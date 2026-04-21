@@ -245,8 +245,8 @@ Vec_f coneIsolation::coneIsolation::operator() (Vec_rp in, Vec_rp rps) {
     return result;
 }
  
- 
- 
+
+  
 // returns missing energy vector, based on reco particles
 Vec_rp missingEnergy(float ecm, Vec_rp in, float p_cutoff = 0.0) {
     float px = 0, py = 0, pz = 0, e = 0;
@@ -267,6 +267,7 @@ Vec_rp missingEnergy(float ecm, Vec_rp in, float p_cutoff = 0.0) {
     ret.emplace_back(res);
     return ret;
 }
+
 
 // calculate the cosine(theta) of the missing energy vector
 float get_cosTheta_miss(Vec_rp met){
