@@ -6,9 +6,7 @@ Install FCCAnalyses framework:
 git clone --branch pre-edm4hep1 https://github.com/HEP-FCC/FCCAnalyses.git
 cd FCCAnalyses
 source ./setup.sh
-mkdir build install && cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=../install
-make install -j 20
+fccanalyses build -j 6
 cd ../..
 ```
 
