@@ -16,7 +16,6 @@ processList = {
 }
 
 
-ROOT.gInterpreter.Declare('#include "TMath.h"')
 available_ecm = ['160']#'340','345', '350', '355','365']
 
 hadronic  = False
@@ -47,7 +46,7 @@ outputDir   = "outputs/treemaker/lnuqq/{}".format(channel)
 
 
 # additional/costom C++ functions, defined in header files (optional)
-includePaths = ["examples/functions.h"]
+includePaths = ["examples/functions.h", "examples/WWFunctions.h"]
 
 ## latest particle transformer model, trained on 9M jets in winter2023 samples
 model_name = "fccee_flavtagging_edm4hep_wc" #"fccee_flavtagging_edm4hep_wc_v1"
@@ -337,26 +336,8 @@ class RDFanalysis:
         df = df.Define('missing_p_eta', 'ReconstructedParticle::get_eta(MissingET)[0]',)
 
 
-        df = df.Define(
-            "Wlep_reco",
-            """
-            TLorentzVector Wlep(0., 0., 0., 0.);
-            TLorentzVector Isolep, nu;
-            Isolep.SetPxPyPzE(
-            Isolep_p * cos(Isolep_phi) *sin(Isolep_theta),
-            Isolep_p * sin(Isolep_phi) * sin(Isolep_theta),
-            Isolep_p * cos(Isolep_theta),
-            Isolep_e
-            );
-            nu.SetPxPyPzE(
-            missing_p * cos(missing_p_phi) * sin(missing_p_theta),
-            missing_p * sin(missing_p_phi) * sin(missing_p_theta),
-            missing_p * cos(missing_p_theta),
-            missing_p
-            );
-            Wlep=Isolep + nu;
-            return Wlep;
-            """
+        df = df.Define("Wlep_reco",
+            "FCCAnalyses::WWFunctions::Wlep_reco(Isolep_p, Isolep_phi, Isolep_theta, Isolep_e, missing_p, missing_p_phi, missing_p_theta)"
             )
         
         df = df.Define("m_iso_lnu", "Wlep_reco.M()");
@@ -368,103 +349,6 @@ class RDFanalysis:
                 jetClusteringHelper.jets
             ),
         )
-        ROOT.gInterpreter.Declare("""
-        float deltaTheta3D(const ROOT::Math::PxPyPzEVector& r,
-        const ROOT::Math::PxPyPzEVector& g) {
-        
-        double dot = r.Px()*g.Px() + r.Py()*g.Py() + r.Pz()*g.Pz();
-        double mag = r.P() * g.P();
-        
-        // Protect against numerical issues
-        if (mag <= 0) return -1.0;
-        
-        double cosang = dot / mag;
-        
-        // Clamp to avoid NaNs
-        if (cosang >  1.0) cosang =  1.0;
-        if (cosang < -1.0) cosang = -1.0;
-        
-        return acos(cosang);
-        }
-"""
-                                  )
-        
-        ROOT.gInterpreter.Declare("""
-        #include "ROOT/RVec.hxx"
-        using namespace ROOT::VecOps;
-
-        float jetAngle(
-        float px1,float py1,float pz1,
-        float px2,float py2,float pz2){
-        
-        float dot = px1*px2 + py1*py2 + pz1*pz2;
-        
-        float mag1 = sqrt(px1*px1 + py1*py1 + pz1*pz1);
-        float mag2 = sqrt(px2*px2 + py2*py2 + pz2*pz2);
-        
-        return acos(dot/(mag1*mag2));
-        }
-
-RVec<float> matchJetsAndComputeResolution(
-
-    const RVec<float>& reco_px,
-    const RVec<float>& reco_py,
-    const RVec<float>& reco_pz,
-    const RVec<float>& reco_E,
-    const RVec<float>& truth_px,
-    const RVec<float>& truth_py,
-    const RVec<float>& truth_pz,
-    const RVec<float>& truth_E
-){
-
-    RVec<float> resolution;
-    for(size_t i=0;i<reco_E.size();i++){
-        float bestAngle = 999.;
-        int bestMatch = -1;
-        for(size_t j=0;j<truth_E.size();j++){
-            float ang = jetAngle(reco_px[i], reco_py[i], reco_pz[i],truth_px[j], truth_py[j], truth_pz[j]);
-            if(ang < bestAngle){
-                bestAngle = ang;
-                bestMatch = j;
-            }
-        }
-        if(bestMatch >= 0){
-//        std::cout<<"found one match"<<std::endl;
-            float resp =(reco_E[i] - truth_E[bestMatch])/truth_E[bestMatch];
-            resolution.push_back(resp);
-        }
-    }
-
-    return resolution;
-}
-""")
-        ROOT.gInterpreter.Declare("""
-        
-        std::pair<ROOT::Math::PxPyPzEVector, ROOT::Math::PxPyPzEVector>
-        matchJets2(const ROOT::Math::PxPyPzEVector& r1,
-        const ROOT::Math::PxPyPzEVector& r2,
-        const ROOT::Math::PxPyPzEVector& g1,
-        const ROOT::Math::PxPyPzEVector& g2) {
-        
-        auto dR = [](const ROOT::Math::PxPyPzEVector& a,
-        const ROOT::Math::PxPyPzEVector& b) {
-        double deta = a.Eta() - b.Eta();
-        double dphi = TVector2::Phi_mpi_pi(a.Phi() - b.Phi());
-        return sqrt(deta*deta + dphi*dphi);
-        };
-        
-        // Two possible assignments
-        double dR_A = dR(r1, g1) + dR(r2, g2);
-        double dR_B = dR(r1, g2) + dR(r2, g1);
-        
-        if (dR_A < dR_B) {
-        return {g1, g2};
-        } else {
-        return {g2, g1};
-        }
-        }
-        """
-                                  )
 
 
         
@@ -549,117 +433,40 @@ RVec<float> matchJetsAndComputeResolution(
         
         df = df.Filter("ngen_leps_status1 == 1 && gen_neutrinos_status1_p.size() == 1 && gen_lightquarks_fromele_e.size() > 1")
         df = df.Define("Whad_gen_status2",
-                    """
-                    TLorentzVector q1,q2,Whad;
-                    q1.SetPxPyPzE(
-                    gen_lightquarks_p[1] * cos(gen_lightquarks_phi[1]) *sin(gen_lightquarks_theta[1]),
-                    gen_lightquarks_p[1] * sin(gen_lightquarks_phi[1]) * sin(gen_lightquarks_theta[1]),
-                    gen_lightquarks_p[1] * cos(gen_lightquarks_theta[1]),
-                    gen_lightquarks_e[1]
-                    );
-                    q2.SetPxPyPzE(
-                    gen_lightquarks_p[0] * cos(gen_lightquarks_phi[0]) * sin(gen_lightquarks_theta[0]),
-                    gen_lightquarks_p[0] * sin(gen_lightquarks_phi[0]) * sin(gen_lightquarks_theta[0]),
-                    gen_lightquarks_p[0] * cos(gen_lightquarks_theta[0]),
-                    gen_lightquarks_e[0]
-                    );
-                    Whad=q1+q2;
-                    return Whad;
-                    """
+                    "FCCAnalyses::WWFunctions::Whad_gen_status2(gen_lightquarks_p, gen_lightquarks_phi, gen_lightquarks_theta, gen_lightquarks_e)"
                     )
         df = df.Define("m_qq_status2","Whad_gen_status2.M()")
         df = df.Define("p_qq_status2","Whad_gen_status2.P()")
         df = df.Define("Whad_gen_qq_fromele",
-                       """
-                TLorentzVector j1,j2,Whad;
-                j2.SetPxPyPzE(
-                gen_lightquarks_fromele_p[1] * cos(gen_lightquarks_fromele_phi[1]) *sin(gen_lightquarks_fromele_theta[1]),
-                gen_lightquarks_fromele_p[1] * sin(gen_lightquarks_fromele_phi[1]) * sin(gen_lightquarks_fromele_theta[1]),
-                gen_lightquarks_fromele_p[1] * cos(gen_lightquarks_fromele_theta[1]),
-                gen_lightquarks_fromele_e[1]
-                );
-                j2.SetPxPyPzE(
-                gen_lightquarks_fromele_p[0] * cos(gen_lightquarks_fromele_phi[0]) * sin(gen_lightquarks_fromele_theta[0]),
-                gen_lightquarks_fromele_p[0] * sin(gen_lightquarks_fromele_phi[0]) * sin(gen_lightquarks_fromele_theta[0]),
-                gen_lightquarks_fromele_p[0] * cos(gen_lightquarks_fromele_theta[0]),
-                gen_lightquarks_fromele_e[0]
-                );
-                Whad=j1+j2;
-                return Whad;
-                """
+                       "FCCAnalyses::WWFunctions::Whad_gen_qq_fromele(gen_lightquarks_fromele_p, gen_lightquarks_fromele_phi, gen_lightquarks_fromele_theta, gen_lightquarks_fromele_e)"
                 )
         df = df.Define("p_qq_fromele","Whad_gen_qq_fromele.P()");
         df = df.Define("m_qq_fromele",
-                       """
-                       //                std::cout<<"gen qs\t"<<gen_lightquarks_fromele_p.size()<<gen_lightquarks_fromele_theta.size()<<"\t"<<gen_lightquarks_fromele_phi.size()<<std::endl;
-                TLorentzVector j1,j2,Whad;
-                j1.SetPtEtaPhiM(gen_lightquarks_fromele_pt[0],gen_lightquarks_fromele_eta[0],gen_lightquarks_fromele_phi[0],0);
-                j2.SetPtEtaPhiM(gen_lightquarks_fromele_pt[1],gen_lightquarks_fromele_eta[1],gen_lightquarks_fromele_phi[1],0);
-                Whad=j1+j2;
-                return Whad.M();
-                """
+                       "FCCAnalyses::WWFunctions::m_qq_fromele(gen_lightquarks_fromele_pt, gen_lightquarks_fromele_eta, gen_lightquarks_fromele_phi)"
                 )
 
         
         #df = df.Define("m_qq_fromele","Whad_gen_qq_fromele.M()");
         df = df.Define("Wlep_gen_old",
-            """
-            TLorentzVector lep, nu,Wlep;
-            lep.SetPxPyPzE(gen_leps_status1_p[0]* cos(gen_leps_status1_phi[0]) *sin(gen_leps_status1_theta[0]),gen_leps_status1_p[0]* sin(gen_leps_status1_phi[0]) * sin(gen_leps_status1_theta[0]),gen_leps_status1_p[0]* cos(gen_leps_status1_theta[0]),gen_leps_status1_e[0]);
-            nu.SetPxPyPzE(gen_neutrinos_status1_p[0]* cos(gen_neutrinos_status1_phi[0]) * sin(gen_neutrinos_status1_theta[0]),gen_neutrinos_status1_p[0]* sin(gen_neutrinos_status1_phi[0]) * sin(gen_neutrinos_status1_theta[0]),gen_neutrinos_status1_p[0]* cos(gen_neutrinos_status1_theta[0]),gen_neutrinos_status1_e[0]);
-            Wlep=lep+nu;
-            return Wlep;
-            """
-	            )
+            "FCCAnalyses::WWFunctions::Wlep_gen_old(gen_leps_status1_p, gen_leps_status1_phi, gen_leps_status1_theta, gen_leps_status1_e, gen_neutrinos_status1_p, gen_neutrinos_status1_phi, gen_neutrinos_status1_theta, gen_neutrinos_status1_e)"
+            )
         df = df.Define("Wlep_gen",
-            """
-            TLorentzVector Wlep,lep,nu;
-            lep.SetPtEtaPhiM(gen_leps_status1_pt[0], gen_leps_status1_eta[0],gen_leps_status1_phi[0],0);
-            nu.SetPtEtaPhiM(gen_neutrinos_status1_pt[0],gen_neutrinos_status1_eta[0],gen_neutrinos_status1_phi[0],0);
-            Wlep=lep+nu;
-            return Wlep;
-            """
+            "FCCAnalyses::WWFunctions::Wlep_gen(gen_leps_status1_pt, gen_leps_status1_eta, gen_leps_status1_phi, gen_neutrinos_status1_pt, gen_neutrinos_status1_eta, gen_neutrinos_status1_phi)"
                        )
         df = df.Define("lep_p4_gen",
-                       """
-                       TLorentzVector lep;
-                       lep.SetPtEtaPhiM(gen_leps_status1_pt[0], gen_leps_status1_eta[0],gen_leps_status1_phi[0],0);
-                       return lep;
-                       """
+                       "FCCAnalyses::WWFunctions::lep_p4_gen(gen_leps_status1_pt, gen_leps_status1_eta, gen_leps_status1_phi)"
                        )
         df = df.Define("nu_p4_gen",
-                       """
-                       TLorentzVector lep;
-                       lep.SetPtEtaPhiM(gen_neutrinos_status1_pt[0],gen_neutrinos_status1_eta[0],gen_neutrinos_status1_phi[0],0);
-                       return lep;
-                       """
+                       "FCCAnalyses::WWFunctions::nu_p4_gen(gen_neutrinos_status1_pt, gen_neutrinos_status1_eta, gen_neutrinos_status1_phi)"
                        )
         
         
-        df = df.Define("Isoleps_p4_reco", 
-        """
-        TLorentzVector Isolep;
-        Isolep.SetPxPyPzE(
-        Isolep_p * cos(Isolep_phi) *sin(Isolep_theta),
-        Isolep_p * sin(Isolep_phi) * sin(Isolep_theta),
-        Isolep_p * cos(Isolep_theta),
-        Isolep_e
-        );
-        return Isolep;
-        """
+        df = df.Define("Isoleps_p4_reco",
+            "FCCAnalyses::WWFunctions::Isoleps_p4_reco(Isolep_p, Isolep_phi, Isolep_theta, Isolep_e)"
         )
 
         df = df.Define("missing_p_p4",
-                       """
-                       TLorentzVector nu;
-                       nu.SetPxPyPzE(
-                       missing_p * cos(missing_p_phi) * sin(missing_p_theta),
-                       missing_p * sin(missing_p_phi) * sin(missing_p_theta),
-                       missing_p * cos(missing_p_theta),
-                       missing_p
-                       );
-                       return nu;
-                       """
+                       "FCCAnalyses::WWFunctions::missing_p_p4(missing_p, missing_p_phi, missing_p_theta)"
                        )
 
         df = df.Define("lep_deta", "Isoleps_p4_reco.Eta() - lep_p4_gen.Eta()")
@@ -680,60 +487,22 @@ RVec<float> matchJetsAndComputeResolution(
         df = df.Define("met_dtheta","missing_p_theta- gen_neutrinos_status1_theta");#
         df = df.Define("met_dcostheta","met_costheta - met_gen_costheta");
         df = df.Define("Whad_gen_old",
-            """
-            TLorentzVector j1,j2,Whad;
-            j1.SetPxPyPzE(gen_lightquarks_fromele_px[0],gen_lightquarks_fromele_py[0],gen_lightquarks_fromele_pz[0],gen_lightquarks_fromele_e[0]);
-            j2.SetPxPyPzE(gen_lightquarks_fromele_px[1],gen_lightquarks_fromele_py[1],gen_lightquarks_fromele_pz[1],gen_lightquarks_fromele_e[1]);
-            Whad=j1+j2;
-            return Whad.M();
-            """
-	    )
+            "FCCAnalyses::WWFunctions::Whad_gen_old(gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)"
+            )
 
         df = df.Define("Whad_gen",
-            """
-            TLorentzVector j1,j2,Whad;
-            j1.SetPtEtaPhiM(gen_lightquarks_fromele_pt[0],gen_lightquarks_fromele_eta[0],gen_lightquarks_fromele_phi[0],0);
-            j2.SetPtEtaPhiM(gen_lightquarks_fromele_pt[1],gen_lightquarks_fromele_eta[1],gen_lightquarks_fromele_phi[1],0);
-            Whad=j1+j2;
-            return Whad;
-            """
-	    )
+            "FCCAnalyses::WWFunctions::Whad_gen(gen_lightquarks_fromele_pt, gen_lightquarks_fromele_eta, gen_lightquarks_fromele_phi)"
+            )
         df = df.Define("m_lnu_status1","Wlep_gen.M()")
         df = df.Define("Wlep_gen_status2",
-                    """
-
-                    TLorentzVector lep, nu,Wlep;
-                    lep.SetPxPyPzE(
-                    gen_leps_status2_p[0] * cos(gen_leps_status2_phi[0]) *sin(gen_leps_status2_theta[0]),
-                    gen_leps_status2_p[0] * sin(gen_leps_status2_phi[0]) * sin(gen_leps_status2_theta[0]),
-                    gen_leps_status2_p[0] * cos(gen_leps_status2_theta[0]),
-                    gen_leps_status2_e[0]
-                    );
-                    nu.SetPxPyPzE(
-                    gen_neutrinos_status1_p[0] * cos(gen_neutrinos_status1_phi[0]) * sin(gen_neutrinos_status1_theta[0]),
-                    gen_neutrinos_status1_p[0] * sin(gen_neutrinos_status1_phi[0]) * sin(gen_neutrinos_status1_theta[0]),
-                    gen_neutrinos_status1_p[0] * cos(gen_neutrinos_status1_theta[0]),
-                    gen_neutrinos_status1_e[0]
-                    );
-                    Wlep=lep + nu;
-                    return Wlep;
-                    """
+                    "FCCAnalyses::WWFunctions::Wlep_gen_status2(gen_leps_status2_p, gen_leps_status2_phi, gen_leps_status2_theta, gen_leps_status2_e, gen_neutrinos_status1_p, gen_neutrinos_status1_phi, gen_neutrinos_status1_theta, gen_neutrinos_status1_e)"
                        )
         df = df.Define("m_lnu_status2","Wlep_gen_status2.M()");
         df = df.Define("p_lnu_status2","Wlep_gen_status2.P()");
         df = df.Define(
             "m_gen_lnuqq",
-            """
-            if (gen_leps_status2.size() < 1 || gen_lightquarks_fromele_p.size() < 2) return -1.0;
-            TLorentzVector Isolep, nu,j1,j2,WW;
-            Isolep.SetPxPyPzE(gen_leps_status1_px[0],gen_leps_status1_py[0],gen_leps_status1_pz[0],gen_leps_status1_p[0]);
-            nu.SetPxPyPzE(gen_neutrinos_status1_px[0],gen_neutrinos_status1_py[0],gen_neutrinos_status1_pz[0],gen_neutrinos_status1_p[0]);
-            j1.SetPxPyPzE(gen_lightquarks_fromele_px[0],gen_lightquarks_fromele_py[0],gen_lightquarks_fromele_pz[0],gen_lightquarks_fromele_e[0]);
-            j2.SetPxPyPzE(gen_lightquarks_fromele_px[1],gen_lightquarks_fromele_py[1],gen_lightquarks_fromele_pz[1],gen_lightquarks_fromele_e[1]);
-            WW=Isolep + nu + j1 + j2;
-            return WW.M();
-            """
-	    )
+            "FCCAnalyses::WWFunctions::m_gen_lnuqq(gen_leps_status2_p, gen_lightquarks_fromele_p, gen_leps_status1_px, gen_leps_status1_py, gen_leps_status1_pz, gen_leps_status1_p, gen_neutrinos_status1_px, gen_neutrinos_status1_py, gen_neutrinos_status1_pz, gen_neutrinos_status1_p, gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)"
+        )
 
 
             
@@ -765,14 +534,8 @@ RVec<float> matchJetsAndComputeResolution(
         df = df.Define("d_12", "JetClusteringUtils::get_exclusive_dmerge(_jet, 1)")
         df = df.Define("m_excl_jj",  "JetConstituentsUtils::InvariantMass(jets_p4[0],  jets_p4[1])")
         df = df.Define("Whad_reco",
-                       """
-                       TLorentzVector j1,j2,Whad;
-                       j1.SetPxPyPzE(jets_p4[0].Px(),jets_p4[0].Py(),jets_p4[0].Pz(),jets_p4[0].E());
-                       j2.SetPxPyPzE(jets_p4[1].Px(),jets_p4[1].Py(),jets_p4[1].Pz(),jets_p4[1].E());
-                       Whad=j1+j2;
-                       return Whad;
-                       """
-	               )
+                       "FCCAnalyses::WWFunctions::Whad_reco(jets_p4)"
+                       )
 
         df = df.Define("WW_iso_lnuexcljj","(Wlep_reco+Whad_reco)")
         df = df.Define("m_iso_lnuexcljj","WW_iso_lnuexcljj.M()")
@@ -780,29 +543,7 @@ RVec<float> matchJetsAndComputeResolution(
         df = df.Define("e_iso_lnuexcljj","WW_iso_lnuexcljj.E()")
 
         df = df.Define("sumP_gen_new",
-                       """
-                       TLorentzVector lep,nu,j1,j2, Wlep, Whad,WW;
-                       lep.SetPxPyPzE(
-                       gen_leps_status1_p[0] * cos(gen_leps_status1_phi[0]) *sin(gen_leps_status1_theta[0]),
-                       gen_leps_status1_p[0] * sin(gen_leps_status1_phi[0]) * sin(gen_leps_status1_theta[0]),
-                       gen_leps_status1_p[0] * cos(gen_leps_status1_theta[0]),
-                       gen_leps_status1_e[0]
-                       );
-                       nu.SetPxPyPzE(
-                       gen_neutrinos_status1_p[0] * cos(gen_neutrinos_status1_phi[0]) * sin(gen_neutrinos_status1_theta[0]),
-                       gen_neutrinos_status1_p[0] * sin(gen_neutrinos_status1_phi[0]) * sin(gen_neutrinos_status1_theta[0]),
-                       gen_neutrinos_status1_p[0] * cos(gen_neutrinos_status1_theta[0]),
-                       gen_neutrinos_status1_e[0]
-                       );
-                       Wlep=lep + nu;
-                       j1.SetPtEtaPhiM(gen_lightquarks_fromele_pt[0],gen_lightquarks_fromele_eta[0],gen_lightquarks_fromele_phi[0],0);
-                       j2.SetPtEtaPhiM(gen_lightquarks_fromele_pt[1],gen_lightquarks_fromele_eta[1],gen_lightquarks_fromele_phi[1],0);
-                       Whad=j1+j2;
-                       //return sqrt(pow((Wlep.Pz()  + Whad.Pz()),2) +pow((Wlep.Px() + Whad.Px()),2) + pow((Wlep.Py() + Whad.Py()),2));
-                       //                       WW=Wlep+Whad;
-                       return Wlep.Pz() + Whad.Pz() + Wlep.Px() + Whad.Px() + Wlep.Py() + Whad.Py();
-                       //return WW.P()
-                       """
+                       "FCCAnalyses::WWFunctions::sumP_gen_new(Wlep_gen, Whad_gen)"
                        )
 
         
@@ -832,53 +573,26 @@ RVec<float> matchJetsAndComputeResolution(
         
         df = df.Define(
             "deltaM",
-            """
-            if (nIsolep < 1 || nRecoJets < 2) return -1.0;
-            TLorentzVector Isolep, nu,j1,j2, FS,Delta,P_initial;
-            P_initial.SetPxPyPzE(0,0,0,160);
-            Isolep.SetPxPyPzE(Isolep_p * cos(Isolep_phi) *sin(Isolep_theta),Isolep_p * sin(Isolep_phi) * sin(Isolep_theta),Isolep_p * cos(Isolep_theta),Isolep_p);
-            nu.SetPxPyPzE(missing_p * cos(missing_p_phi) * sin(missing_p_theta),missing_p * sin(missing_p_phi) * sin(missing_p_theta),missing_p * cos(missing_p_theta),missing_p);
-            j1.SetPxPyPzE(jets_p4[0].Px(),jets_p4[0].Py(),jets_p4[0].Pz(),jets_p4[0].E());
-            j2.SetPxPyPzE(jets_p4[1].Px(),jets_p4[1].Py(),jets_p4[1].Pz(),jets_p4[1].E());
-            FS= Isolep + nu + j1 + j2;
-            Delta=P_initial-FS;
-            return Delta.M();
-            """
-	    )
+            "FCCAnalyses::WWFunctions::deltaM(nIsolep, nRecoJets, Wlep_reco, Whad_reco)"
+        )
 
             
         df = df.Define("p_excljj","Whad_reco.P()");    
         
-        df = df.Define("jet_res_qq_fromele","matchJetsAndComputeResolution(""recoJet_px, recoJet_py, recoJet_pz, recoJet_e,""gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)" )
+        df = df.Define("jet_res_qq_fromele","FCCAnalyses::WWFunctions::matchJetsAndComputeResolution(recoJet_px, recoJet_py, recoJet_pz, recoJet_e, gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)" )
         df = df.Define("res_jet1_qq_fromele", "jet_res_qq_fromele[0]")
         df = df.Define("res_jet2_qq_fromele", "jet_res_qq_fromele[1]")
         
-        df = df.Define("jet_res_qq","matchJetsAndComputeResolution(""recoJet_px, recoJet_py, recoJet_pz, recoJet_e,""gen_lightquarks_px, gen_lightquarks_py, gen_lightquarks_pz, gen_lightquarks_e)" )
+        df = df.Define("jet_res_qq","FCCAnalyses::WWFunctions::matchJetsAndComputeResolution(recoJet_px, recoJet_py, recoJet_pz, recoJet_e, gen_lightquarks_px, gen_lightquarks_py, gen_lightquarks_pz, gen_lightquarks_e)" )
         df = df.Define("res_jet1_qq", "jet_res_qq[0]")
         df = df.Define("res_jet2_qq", "jet_res_qq[1]")
-        ROOT.gInterpreter.Declare("""
-        ROOT::VecOps::RVec<ROOT::Math::PxPyPzEVector>
-        build_p4(const ROOT::VecOps::RVec<float>& px,
-        const ROOT::VecOps::RVec<float>& py,
-        const ROOT::VecOps::RVec<float>& pz,
-        const ROOT::VecOps::RVec<float>& e) {
-
-        ROOT::VecOps::RVec<ROOT::Math::PxPyPzEVector> out;
-        
-        for (size_t i = 0; i < px.size(); ++i) {
-        out.emplace_back(px[i], py[i], pz[i], e[i]);
-        }
-        
-        return out;
-        }
-        """)
         df = df.Define(
             "gen_lightquarks_fromele_p4",
-            "build_p4(gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)"
+            "FCCAnalyses::WWFunctions::build_p4(gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)"
         )
         
         #df = df.Define("gen_lightquarks_fromele_p4","ROOT::Math::PxPyPzEVector(gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)")
-        df = df.Define("matched_genjets","matchJets2(jet1, jet2, gen_lightquarks_fromele_p4[0], gen_lightquarks_fromele_p4[1])");
+        df = df.Define("matched_genjets","FCCAnalyses::WWFunctions::matchJets2(jet1, jet2, gen_lightquarks_fromele_p4[0], gen_lightquarks_fromele_p4[1])");
         df = df.Define("jet1_matched_p4", "matched_genjets.first") #these are gen jets matched to leading and sub leading reco jets
         df = df.Define("jet2_matched_p4", "matched_genjets.second");
         #df = df.Define("jet1_dtheta", "deltaTheta3D(jet1, jet1_matched_p4)")
@@ -901,7 +615,7 @@ RVec<float> matchJetsAndComputeResolution(
         df = df.Define("jet2_dphi", "TVector2::Phi_mpi_pi(jet2.Phi()-jet2_matched_p4.Phi())")
 
         
-        df = df.Define("lep_res","matchJetsAndComputeResolution(""Isoleps_px, Isoleps_py, Isoleps_pz, Isoleps_e,""gen_leps_status1_px, gen_leps_status1_py,gen_leps_status1_pz, gen_leps_status1_e)" )
+        df = df.Define("lep_res","FCCAnalyses::WWFunctions::matchJetsAndComputeResolution(Isoleps_px, Isoleps_py, Isoleps_pz, Isoleps_e, gen_leps_status1_px, gen_leps_status1_py, gen_leps_status1_pz, gen_leps_status1_e)" )
         df = (df
                   .Define("truth_mlnu", "m_lnu_status2")
                   .Define("truth_mqq",  "m_qq_status2")
