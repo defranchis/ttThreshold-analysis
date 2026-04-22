@@ -26,6 +26,12 @@ ecm       = 160
 
 saveExclJets = True
 saveMCTruth = True
+
+# ── kinematic fit method ───────────────────────────────────────────────────
+# "minuit" → ROOT Minuit2 (robust, ~200-500 function evaluations per event)
+# "bfgs"   → custom BFGS, stack-only, no heap, template-inlined chi2
+#             (~50-150 evaluations, thread-safe without thread_local)
+KIN_FIT_METHOD = "bfgs"
 if not str(ecm) in available_ecm:
     raise ValueError("ecm value not in available_ecm")
 
@@ -652,8 +658,13 @@ class RDFanalysis:
                 )
 
         # ── kinematic fit ──────────────────────────────────────────────────
+        _kinfit_funcs = {
+            "minuit": "FCCAnalyses::WWFunctions::kinFit",
+            "bfgs":   "FCCAnalyses::WWFunctions::kinFitBFGS",
+        }
+        _kinfit_call = _kinfit_funcs[KIN_FIT_METHOD]
         df = df.Define("kinfit",
-            "FCCAnalyses::WWFunctions::kinFit("
+            _kinfit_call + "("
             "jet1_p, jet1_theta, jet1_phi,"
             "jet2_p, jet2_theta, jet2_phi,"
             "Isolep_p, Isolep_theta, Isolep_phi,"

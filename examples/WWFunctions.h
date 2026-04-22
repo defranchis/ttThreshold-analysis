@@ -353,6 +353,195 @@ static TLorentzVector _vec_spherical(double p, double theta, double phi) {
     return v;
 }
 
+// ── BFGS minimizer (option C+A) ───────────────────────────────────────────
+// Template avoids std::function overhead (no heap, no virtual dispatch).
+// All work arrays are on the stack, so the function is inherently thread-safe
+// without any thread_local annotation — suitable for multithreaded RDataFrame.
+//
+// Uses central finite differences for the gradient and Armijo backtracking
+// for the line search. Resets H to identity on non-descent or line-search
+// failure so it never gets permanently stuck.
+//
+// Returns 0 on convergence (||grad|| < GTOL), 1 if max iterations reached.
+template<typename Func>
+static int _bfgs_minimize(const Func& f, double* x, double& fmin) {
+    constexpr int    N       = KF_NDIM; // = 11, all arrays are fixed-size
+    constexpr int    MAXITER = 300;
+    constexpr double GTOL    = 1e-5;
+    constexpr double C1      = 1e-4;    // Armijo sufficient-decrease constant
+
+    double g[N], gn[N], d[N], s[N], y[N], Hy[N], xn[N];
+    double H[N*N];  // inverse Hessian approximation, row-major (121 doubles ~1 kB)
+
+    // H = I
+    for (int i = 0; i < N*N; ++i) H[i] = 0.0;
+    for (int i = 0; i < N;   ++i) H[i*N+i] = 1.0;
+
+    // Central finite-difference gradient; step scales with |x_i| to handle
+    // parameters with very different magnitudes (mW~80 vs angular pulls~0).
+    auto grad_fn = [&](const double* xp, double* gp) {
+        double xc[N];
+        for (int i = 0; i < N; ++i) xc[i] = xp[i];
+        for (int i = 0; i < N; ++i) {
+            double h  = 1e-4 * (std::abs(xc[i]) > 1.0 ? std::abs(xc[i]) : 1.0);
+            double xi = xc[i];
+            xc[i] = xi + h;  double fp = f(xc);
+            xc[i] = xi - h;  double fm = f(xc);
+            xc[i] = xi;
+            gp[i] = (fp - fm) / (2.0 * h);
+        }
+    };
+
+    fmin = f(x);
+    grad_fn(x, g);
+
+    for (int iter = 0; iter < MAXITER; ++iter) {
+        // Convergence check on gradient norm
+        double gnorm2 = 0;
+        for (int i = 0; i < N; ++i) gnorm2 += g[i]*g[i];
+        if (gnorm2 < GTOL*GTOL) return 0;
+
+        // Search direction: d = -H * g
+        for (int i = 0; i < N; ++i) {
+            d[i] = 0;
+            for (int j = 0; j < N; ++j) d[i] -= H[i*N+j] * g[j];
+        }
+
+        // If d is not a descent direction (can happen if H drifted non-PD),
+        // reset H to identity and fall back to steepest descent for this step.
+        double slope = 0;
+        for (int i = 0; i < N; ++i) slope += g[i] * d[i];
+        if (slope >= 0) {
+            for (int i = 0; i < N*N; ++i) H[i] = 0.0;
+            for (int i = 0; i < N;   ++i) { H[i*N+i] = 1.0; d[i] = -g[i]; }
+            slope = -gnorm2;
+        }
+
+        // Armijo backtracking line search
+        double alpha = 1.0;
+        bool   ls_ok = false;
+        for (int ls = 0; ls < 40; ++ls) {
+            for (int i = 0; i < N; ++i) xn[i] = x[i] + alpha * d[i];
+            double fn = f(xn);
+            if (fn <= fmin + C1 * alpha * slope) { fmin = fn; ls_ok = true; break; }
+            alpha *= 0.5;
+            if (alpha < 1e-14) break;
+        }
+        if (!ls_ok) break;  // line search failed — stop
+
+        // Accept step: s = alpha*d, update x
+        for (int i = 0; i < N; ++i) { s[i] = alpha * d[i]; x[i] = xn[i]; }
+
+        // Gradient at new point, y = g_new - g_old
+        grad_fn(x, gn);
+        double sy = 0;
+        for (int i = 0; i < N; ++i) { y[i] = gn[i] - g[i]; sy += s[i] * y[i]; g[i] = gn[i]; }
+
+        // BFGS rank-2 inverse Hessian update (skip if curvature condition fails).
+        // Formula: H += -rho*(s*Hy^T + Hy*s^T) + (rho^2*yHy + rho)*s*s^T
+        // where Hy = H*y, yHy = y^T*Hy, rho = 1/(s^T*y)
+        if (sy <= 1e-14) continue;
+        double rho = 1.0 / sy;
+
+        for (int i = 0; i < N; ++i) {
+            Hy[i] = 0;
+            for (int j = 0; j < N; ++j) Hy[i] += H[i*N+j] * y[j];
+        }
+        double yHy = 0;
+        for (int i = 0; i < N; ++i) yHy += y[i] * Hy[i];
+        double fac  = rho*rho*yHy + rho;
+        for (int i = 0; i < N; ++i)
+            for (int j = 0; j < N; ++j)
+                H[i*N+j] += -rho*(s[i]*Hy[j] + Hy[i]*s[j]) + fac*s[i]*s[j];
+    }
+    return 1;  // max iterations reached without meeting GTOL
+}
+
+KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
+                         float jet2_p,    float jet2_theta,    float jet2_phi,
+                         float Isolep_p,  float Isolep_theta,  float Isolep_phi,
+                         float missing_p, float missing_p_theta, float missing_p_phi) {
+
+    KinFitResult result{};
+    result.gW    = KF_GW_FIXED;
+    result.valid = 0;
+    result.chi2  = 999.0f;
+
+    if (Isolep_p < 0 || jet1_p <= 0 || jet2_p <= 0 || missing_p <= 0)
+        return result;
+
+    // Same chi2 as kinFit; lambda type is deduced, so _bfgs_minimize can inline it.
+    // Parameters: x[0]=mW, x[1]=s1, x[2]=s2, x[3]=sl, x[4]=sn,
+    //             x[5]=t1, x[6]=t2, x[7]=tn, x[8]=p1, x[9]=p2, x[10]=pn
+    auto chi2fn = [=](const double* x) -> double {
+        const double mW = x[0];
+        const double s1 = x[1], s2 = x[2], sl = x[3], sn = x[4];
+        const double t1 = x[5], t2 = x[6], tn = x[7];
+        const double p1 = x[8], p2 = x[9], pn = x[10];
+
+        TLorentzVector j1f = _vec_spherical(jet1_p*s1,    jet1_theta    + t1*KF_JET1_THETA_RMS, jet1_phi    + p1*KF_JET1_PHI_RMS);
+        TLorentzVector j2f = _vec_spherical(jet2_p*s2,    jet2_theta    + t2*KF_JET2_THETA_RMS, jet2_phi    + p2*KF_JET2_PHI_RMS);
+        TLorentzVector lf  = _vec_spherical(Isolep_p*sl,  Isolep_theta,                         Isolep_phi);
+        TLorentzVector nf  = _vec_spherical(missing_p*sn, missing_p_theta + tn*KF_MET_THETA_RMS, missing_p_phi + pn*KF_MET_PHI_RMS);
+
+        TLorentzVector Wh = j1f + j2f;
+        TLorentzVector Wl = lf  + nf;
+        TLorentzVector WW = Wh  + Wl;
+
+        double mh = Wh.M(), ml = Wl.M();
+        double mwgw = mW * KF_GW_FIXED;
+        double dh   = mh*mh - mW*mW,  dl = ml*ml - mW*mW;
+        double bw_h = mwgw / (dh*dh + mwgw*mwgw);
+        double bw_l = mwgw / (dl*dl + mwgw*mwgw);
+        double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l));
+
+        double cons = std::pow(WW.E() - ECM, 2) / (KF_SIGMA_SQRTS * KF_SIGMA_SQRTS)
+                    + (std::pow(Wh.Px()+Wl.Px(), 2) + std::pow(Wh.Py()+Wl.Py(), 2) + std::pow(Wh.Pz()+Wl.Pz(), 2)) * KF_MOMENTUM_PENALTY;
+
+        double scale_pen = std::pow((s1-KF_JET_SCALE_BIAS)/KF_JET_SCALE_SIGMA, 2)
+                         + std::pow((s2-KF_JET_SCALE_BIAS)/KF_JET_SCALE_SIGMA, 2)
+                         + std::pow((sl-KF_LEP_SCALE_BIAS)/KF_LEP_SCALE_SIGMA, 2)
+                         + std::pow((sn-KF_MET_SCALE_BIAS)/KF_MET_SCALE_SIGMA, 2);
+
+        double angular = t1*t1 + t2*t2 + tn*tn + p1*p1 + p2*p2 + pn*pn;
+
+        return bw_term + cons + scale_pen + angular;
+    };
+
+    // x0: starting point — mW at PDG value, scales at 1, angular pulls at 0
+    double x0[KF_NDIM] = {KF_MW_INIT, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    double fmin = 0;
+    int status = _bfgs_minimize(chi2fn, x0, fmin);
+
+    result.valid = (status == 0) ? 1 : 0;
+    result.chi2  = fmin;
+    result.mW = x0[0];
+    result.s1 = x0[1]; result.s2 = x0[2]; result.sl = x0[3]; result.sn = x0[4];
+    result.t1 = x0[5]; result.t2 = x0[6]; result.tn = x0[7];
+    result.p1 = x0[8]; result.p2 = x0[9]; result.pn = x0[10];
+
+    // Post-fit kinematics
+    TLorentzVector j1f = _vec_spherical(jet1_p*result.s1,    jet1_theta    + result.t1*KF_JET1_THETA_RMS, jet1_phi    + result.p1*KF_JET1_PHI_RMS);
+    TLorentzVector j2f = _vec_spherical(jet2_p*result.s2,    jet2_theta    + result.t2*KF_JET2_THETA_RMS, jet2_phi    + result.p2*KF_JET2_PHI_RMS);
+    TLorentzVector lf  = _vec_spherical(Isolep_p*result.sl,  Isolep_theta,                                Isolep_phi);
+    TLorentzVector nf  = _vec_spherical(missing_p*result.sn, missing_p_theta + result.tn*KF_MET_THETA_RMS, missing_p_phi + result.pn*KF_MET_PHI_RMS);
+
+    TLorentzVector Wh = j1f + j2f;
+    TLorentzVector Wl = lf  + nf;
+
+    result.mWlep_postfit    = Wl.M();       result.mWhad_postfit    = Wh.M();
+    result.pt_j1_postfit    = j1f.Pt();     result.pt_j2_postfit    = j2f.Pt();
+    result.pt_lep_postfit   = lf.Pt();      result.pt_nu_postfit    = nf.Pt();
+    result.Wlep_px_postfit  = Wl.Px();      result.Wlep_py_postfit  = Wl.Py();  result.Wlep_pz_postfit = Wl.Pz();
+    result.Whad_px_postfit  = Wh.Px();      result.Whad_py_postfit  = Wh.Py();  result.Whad_pz_postfit = Wh.Pz();
+    result.theta_j1_postfit = j1f.Theta();  result.theta_j2_postfit = j2f.Theta(); result.theta_nu_postfit = nf.Theta();
+    result.phi_j1_postfit   = j1f.Phi();    result.phi_j2_postfit   = j2f.Phi();   result.phi_nu_postfit   = nf.Phi();
+    result.deltaP_postfit   = std::sqrt(std::pow(Wl.Px()+Wh.Px(), 2)
+                                      + std::pow(Wl.Py()+Wh.Py(), 2)
+                                      + std::pow(Wl.Pz()+Wh.Pz(), 2));
+    return result;
+}
+
 KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                     float jet2_p,    float jet2_theta,    float jet2_phi,
                     float Isolep_p,  float Isolep_theta,  float Isolep_phi,
