@@ -12,7 +12,7 @@ ROOT.gROOT.SetBatch(True)
 # ── global constants ───────────────────────────────────────────────────────
 ECM            = 160.0
 sigma_sqrtS    = 0.12
-MAX_EVENTS     = 20000
+MAX_EVENTS     = 1000
 
 jet1_theta_rms = 0.05
 jet1_phi_rms   = 0.05
