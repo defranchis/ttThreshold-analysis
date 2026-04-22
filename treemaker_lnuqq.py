@@ -108,6 +108,16 @@ all_branches = ["lep_res","reco_moff","reco_mon","truth_lnuqq_mon","truth_lnuqq_
 all_branches+=["gen_leps_status1_p","ngen_leps_status2","gen_leps_status2_p","m_lnu_status1","m_qq_status2","m_qq_fromele","m_lnu_status2","ngen_leps_status1", "gen_lightquarks_p","res_jet2_qq_fromele","res_jet1_qq_fromele","res_jet2_qq","res_jet1_qq","truth_lnuqq_qqfromele_mon","truth_lnuqq_qqfromele_moff","mlnu_plus_mjj_reco","mlnu_plus_mqq_status2_truth","mlnu_plus_mqq_fromele_truth","p_qq_status2"]
 #"m_genkt_ee_jj","Genjets_kt_ee_e","Genjets_kt_ee_p","Genjets_kt_ee_p1","Genjets_kt_ee_p2","res_jet1","res_jet2","truth_moff","truth_mon","jet_res","m_genkt5_jj","Genjets_kt_e",
 all_branches+=[ "nRecoJets", "jet1_p", "jet2_p", "d_12","m_iso_lnuexcljj","jet1_pt","jet2_pt","jet1_eta","jet2_eta","jet1_phi","jet2_phi","jet1_mass","jet2_mass"]
+all_branches+=["kinfit_mW","kinfit_gW","kinfit_s1","kinfit_s2","kinfit_sl","kinfit_sn",
+               "kinfit_t1","kinfit_t2","kinfit_tn","kinfit_p1","kinfit_p2","kinfit_pn",
+               "kinfit_chi2","kinfit_valid",
+               "kinfit_mWlep","kinfit_mWhad",
+               "kinfit_pt_j1","kinfit_pt_j2","kinfit_pt_lep","kinfit_pt_nu",
+               "kinfit_Wlep_px","kinfit_Wlep_py","kinfit_Wlep_pz",
+               "kinfit_Whad_px","kinfit_Whad_py","kinfit_Whad_pz",
+               "kinfit_theta_j1","kinfit_theta_j2","kinfit_theta_nu",
+               "kinfit_phi_j1","kinfit_phi_j2","kinfit_phi_nu",
+               "kinfit_deltaP"]
 #print('saving these branches',all_branches)
 # Mandatory: RDFanalysis class where the use defines the operations on the TTree
 class RDFanalysis:
@@ -640,6 +650,48 @@ class RDFanalysis:
                   .Define("eta_miss", "-log(tan(missing_p_theta/2.))")
 
                 )
+
+        # ── kinematic fit ──────────────────────────────────────────────────
+        df = df.Define("kinfit",
+            "FCCAnalyses::WWFunctions::kinFit("
+            "jet1_p, jet1_theta, jet1_phi,"
+            "jet2_p, jet2_theta, jet2_phi,"
+            "Isolep_p, Isolep_theta, Isolep_phi,"
+            "missing_p, missing_p_theta, missing_p_phi)"
+        )
+        df = df.Define("kinfit_mW",       "kinfit.mW")
+        df = df.Define("kinfit_gW",       "kinfit.gW")
+        df = df.Define("kinfit_s1",       "kinfit.s1")
+        df = df.Define("kinfit_s2",       "kinfit.s2")
+        df = df.Define("kinfit_sl",       "kinfit.sl")
+        df = df.Define("kinfit_sn",       "kinfit.sn")
+        df = df.Define("kinfit_t1",       "kinfit.t1")
+        df = df.Define("kinfit_t2",       "kinfit.t2")
+        df = df.Define("kinfit_tn",       "kinfit.tn")
+        df = df.Define("kinfit_p1",       "kinfit.p1")
+        df = df.Define("kinfit_p2",       "kinfit.p2")
+        df = df.Define("kinfit_pn",       "kinfit.pn")
+        df = df.Define("kinfit_chi2",     "kinfit.chi2")
+        df = df.Define("kinfit_valid",    "kinfit.valid")
+        df = df.Define("kinfit_mWlep",    "kinfit.mWlep_postfit")
+        df = df.Define("kinfit_mWhad",    "kinfit.mWhad_postfit")
+        df = df.Define("kinfit_pt_j1",    "kinfit.pt_j1_postfit")
+        df = df.Define("kinfit_pt_j2",    "kinfit.pt_j2_postfit")
+        df = df.Define("kinfit_pt_lep",   "kinfit.pt_lep_postfit")
+        df = df.Define("kinfit_pt_nu",    "kinfit.pt_nu_postfit")
+        df = df.Define("kinfit_Wlep_px",  "kinfit.Wlep_px_postfit")
+        df = df.Define("kinfit_Wlep_py",  "kinfit.Wlep_py_postfit")
+        df = df.Define("kinfit_Wlep_pz",  "kinfit.Wlep_pz_postfit")
+        df = df.Define("kinfit_Whad_px",  "kinfit.Whad_px_postfit")
+        df = df.Define("kinfit_Whad_py",  "kinfit.Whad_py_postfit")
+        df = df.Define("kinfit_Whad_pz",  "kinfit.Whad_pz_postfit")
+        df = df.Define("kinfit_theta_j1", "kinfit.theta_j1_postfit")
+        df = df.Define("kinfit_theta_j2", "kinfit.theta_j2_postfit")
+        df = df.Define("kinfit_theta_nu", "kinfit.theta_nu_postfit")
+        df = df.Define("kinfit_phi_j1",   "kinfit.phi_j1_postfit")
+        df = df.Define("kinfit_phi_j2",   "kinfit.phi_j2_postfit")
+        df = df.Define("kinfit_phi_nu",   "kinfit.phi_nu_postfit")
+        df = df.Define("kinfit_deltaP",   "kinfit.deltaP_postfit")
 
             #            m_on  = max(m_lnu , m_jj)
             #           m_off = min(m_lnu , m_jj)
