@@ -127,6 +127,9 @@ all_branches+=["kinfit_mW","kinfit_gW","kinfit_s1","kinfit_s2","kinfit_sl","kinf
                "kinfit_theta_j1","kinfit_theta_j2","kinfit_theta_nu",
                "kinfit_phi_j1","kinfit_phi_j2","kinfit_phi_nu",
                "kinfit_deltaP"]
+all_branches+=["pf_qq_mass","pf_qq_p","pf_qq_costheta","pf_qq_phi",
+               "Whad_gen_mass","Whad_gen_p","Whad_gen_costheta","Whad_gen_phi",
+               "diff_RG_m_pf_qq","diff_RG_p_pf_qq","diff_RG_costheta_pf_qq","diff_RG_phi_pf_qq"]
 #print('saving these branches',all_branches)
 # Mandatory: RDFanalysis class where the use defines the operations on the TTree
 _dataset_iter = iter(processList.keys())
@@ -290,6 +293,14 @@ class RDFanalysis:
             "FCCAnalyses::ReconstructedParticle::remove(ReconstructedParticlesNoMuons,electrons_sel_iso)",
         )
 
+        df = df.Define("pf_qq_sum_px", "ROOT::VecOps::Sum(FCCAnalyses::ReconstructedParticle::get_px(ReconstructedParticlesNoMuNoEl))")
+        df = df.Define("pf_qq_sum_py", "ROOT::VecOps::Sum(FCCAnalyses::ReconstructedParticle::get_py(ReconstructedParticlesNoMuNoEl))")
+        df = df.Define("pf_qq_sum_pz", "ROOT::VecOps::Sum(FCCAnalyses::ReconstructedParticle::get_pz(ReconstructedParticlesNoMuNoEl))")
+        df = df.Define("pf_qq_sum_e",  "ROOT::VecOps::Sum(FCCAnalyses::ReconstructedParticle::get_e(ReconstructedParticlesNoMuNoEl))")
+        df = df.Define("pf_qq_mass",   "sqrt(pf_qq_sum_e*pf_qq_sum_e - pf_qq_sum_px*pf_qq_sum_px - pf_qq_sum_py*pf_qq_sum_py - pf_qq_sum_pz*pf_qq_sum_pz)")
+        df = df.Define("pf_qq_p",      "sqrt(pf_qq_sum_px*pf_qq_sum_px + pf_qq_sum_py*pf_qq_sum_py + pf_qq_sum_pz*pf_qq_sum_pz)")
+        df = df.Define("pf_qq_costheta", "pf_qq_sum_pz / pf_qq_p")
+        df = df.Define("pf_qq_phi",    "atan2(pf_qq_sum_py, pf_qq_sum_px)")
 
         ## perform exclusive jet clustering
         global jetClusteringHelper
@@ -524,6 +535,14 @@ class RDFanalysis:
         df = df.Define("Whad_gen",
             "FCCAnalyses::WWFunctions::Whad_gen(gen_lightquarks_fromele_pt, gen_lightquarks_fromele_eta, gen_lightquarks_fromele_phi)"
             )
+        df = df.Define("Whad_gen_mass",     "Whad_gen.M()")
+        df = df.Define("Whad_gen_p",        "Whad_gen.P()")
+        df = df.Define("Whad_gen_costheta", "Whad_gen.Pz() / Whad_gen.P()")
+        df = df.Define("Whad_gen_phi",      "Whad_gen.Phi()")
+        df = df.Define("diff_RG_m_pf_qq",        "pf_qq_mass - Whad_gen_mass")
+        df = df.Define("diff_RG_p_pf_qq",        "pf_qq_p - Whad_gen_p")
+        df = df.Define("diff_RG_costheta_pf_qq", "pf_qq_costheta - Whad_gen_costheta")
+        df = df.Define("diff_RG_phi_pf_qq",      "TVector2::Phi_mpi_pi(pf_qq_phi - Whad_gen_phi)")
         df = df.Define("m_lnu_status1","Wlep_gen.M()")
         df = df.Define("Wlep_gen_status2",
                     "FCCAnalyses::WWFunctions::Wlep_gen_status2(gen_leps_status2_p, gen_leps_status2_phi, gen_leps_status2_theta, gen_leps_status2_e, gen_neutrinos_status1_p, gen_neutrinos_status1_phi, gen_neutrinos_status1_theta, gen_neutrinos_status1_e)"
