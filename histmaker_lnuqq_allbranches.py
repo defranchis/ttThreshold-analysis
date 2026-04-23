@@ -5,6 +5,7 @@ processList = {
 }
 
 prodTag    = None
+procDict   = "FCCee_procDict_winter2023_IDEA.json"
 inputDir   = "outputs/treemaker/lnuqq/semihad/"
 outputDir  = "outputs/histmaker/lnuqq/"
 nCPUS      = -1

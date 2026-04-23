@@ -109,7 +109,7 @@ all_branches = ["lep_res","reco_moff","reco_mon","truth_lnuqq_mon","truth_lnuqq_
                 "diff_RG_m_lnuqq","gen_leps_status1_theta","gen_neutrinos_status1_theta",
                 "diff_RG_m_qq",
                 "diff_RG_p_qq","Whad_gen_old","sumP_gen_new","ngen_partons_fromele","ngen_partons",
-                "p_iso_lnuexcljj","e_iso_lnuexcljj","Whad_gen_pt","Wlep_gen_pt", "Whad_reco_pt","Wlep_reco_pt", "lep_deta","lep_dphi","lep_dR","lep_dtheta", "jet1_deta","jet1_dphi","jet1_dtheta",
+                "p_iso_lnuexcljj","e_iso_lnuexcljj","Whad_gen_pt","Wlep_gen_pt", "Whad_reco_pt", "Whad_reco_mass", "Wlep_reco_pt", "Wlep_reco_mass", "lep_deta","lep_dphi","lep_dR","lep_dtheta", "jet1_deta","jet1_dphi","jet1_dtheta",
                 "jet2_deta","jet2_dphi","jet2_dtheta", "met_deta","met_dphi","met_dR","met_dtheta","lep_gen_costheta","lep_costheta", "met_gen_costheta","met_costheta",
                 "jet1_gen_costheta","jet1_costheta", "jet2_gen_costheta","jet2_costheta", "met_dcostheta","lep_dcostheta","jet1_gen_theta","jet2_gen_theta","jet2_dcostheta","jet1_dcostheta"
 ]
@@ -583,7 +583,9 @@ class RDFanalysis:
         df = df.Define("Wlep_gen_pt","Wlep_gen.Pt()")
         df = df.Define("Whad_gen_pt","Whad_gen.Pt()")
         df = df.Define("Wlep_reco_pt","Wlep_reco.Pt()")
+        df = df.Define("Wlep_reco_mass","Wlep_reco.M()")
         df = df.Define("Whad_reco_pt","Whad_reco.Pt()")
+        df = df.Define("Whad_reco_mass","Whad_reco.M()")
         
         df = df.Define("sumP"," (Wlep_reco.Px() + Whad_reco.Px() + Wlep_reco.Py() + Whad_reco.Py() + Wlep_reco.Pz() +Whad_reco.Pz())");
         df = df.Define("sumPt","(Wlep_reco.Px() + Whad_reco.Px() + Wlep_reco.Py() + Whad_reco.Py())");
