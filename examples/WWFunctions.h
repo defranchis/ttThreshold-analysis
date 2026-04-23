@@ -15,7 +15,7 @@
 
 namespace FCCAnalyses { namespace WWFunctions {
 
-static constexpr float ECM = 160.0f;
+inline float ECM = 160.0f;
 
 // ── angle helpers ──────────────────────────────────────────────────────────
 

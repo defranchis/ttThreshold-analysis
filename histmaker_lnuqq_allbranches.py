@@ -2,12 +2,14 @@ from treemaker_lnuqq import all_branches
 
 processList = {
     "wzp6_ee_munumuqq_noCut_ecm160": {},
+    "wzp6_ee_munumuqq_noCut_ecm163": {},
+    "wzp6_ee_munumuqq_noCut_ecm157": {},
 }
 
 prodTag    = None
 procDict   = "FCCee_procDict_winter2023_IDEA.json"
 inputDir   = "outputs/treemaker/lnuqq/semihad/"
-outputDir  = "outputs/histmaker/lnuqq/"
+outputDir  = "outputs/histmaker/lnuqq/semihad/"
 nCPUS      = -1
 doScale    = False
 intLumi    = 1

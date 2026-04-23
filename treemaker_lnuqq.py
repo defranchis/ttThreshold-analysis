@@ -1,28 +1,31 @@
-import os, copy, ROOT
+import os, copy, re, ROOT
 import urllib
 processList = {
-#    "wzp6_ee_mumuqq_noCut_ecm160": {
-#        "fraction": 1,
-#        "crossSection": 1,
-#    },
-#    "wzp6_ee_munumuqq_noCut_ecm157":{
-#        "fraction": 1,
-#        "crossSection": 1,
-#    },
-    "wzp6_ee_munumuqq_noCut_ecm160":{
+    "wzp6_ee_munumuqq_noCut_ecm160": {
+        "fraction": 1,
+        "crossSection": 1,
+    },
+    "wzp6_ee_munumuqq_noCut_ecm157":{
+        "fraction": 1,
+        "crossSection": 1,
+    },
+    "wzp6_ee_munumuqq_noCut_ecm163":{
         "fraction": 1,
         "crossSection": 1,
     },
 }
 
-
-available_ecm = ['160']#'340','345', '350', '355','365']
+available_ecm = ['157', '160', '163'] #for a redundant check
 
 hadronic  = False
-#semihad  = False
-#lep      = False
-ecm       = 160
-#print(ecm)
+
+def _parse_ecm(name):
+    m = re.search(r'_ecm(\d+)', name)
+    if not m:
+        raise ValueError(f"Cannot parse ecm from sample name: {name}")
+    return int(m.group(1))
+
+
 
 saveExclJets = True
 saveMCTruth = True
@@ -34,8 +37,6 @@ saveMCTruth = True
 KIN_FIT_METHOD  = "minuit"
 # True → fit gW as a free parameter (12-dim); False → fix gW = KF_GW_FIXED (11-dim)
 KIN_FIT_FREE_GW = False
-if not str(ecm) in available_ecm:
-    raise ValueError("ecm value not in available_ecm")
 
 channel = "CHANNELNAMEHERE"
 
@@ -128,6 +129,8 @@ all_branches+=["kinfit_mW","kinfit_gW","kinfit_s1","kinfit_s2","kinfit_sl","kinf
                "kinfit_deltaP"]
 #print('saving these branches',all_branches)
 # Mandatory: RDFanalysis class where the use defines the operations on the TTree
+_dataset_iter = iter(processList.keys())
+
 class RDFanalysis:
 
     # __________________________________________________________
@@ -136,6 +139,13 @@ class RDFanalysis:
 
         # __________________________________________________________
         # Mandatory: analysers funtion to define the analysers to process, please make sure you return the last dataframe, in this example it is df2
+
+        _dataset = next(_dataset_iter)
+        _ecm = _parse_ecm(_dataset)
+        print(f"[treemaker] dataset={_dataset}  ecm={_ecm}")
+        if str(_ecm) not in available_ecm:
+            raise ValueError(f"ecm={_ecm} parsed from '{_dataset}' not in available_ecm={available_ecm}")
+        ROOT.gInterpreter.ProcessLine(f"FCCAnalyses::WWFunctions::ECM = {_ecm};")
 
         # define some aliases to be used later on
         df = df.Alias("Muon0", "Muon#0.index")
