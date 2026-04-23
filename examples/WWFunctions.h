@@ -409,61 +409,6 @@ static double _chi2_eval(
     return bw_term + cons + scale_pen + angular;
 }
 
-// ── lightweight massless 4-vector (E = p) for chi2 evaluations ───────────
-// Avoids TLorentzVector construction overhead in the hot path (~400-1000 calls/event).
-struct Vec4 {
-    double px, py, pz, E;
-    static Vec4 spherical(double p, double th, double ph) {
-        double sth = std::sin(th), cth = std::cos(th);
-        return {p * sth * std::cos(ph), p * sth * std::sin(ph), p * cth, p};
-    }
-    Vec4 operator+(const Vec4& o) const { return {px+o.px, py+o.py, pz+o.pz, E+o.E}; }
-    double M2() const { return E*E - px*px - py*py - pz*pz; }
-    double M()  const { double m2 = M2(); return m2 > 0.0 ? std::sqrt(m2) : 0.0; }
-};
-
-// Shared chi2 kernel — delegates from kinFit and kinFitBFGS lambdas.
-static double _chi2_eval(
-    double mW, double gW,
-    double s1, double s2, double sl, double sn,
-    double t1, double t2, double tn,
-    double p1, double p2, double pn,
-    double jet1_p, double jet1_theta, double jet1_phi,
-    double jet2_p, double jet2_theta, double jet2_phi,
-    double lep_p,  double lep_theta,  double lep_phi,
-    double nu_p,   double nu_theta,   double nu_phi)
-{
-    if (gW <= 0.0) return 1e10;
-
-    Vec4 j1 = Vec4::spherical(jet1_p*s1, jet1_theta + t1*KF_JET1_THETA_RMS, jet1_phi + p1*KF_JET1_PHI_RMS);
-    Vec4 j2 = Vec4::spherical(jet2_p*s2, jet2_theta + t2*KF_JET2_THETA_RMS, jet2_phi + p2*KF_JET2_PHI_RMS);
-    Vec4 lf = Vec4::spherical(lep_p*sl,  lep_theta,                          lep_phi);
-    Vec4 nf = Vec4::spherical(nu_p*sn,   nu_theta   + tn*KF_MET_THETA_RMS,   nu_phi  + pn*KF_MET_PHI_RMS);
-
-    Vec4 Wh = j1 + j2;
-    Vec4 Wl = lf + nf;
-    Vec4 WW = Wh + Wl;
-
-    double mh = Wh.M(), ml = Wl.M();
-    double mwgw = mW * gW;
-    double dh   = mh*mh - mW*mW,  dl = ml*ml - mW*mW;
-    double bw_h = mwgw / (dh*dh + mwgw*mwgw);
-    double bw_l = mwgw / (dl*dl + mwgw*mwgw);
-    double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l));
-
-    double cons = std::pow(WW.E - ECM, 2) / (KF_SIGMA_SQRTS * KF_SIGMA_SQRTS)
-                + (WW.px*WW.px + WW.py*WW.py + WW.pz*WW.pz) * KF_MOMENTUM_PENALTY;
-
-    double scale_pen = std::pow((s1-KF_JET_SCALE_BIAS)/KF_JET_SCALE_SIGMA, 2)
-                     + std::pow((s2-KF_JET_SCALE_BIAS)/KF_JET_SCALE_SIGMA, 2)
-                     + std::pow((sl-KF_LEP_SCALE_BIAS)/KF_LEP_SCALE_SIGMA, 2)
-                     + std::pow((sn-KF_MET_SCALE_BIAS)/KF_MET_SCALE_SIGMA, 2);
-
-    double angular = t1*t1 + t2*t2 + tn*tn + p1*p1 + p2*p2 + pn*pn;
-
-    return bw_term + cons + scale_pen + angular;
-}
-
 // ── BFGS minimizer (option C+A) ───────────────────────────────────────────
 // Template avoids std::function overhead (no heap, no virtual dispatch).
 // All work arrays are on the stack, so the function is inherently thread-safe
