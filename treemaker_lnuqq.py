@@ -94,7 +94,7 @@ weaver_model = get_file_path(url_model, local_model)
 from addons.ONNXRuntime.jetFlavourHelper import JetFlavourHelper
 from addons.FastJet.jetClusteringHelper import (
     ExclusiveJetClusteringHelper,
-    InclusiveJetClusteringHelper,
+    #InclusiveJetClusteringHelper,
 )
 
 jetFlavourHelper = None
@@ -370,18 +370,28 @@ class RDFanalysis:
 
 
         
-        df = df.Alias("Particle0", "Particle#0.index") #parents
-        df = df.Alias("Particle1", "Particle#1.index") #daughters
+        df = df.Alias("Particle0", "Particle#0.index")
+        df = df.Alias("Particle1", "Particle#1.index")
         df = df.Alias("MCRecoAssociations0", "MCRecoAssociations#0.index")
         df = df.Alias("MCRecoAssociations1", "MCRecoAssociations#1.index")
+
+        # Minimum defines needed for the gen-level filter — computed for all events
         df = df.Define("status1parts",            "FCCAnalyses::MCParticle::sel_genStatus(1)(Particle)")
+        df = df.Define("gen_leps_status1",        "FCCAnalyses::MCParticle::sel_genleps(13,13,true)(status1parts)")
+        df = df.Define("ngen_leps_status1",       "FCCAnalyses::MCParticle::get_n(gen_leps_status1)")
+        df = df.Define("neutrinos",               "FCCAnalyses::MCParticle::sel_genleps(14,14, true)(status1parts)")
+        df = df.Define("gen_neutrinos_status1",   "FCCAnalyses::MCParticle::sel_genleps(14,14, true)(neutrinos)")
+        df = df.Define("gen_neutrinos_status1_p", "FCCAnalyses::MCParticle::get_p(gen_neutrinos_status1)")
+        df = df.Define("gen_lightquarks_fromele", "FCCAnalyses::MCParticle::sel_lightQuarks_fromele(true)(Particle,Particle0)")
+
+        # Early filter — skips all remaining gen defines for non-signal events
+        df = df.Filter("ngen_leps_status1 == 1 && gen_neutrinos_status1_p.size() == 1 && gen_lightquarks_fromele.size() > 1")
+
+        # All remaining gen defines — only run for events that pass the filter above
         df = df.Define("status2parts",            "FCCAnalyses::MCParticle::sel_genStatus(2)(Particle)")
         df = df.Define("nstatus1parts",           "FCCAnalyses::MCParticle::get_n(status1parts)")
-        df = df.Define("gen_leps_status1",        "FCCAnalyses::MCParticle::sel_genleps(13,13,true)(status1parts)") #11
-        df = df.Define("gen_leps_status2",        "FCCAnalyses::MCParticle::sel_genleps(13,13,true)(status2parts)") #11
-        df = df.Define("neutrinos",               "FCCAnalyses::MCParticle::sel_genleps(14,14, true)(status1parts)")
+        df = df.Define("gen_leps_status2",        "FCCAnalyses::MCParticle::sel_genleps(13,13,true)(status2parts)")
         df = df.Define("neutrinos_2",             "FCCAnalyses::MCParticle::sel_genleps(14,14, true)(status2parts)")
-        df = df.Define("ngen_leps_status1",       "FCCAnalyses::MCParticle::get_n(gen_leps_status1)")
         df = df.Define("ngen_leps_status2",       "FCCAnalyses::MCParticle::get_n(gen_leps_status2)")
         df = df.Define("gen_leps_status2_p",      "FCCAnalyses::MCParticle::get_p(gen_leps_status2)")
         df = df.Define("gen_leps_status1_p",      "FCCAnalyses::MCParticle::get_p(gen_leps_status1)")
@@ -389,7 +399,7 @@ class RDFanalysis:
         df = df.Define("gen_leps_status1_py",     "FCCAnalyses::MCParticle::get_py(gen_leps_status1)")
         df = df.Define("gen_leps_status1_pz",     "FCCAnalyses::MCParticle::get_pz(gen_leps_status1)")
         df = df.Define("gen_leps_status1_pt",     "FCCAnalyses::MCParticle::get_pt(gen_leps_status1)")
-        df = df.Define("gen_leps_status1_eta",    "FCCAnalyses::MCParticle::get_eta(gen_leps_status1)")        
+        df = df.Define("gen_leps_status1_eta",    "FCCAnalyses::MCParticle::get_eta(gen_leps_status1)")
         df = df.Define("gen_leps_status2_px",     "FCCAnalyses::MCParticle::get_px(gen_leps_status2)")
         df = df.Define("gen_leps_status2_py",     "FCCAnalyses::MCParticle::get_py(gen_leps_status2)")
         df = df.Define("gen_leps_status2_pz",     "FCCAnalyses::MCParticle::get_pz(gen_leps_status2)")
@@ -402,14 +412,10 @@ class RDFanalysis:
         df = df.Define("gen_leps_status2_theta",  "FCCAnalyses::MCParticle::get_theta(gen_leps_status2)")
         df = df.Define("gen_leps_status2_phi",    "FCCAnalyses::MCParticle::get_phi(gen_leps_status2)")
         df = df.Define("gen_leps_status2_e",      "FCCAnalyses::MCParticle::get_e(gen_leps_status2)")
-        df = df.Define("gen_neutrinos_status1",   "FCCAnalyses::MCParticle::sel_genleps(14,14, true)(neutrinos)")
         df = df.Define("ngen_neutrinos_status1",  "FCCAnalyses::MCParticle::get_n(gen_neutrinos_status1)")
-        df = df.Define('gen_lightquarks',         "FCCAnalyses::MCParticle::sel_lightQuarks(true)(status2parts)")
-        df = df.Define('gen_lightquarks_fromele', "FCCAnalyses::MCParticle::sel_lightQuarks_fromele(true)(Particle,Particle0)")
-        df = df.Define("ngen_partons_fromele",    "FCCAnalyses::MCParticle::get_n(gen_lightquarks_fromele)");
-        df = df.Define("ngen_partons",            "FCCAnalyses::MCParticle::get_n(gen_lightquarks)");
-        
-        df = df.Define("gen_neutrinos_status1_p",      "FCCAnalyses::MCParticle::get_p(gen_neutrinos_status1)")
+        df = df.Define("gen_lightquarks",         "FCCAnalyses::MCParticle::sel_lightQuarks(true)(status2parts)")
+        df = df.Define("ngen_partons_fromele",    "FCCAnalyses::MCParticle::get_n(gen_lightquarks_fromele)")
+        df = df.Define("ngen_partons",            "FCCAnalyses::MCParticle::get_n(gen_lightquarks)")
         df = df.Define("gen_neutrinos_status1_pt",     "FCCAnalyses::MCParticle::get_pt(gen_neutrinos_status1)")
         df = df.Define("gen_neutrinos_status1_px",     "FCCAnalyses::MCParticle::get_px(gen_neutrinos_status1)")
         df = df.Define("gen_neutrinos_status1_py",     "FCCAnalyses::MCParticle::get_py(gen_neutrinos_status1)")
@@ -429,27 +435,24 @@ class RDFanalysis:
         df = df.Define("gen_neutrinos_status2_pdgId",  "FCCAnalyses::MCParticle::get_pdg(gen_neutrinos_status2)")
         df = df.Define("gen_neutrinos_status2_e",      "FCCAnalyses::MCParticle::get_e(gen_neutrinos_status2)")
         df = df.Define("gen_lightquarks_fromele_p",    "FCCAnalyses::MCParticle::get_p(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_px",    "FCCAnalyses::MCParticle::get_px(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_py",    "FCCAnalyses::MCParticle::get_py(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_pz",    "FCCAnalyses::MCParticle::get_pz(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_pt",    "FCCAnalyses::MCParticle::get_pt(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_eta",   "FCCAnalyses::MCParticle::get_eta(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_theta", "FCCAnalyses::MCParticle::get_theta(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_phi",   "FCCAnalyses::MCParticle::get_phi(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_e",     "FCCAnalyses::MCParticle::get_e(gen_lightquarks_fromele)")
-
+        df = df.Define("gen_lightquarks_fromele_px",   "FCCAnalyses::MCParticle::get_px(gen_lightquarks_fromele)")
+        df = df.Define("gen_lightquarks_fromele_py",   "FCCAnalyses::MCParticle::get_py(gen_lightquarks_fromele)")
+        df = df.Define("gen_lightquarks_fromele_pz",   "FCCAnalyses::MCParticle::get_pz(gen_lightquarks_fromele)")
+        df = df.Define("gen_lightquarks_fromele_pt",   "FCCAnalyses::MCParticle::get_pt(gen_lightquarks_fromele)")
+        df = df.Define("gen_lightquarks_fromele_eta",  "FCCAnalyses::MCParticle::get_eta(gen_lightquarks_fromele)")
+        df = df.Define("gen_lightquarks_fromele_theta","FCCAnalyses::MCParticle::get_theta(gen_lightquarks_fromele)")
+        df = df.Define("gen_lightquarks_fromele_phi",  "FCCAnalyses::MCParticle::get_phi(gen_lightquarks_fromele)")
+        df = df.Define("gen_lightquarks_fromele_e",    "FCCAnalyses::MCParticle::get_e(gen_lightquarks_fromele)")
         df = df.Define("gen_lightquarks_p",      "FCCAnalyses::MCParticle::get_p(gen_lightquarks)")
-        df = df.Define("gen_lightquarks_px",      "FCCAnalyses::MCParticle::get_px(gen_lightquarks)")
-        df = df.Define("gen_lightquarks_py",      "FCCAnalyses::MCParticle::get_py(gen_lightquarks)")
-        df = df.Define("gen_lightquarks_pz",      "FCCAnalyses::MCParticle::get_pz(gen_lightquarks)")
+        df = df.Define("gen_lightquarks_px",     "FCCAnalyses::MCParticle::get_px(gen_lightquarks)")
+        df = df.Define("gen_lightquarks_py",     "FCCAnalyses::MCParticle::get_py(gen_lightquarks)")
+        df = df.Define("gen_lightquarks_pz",     "FCCAnalyses::MCParticle::get_pz(gen_lightquarks)")
         df = df.Define("gen_lightquarks_theta",  "FCCAnalyses::MCParticle::get_theta(gen_lightquarks)")
         df = df.Define("gen_lightquarks_phi",    "FCCAnalyses::MCParticle::get_phi(gen_lightquarks)")
         df = df.Define("gen_lightquarks_charge", "FCCAnalyses::MCParticle::get_charge(gen_lightquarks)")
         df = df.Define("gen_lightquarks_pdgId",  "FCCAnalyses::MCParticle::get_pdg(gen_lightquarks)")
         df = df.Define("gen_lightquarks_e",      "FCCAnalyses::MCParticle::get_e(gen_lightquarks)")
         df = df.Define("gen_lightquarks_mother_pdgId", "FCCAnalyses::MCParticle::get_leptons_origin(gen_lightquarks,Particle,Particle0)")
-        
-        df = df.Filter("ngen_leps_status1 == 1 && gen_neutrinos_status1_p.size() == 1 && gen_lightquarks_fromele_e.size() > 1")
         df = df.Define("Whad_gen_status2",
                     "FCCAnalyses::WWFunctions::Whad_gen_status2(gen_lightquarks_p, gen_lightquarks_phi, gen_lightquarks_theta, gen_lightquarks_e)"
                     )
