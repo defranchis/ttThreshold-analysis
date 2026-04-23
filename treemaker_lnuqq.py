@@ -31,7 +31,9 @@ saveMCTruth = True
 # "minuit" → ROOT Minuit2 (robust, ~200-500 function evaluations per event)
 # "bfgs"   → custom BFGS, stack-only, no heap, template-inlined chi2
 #             (~50-150 evaluations, thread-safe without thread_local)
-KIN_FIT_METHOD = "bfgs"
+KIN_FIT_METHOD  = "minuit"
+# True → fit gW as a free parameter (12-dim); False → fix gW = KF_GW_FIXED (11-dim)
+KIN_FIT_FREE_GW = False
 if not str(ecm) in available_ecm:
     raise ValueError("ecm value not in available_ecm")
 
@@ -662,13 +664,14 @@ class RDFanalysis:
             "minuit": "FCCAnalyses::WWFunctions::kinFit",
             "bfgs":   "FCCAnalyses::WWFunctions::kinFitBFGS",
         }
-        _kinfit_call = _kinfit_funcs[KIN_FIT_METHOD]
+        _kinfit_call   = _kinfit_funcs[KIN_FIT_METHOD]
+        _kinfit_free_gw = "true" if KIN_FIT_FREE_GW else "false"
         df = df.Define("kinfit",
             _kinfit_call + "("
             "jet1_p, jet1_theta, jet1_phi,"
             "jet2_p, jet2_theta, jet2_phi,"
             "Isolep_p, Isolep_theta, Isolep_phi,"
-            "missing_p, missing_p_theta, missing_p_phi)"
+            f"missing_p, missing_p_theta, missing_p_phi, {_kinfit_free_gw})"
         )
         df = df.Define("kinfit_mW",       "kinfit.mW")
         df = df.Define("kinfit_gW",       "kinfit.gW")
