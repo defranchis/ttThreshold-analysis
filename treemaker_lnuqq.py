@@ -101,20 +101,20 @@ from addons.FastJet.jetClusteringHelper import (
 jetFlavourHelper = None
 jetClusteringHelper = None
 
-all_branches = ["lep_res","reco_moff","reco_mon","truth_lnuqq_mon","truth_lnuqq_moff","m_gen_lnuqq","p_lnu_status2","p_excljj","p_iso_lnu",
+all_branches = ["lep_p_resp","reco_moff","reco_mon","truth_lnuqq_mon","truth_lnuqq_moff","m_gen_lnuqq","p_lnu_status2","p_excljj","p_iso_lnu",
                 "p_qq_fromele",    "nIsolep", "Isolep_p", 'Isolep_theta',"m_iso_lnu",'Isolep_phi',"Isolep_pt","Isolep_eta",
-                "missing_p", "missing_p_theta", "missing_p_phi", "missing_p_res","missing_p_eta","missing_pt",
-                "diff_RG_m_lnu",#"resP",
+                "missing_p", "missing_p_theta", "missing_p_phi", "met_p_resp","missing_p_eta","missing_pt",
+                "m_lnu_resol",#"resP",
                 "deltaM","sumP","sumPx","sumPy","sumPz","sumP_gen","sumPx_gen","sumPy_gen","sumPz_gen","sumPt","sumPt_gen",
-                "diff_RG_p_lnu",
-                "diff_RG_m_lnuqq","gen_leps_status1_theta","gen_neutrinos_status1_theta",
-                "diff_RG_m_qq",
-                "diff_RG_p_qq","Whad_gen_old","sumP_gen_new","ngen_partons_fromele","ngen_partons",
-                "p_iso_lnuexcljj","e_iso_lnuexcljj","Whad_gen_pt","Wlep_gen_pt", "Whad_reco_pt", "Whad_reco_mass", "Wlep_reco_pt", "Wlep_reco_mass", "lep_deta","lep_dphi","lep_dR","lep_dtheta", "jet1_deta","jet1_dphi","jet1_dtheta",
-                "jet2_deta","jet2_dphi","jet2_dtheta", "met_deta","met_dphi","met_dR","met_dtheta","lep_gen_costheta","lep_costheta", "met_gen_costheta","met_costheta",
-                "jet1_gen_costheta","jet1_costheta", "jet2_gen_costheta","jet2_costheta", "met_dcostheta","lep_dcostheta","jet1_gen_theta","jet2_gen_theta","jet2_dcostheta","jet1_dcostheta"
+                "p_lnu_resol",
+                "m_lnuqq_resol","gen_leps_status1_theta","gen_neutrinos_status1_theta",
+                "m_qq_resol",
+                "p_qq_resol","Whad_gen_old","sumP_gen_new","ngen_partons_fromele","ngen_partons",
+                "p_iso_lnuexcljj","e_iso_lnuexcljj","Whad_gen_pt","Wlep_gen_pt", "Whad_reco_pt", "Whad_reco_mass", "Wlep_reco_pt", "Wlep_reco_mass", "lep_eta_resol","lep_phi_resol","lep_dR","lep_theta_resol", "jet1_eta_resol","jet1_phi_resol","jet1_theta_resol",
+                "jet2_eta_resol","jet2_phi_resol","jet2_theta_resol", "met_eta_resol","met_phi_resol","met_dR","met_theta_resol","lep_gen_costheta","lep_costheta", "met_gen_costheta","met_costheta",
+                "jet1_gen_costheta","jet1_costheta", "jet2_gen_costheta","jet2_costheta", "met_costheta_resol","lep_costheta_resol","jet1_gen_theta","jet2_gen_theta","jet2_costheta_resol","jet1_costheta_resol"
 ]
-all_branches+=["gen_leps_status1_p","ngen_leps_status2","gen_leps_status2_p","m_lnu_status1","m_qq_status2","m_qq_fromele","m_lnu_status2","ngen_leps_status1", "gen_lightquarks_p","res_jet2_qq_fromele","res_jet1_qq_fromele","res_jet2_qq","res_jet1_qq","truth_lnuqq_qqfromele_mon","truth_lnuqq_qqfromele_moff","mlnu_plus_mjj_reco","mlnu_plus_mqq_status2_truth","mlnu_plus_mqq_fromele_truth","p_qq_status2"]
+all_branches+=["gen_leps_status1_p","ngen_leps_status2","gen_leps_status2_p","m_lnu_status1","m_qq_status2","m_qq_fromele","m_lnu_status2","ngen_leps_status1", "gen_lightquarks_p","jet2_p_fromele_resp","jet1_p_fromele_resp","jet2_p_resp","jet1_p_resp","truth_lnuqq_qqfromele_mon","truth_lnuqq_qqfromele_moff","mlnu_plus_mjj_reco","mlnu_plus_mqq_status2_truth","mlnu_plus_mqq_fromele_truth","p_qq_status2"]
 #"m_genkt_ee_jj","Genjets_kt_ee_e","Genjets_kt_ee_p","Genjets_kt_ee_p1","Genjets_kt_ee_p2","res_jet1","res_jet2","truth_moff","truth_mon","jet_res","m_genkt5_jj","Genjets_kt_e",
 all_branches+=[ "nRecoJets", "jet1_p", "jet2_p", "d_12","m_iso_lnuexcljj","jet1_pt","jet2_pt","jet1_eta","jet2_eta","jet1_phi","jet2_phi","jet1_mass","jet2_mass"]
 all_branches+=["kinfit_mW","kinfit_gW","kinfit_s1","kinfit_s2","kinfit_sl","kinfit_sn",
@@ -129,7 +129,7 @@ all_branches+=["kinfit_mW","kinfit_gW","kinfit_s1","kinfit_s2","kinfit_sl","kinf
                "kinfit_deltaP"]
 all_branches+=["pf_qq_mass","pf_qq_p","pf_qq_costheta","pf_qq_phi",
                "Whad_gen_mass","Whad_gen_p","Whad_gen_costheta","Whad_gen_phi",
-               "diff_RG_m_pf_qq","diff_RG_p_pf_qq","diff_RG_costheta_pf_qq","diff_RG_phi_pf_qq"]
+               "pf_qq_m_resol","pf_qq_p_resol","pf_qq_costheta_resol","pf_qq_phi_resol"]
 #print('saving these branches',all_branches)
 # Mandatory: RDFanalysis class where the use defines the operations on the TTree
 _dataset_iter = iter(processList.keys())
@@ -511,23 +511,23 @@ class RDFanalysis:
                        "FCCAnalyses::WWFunctions::missing_p_p4(missing_p, missing_p_phi, missing_p_theta)"
                        )
 
-        df = df.Define("lep_deta", "Isoleps_p4_reco.Eta() - lep_p4_gen.Eta()")
-        df = df.Define("lep_dphi", "TVector2::Phi_mpi_pi(Isoleps_p4_reco.Phi() - lep_p4_gen.Phi())")
-        df = df.Define("lep_dR",   "sqrt(lep_deta*lep_deta + lep_dphi*lep_dphi)");
-        df = df.Define("met_dphi","TVector2::Phi_mpi_pi(missing_p_p4.Phi() - nu_p4_gen.Phi())");
-        df = df.Define("met_deta","missing_p_p4.Eta() - nu_p4_gen.Eta()");
-        df = df.Define("met_dR",  "sqrt(met_deta*met_deta + met_dphi*met_dphi)");
+        df = df.Define("lep_eta_resol", "Isoleps_p4_reco.Eta() - lep_p4_gen.Eta()")
+        df = df.Define("lep_phi_resol", "TVector2::Phi_mpi_pi(Isoleps_p4_reco.Phi() - lep_p4_gen.Phi())")
+        df = df.Define("lep_dR",        "sqrt(lep_eta_resol*lep_eta_resol + lep_phi_resol*lep_phi_resol)")
+        df = df.Define("met_phi_resol", "TVector2::Phi_mpi_pi(missing_p_p4.Phi() - nu_p4_gen.Phi())")
+        df = df.Define("met_eta_resol", "missing_p_p4.Eta() - nu_p4_gen.Eta()")
+        df = df.Define("met_dR",        "sqrt(met_eta_resol*met_eta_resol + met_phi_resol*met_phi_resol)")
         df = df.Define("lep_gen_costheta", "lep_p4_gen.Pz() / lep_p4_gen.P()");
         df = df.Define("lep_costheta", "Isoleps_p4_reco.Pz() / Isoleps_p4_reco.P()");
         #        df = df.Define("lep_dtheta","deltaTheta3D(Isoleps_p4_reco, lep_p4_gen)");
-        df = df.Define("lep_dcostheta"," lep_costheta-lep_gen_costheta")
-        df = df.Define("lep_dtheta"," Isolep_theta-gen_leps_status1_theta")
-        
+        df = df.Define("lep_costheta_resol", "lep_costheta - lep_gen_costheta")
+        df = df.Define("lep_theta_resol",    "Isolep_theta - gen_leps_status1_theta")
+
         df = df.Define("met_gen_costheta", "nu_p4_gen.Pz() / nu_p4_gen.P()");
         df = df.Define("met_costheta", "missing_p_p4.Pz() / missing_p_p4.P()");
         #df = df.Define("met_dtheta","deltaTheta3D(missing_p_p4, nu_p4_gen)");
-        df = df.Define("met_dtheta","missing_p_theta- gen_neutrinos_status1_theta");#
-        df = df.Define("met_dcostheta","met_costheta - met_gen_costheta");
+        df = df.Define("met_theta_resol",    "missing_p_theta - gen_neutrinos_status1_theta")
+        df = df.Define("met_costheta_resol", "met_costheta - met_gen_costheta")
         df = df.Define("Whad_gen_old",
             "FCCAnalyses::WWFunctions::Whad_gen_old(gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)"
             )
@@ -539,10 +539,10 @@ class RDFanalysis:
         df = df.Define("Whad_gen_p",        "Whad_gen.P()")
         df = df.Define("Whad_gen_costheta", "Whad_gen.Pz() / Whad_gen.P()")
         df = df.Define("Whad_gen_phi",      "Whad_gen.Phi()")
-        df = df.Define("diff_RG_m_pf_qq",        "pf_qq_mass - Whad_gen_mass")
-        df = df.Define("diff_RG_p_pf_qq",        "pf_qq_p - Whad_gen_p")
-        df = df.Define("diff_RG_costheta_pf_qq", "pf_qq_costheta - Whad_gen_costheta")
-        df = df.Define("diff_RG_phi_pf_qq",      "TVector2::Phi_mpi_pi(pf_qq_phi - Whad_gen_phi)")
+        df = df.Define("pf_qq_m_resol",        "pf_qq_mass - Whad_gen_mass")
+        df = df.Define("pf_qq_p_resol",        "pf_qq_p - Whad_gen_p")
+        df = df.Define("pf_qq_costheta_resol", "pf_qq_costheta - Whad_gen_costheta")
+        df = df.Define("pf_qq_phi_resol",      "TVector2::Phi_mpi_pi(pf_qq_phi - Whad_gen_phi)")
         df = df.Define("m_lnu_status1","Wlep_gen.M()")
         df = df.Define("Wlep_gen_status2",
                     "FCCAnalyses::WWFunctions::Wlep_gen_status2(gen_leps_status2_p, gen_leps_status2_phi, gen_leps_status2_theta, gen_leps_status2_e, gen_neutrinos_status1_p, gen_neutrinos_status1_phi, gen_neutrinos_status1_theta, gen_neutrinos_status1_e)"
@@ -631,13 +631,12 @@ class RDFanalysis:
             
         df = df.Define("p_excljj","Whad_reco.P()");    
         
-        df = df.Define("jet_res_qq_fromele","FCCAnalyses::WWFunctions::matchJetsAndComputeResolution(recoJet_px, recoJet_py, recoJet_pz, recoJet_e, gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)" )
-        df = df.Define("res_jet1_qq_fromele", "jet_res_qq_fromele[0]")
-        df = df.Define("res_jet2_qq_fromele", "jet_res_qq_fromele[1]")
-        
-        df = df.Define("jet_res_qq","FCCAnalyses::WWFunctions::matchJetsAndComputeResolution(recoJet_px, recoJet_py, recoJet_pz, recoJet_e, gen_lightquarks_px, gen_lightquarks_py, gen_lightquarks_pz, gen_lightquarks_e)" )
-        df = df.Define("res_jet1_qq", "jet_res_qq[0]")
-        df = df.Define("res_jet2_qq", "jet_res_qq[1]")
+        df = df.Define("gen_lightquarks_p4",
+            "FCCAnalyses::WWFunctions::build_p4(gen_lightquarks_px, gen_lightquarks_py, gen_lightquarks_pz, gen_lightquarks_e)")
+        df = df.Define("matched_genjets_qq",
+            "FCCAnalyses::WWFunctions::matchJets2(jet1, jet2, gen_lightquarks_p4[0], gen_lightquarks_p4[1])")
+        df = df.Define("jet1_p_resp", "jet1_p / matched_genjets_qq.first.P()")
+        df = df.Define("jet2_p_resp", "jet2_p / matched_genjets_qq.second.P()")
         df = df.Define(
             "gen_lightquarks_fromele_p4",
             "FCCAnalyses::WWFunctions::build_p4(gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)"
@@ -647,6 +646,8 @@ class RDFanalysis:
         df = df.Define("matched_genjets","FCCAnalyses::WWFunctions::matchJets2(jet1, jet2, gen_lightquarks_fromele_p4[0], gen_lightquarks_fromele_p4[1])");
         df = df.Define("jet1_matched_p4", "matched_genjets.first") #these are gen jets matched to leading and sub leading reco jets
         df = df.Define("jet2_matched_p4", "matched_genjets.second");
+        df = df.Define("jet1_p_fromele_resp", "jet1_p / jet1_matched_p4.P()")
+        df = df.Define("jet2_p_fromele_resp", "jet2_p / jet2_matched_p4.P()")
         #df = df.Define("jet1_dtheta", "deltaTheta3D(jet1, jet1_matched_p4)")
         #df = df.Define("jet2_dtheta", "deltaTheta3D(jet2, jet2_matched_p4)")
         df = df.Define("jet1_costheta", "jet1.Pz()/jet1.P()")
@@ -655,19 +656,19 @@ class RDFanalysis:
         df = df.Define("jet2_gen_costheta", "jet2_matched_p4.Pz()/jet2_matched_p4.P()")
         df = df.Define("jet1_gen_theta", "jet1_matched_p4.Theta()")
         df = df.Define("jet2_gen_theta", "jet2_matched_p4.Theta()")
-        df = df.Define("jet1_dtheta", "jet1_theta - jet1_matched_p4.Theta()");
-        df = df.Define("jet2_dtheta", "jet2_theta - jet2_matched_p4.Theta()")
-        df = df.Define("jet1_dcostheta", "jet1_costheta - jet1_gen_costheta");
-        df = df.Define("jet2_dcostheta", "jet2_costheta - jet2_gen_costheta");
+        df = df.Define("jet1_theta_resol", "jet1_theta - jet1_matched_p4.Theta()")
+        df = df.Define("jet2_theta_resol", "jet2_theta - jet2_matched_p4.Theta()")
+        df = df.Define("jet1_costheta_resol", "jet1_costheta - jet1_gen_costheta")
+        df = df.Define("jet2_costheta_resol", "jet2_costheta - jet2_gen_costheta")
 
         
-        df = df.Define("jet1_deta", "jet1.Eta()-jet1_matched_p4.Eta()")
-        df = df.Define("jet2_deta", "jet2.Eta()-jet2_matched_p4.Eta()")
-        df = df.Define("jet1_dphi", "TVector2::Phi_mpi_pi(jet1.Phi()-jet1_matched_p4.Phi())")
-        df = df.Define("jet2_dphi", "TVector2::Phi_mpi_pi(jet2.Phi()-jet2_matched_p4.Phi())")
+        df = df.Define("jet1_eta_resol", "jet1.Eta()-jet1_matched_p4.Eta()")
+        df = df.Define("jet2_eta_resol", "jet2.Eta()-jet2_matched_p4.Eta()")
+        df = df.Define("jet1_phi_resol", "TVector2::Phi_mpi_pi(jet1.Phi()-jet1_matched_p4.Phi())")
+        df = df.Define("jet2_phi_resol", "TVector2::Phi_mpi_pi(jet2.Phi()-jet2_matched_p4.Phi())")
 
         
-        df = df.Define("lep_res","FCCAnalyses::WWFunctions::matchJetsAndComputeResolution(Isoleps_px, Isoleps_py, Isoleps_pz, Isoleps_e, gen_leps_status1_px, gen_leps_status1_py, gen_leps_status1_pz, gen_leps_status1_e)" )
+        df = df.Define("lep_p_resp", "Isolep_p / gen_leps_status1_p[0]")
         df = (df
                   .Define("truth_mlnu", "m_lnu_status2")
                   .Define("truth_mqq",  "m_qq_status2")
@@ -683,12 +684,12 @@ class RDFanalysis:
                   .Define("mlnu_plus_mjj_reco", "reco_mlnu + reco_mjj")
                   .Define("mlnu_plus_mqq_status2_truth",("m_qq_status2 + m_lnu_status2"))
                   .Define("mlnu_plus_mqq_fromele_truth",("m_qq_fromele + m_lnu_status2"))
-                  .Define("diff_RG_m_lnu",("reco_mlnu- m_lnu_status2"))
-                  .Define("diff_RG_p_lnu",("p_iso_lnu - p_lnu_status2"))
-                  .Define("diff_RG_m_lnuqq",("m_iso_lnuexcljj-m_gen_lnuqq"))
-                  .Define("diff_RG_m_qq",("reco_mjj-truth_mqq_fromele"))
-                  .Define("diff_RG_p_qq",("p_excljj - p_qq_status2"))
-                  .Define("missing_p_res",("(missing_p - gen_neutrinos_status1_p[0])/gen_neutrinos_status1_p[0]"))
+                  .Define("m_lnu_resol",  "reco_mlnu - m_lnu_status2")
+                  .Define("p_lnu_resol",  "p_iso_lnu - p_lnu_status2")
+                  .Define("m_lnuqq_resol","m_iso_lnuexcljj - m_gen_lnuqq")
+                  .Define("m_qq_resol",   "reco_mjj - truth_mqq_fromele")
+                  .Define("p_qq_resol",   "p_excljj - p_qq_status2")
+                  .Define("met_p_resp",   "missing_p / gen_neutrinos_status1_p[0]")
                   .Define("eta_miss", "-log(tan(missing_p_theta/2.))")
 
                 )
