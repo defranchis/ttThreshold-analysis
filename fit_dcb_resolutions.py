@@ -58,10 +58,27 @@ BRANCH_CONFIG = {
     # Jet2: sharp core — single DCB describes it better than DCB+G
     "jet2_p_resp":          {"clip": (0.2, 99.8), "nbins": 150, "model": "dcb2g"},
     "jet2_p_fromele_resp":  {"clip": (1.0, 99.0), "nbins": 150, "model": "dcb2g"},
+    # Combined (jet1+jet2) pooled responses
+    "jet_p_resp":           {"clip": (0.2, 99.8), "nbins": 150, "model": "dcb2g"},
+    "jet_p_fromele_resp":   {"clip": (0.2, 99.8), "nbins": 150, "model": "dcb2g"},
+    # costheta resolutions need two-component model (DCB alone chi2/ndf ~5)
+    "jet1_costheta_resol":  {"clip": (0.5, 99.5), "nbins": 150, "model": "dcb2g"},
+    "jet2_costheta_resol":  {"clip": (0.5, 99.5), "nbins": 150, "model": "dcb2g"},
+    "jet_costheta_resol":   {"clip": (0.5, 99.5), "nbins": 150, "model": "dcb2g"},
     # Gen-level total momenta: narrow ISR-free spike + broad wings → DCB+G
     "px_tot_gen":           {"clip": (0.5, 99.5), "nbins": 200, "model": "dcb2g"},
     "py_tot_gen":           {"clip": (0.5, 99.5), "nbins": 200, "model": "dcb2g"},
     "pz_tot_gen":           {"clip": (0.5, 99.5), "nbins": 200, "model": "dcb2g"},
+}
+
+# ── Virtual combined branches (concatenation of two tree branches) ──────────
+COMBINED_BRANCHES = {
+    "jet_p_resp":           ("jet1_p_resp",          "jet2_p_resp"),
+    "jet_p_fromele_resp":   ("jet1_p_fromele_resp",   "jet2_p_fromele_resp"),
+    "jet_costheta_resol":   ("jet1_costheta_resol",   "jet2_costheta_resol"),
+    "jet_eta_resol":        ("jet1_eta_resol",         "jet2_eta_resol"),
+    "jet_phi_resol":        ("jet1_phi_resol",         "jet2_phi_resol"),
+    "jet_theta_resol":      ("jet1_theta_resol",       "jet2_theta_resol"),
 }
 
 # ── Model functions ──────────────────────────────────────────────────────────
@@ -300,7 +317,20 @@ for ecm in ECM_LIST:
                            or b in EXTRA_BRANCHES])
         data_all = tree.arrays(branches, library="np")
 
-    missing_cfg = [b for b in BRANCH_CONFIG if b not in available]
+        def _flatten_raw(raw):
+            arr = np.asarray(raw)
+            if arr.dtype == object:
+                return np.concatenate([np.asarray(x, dtype=float).ravel() for x in arr])
+            return arr.astype(float).ravel()
+        for cname, (b1, b2) in COMBINED_BRANCHES.items():
+            if b1 in data_all and b2 in data_all:
+                data_all[cname] = np.concatenate([_flatten_raw(data_all[b1]),
+                                                  _flatten_raw(data_all[b2])])
+                if cname not in branches:
+                    branches = sorted(branches + [cname])
+
+    missing_cfg = [b for b in BRANCH_CONFIG
+                   if b not in available and b not in COMBINED_BRANCHES]
     if missing_cfg:
         print(f"WARNING: {len(missing_cfg)} configured branch(es) not found in {INFILE}:")
         for b in missing_cfg:
@@ -308,6 +338,7 @@ for ecm in ECM_LIST:
 
     print(f"Fitting {len(branches)} branches from {INFILE}\n")
     results = {}
+    _fitted = {}   # bname → (yfn, edges, norm) for comparison plots
 
     for bname in branches:
         cfg              = BRANCH_CONFIG.get(bname, {})
@@ -431,6 +462,7 @@ for ecm in ECM_LIST:
         _integ, _ = _quad(lambda x: yfn(x) / N_f, -np.inf, np.inf,
                           limit=500, epsabs=0, epsrel=1e-6)
         results[bname]["norm"] = float(1.0 / max(_integ, 1e-300))
+        _fitted[bname] = (yfn, edges, results[bname]["norm"])
 
         print(f"  {bname:40s}  χ²/ndf={chi2_ndof:.2f}  "
               f"{'OK' if fit_ok else 'WARN'}  [{model}]")
@@ -478,6 +510,37 @@ for ecm in ECM_LIST:
         for fmt in ("png", "pdf"):
             fig.savefig(f"{plot_dir}/{bname}.{fmt}", dpi=150)
         plt.close(fig)
+
+    # ── Jet1 vs jet2 comparison plots ────────────────────────────────────────
+    comp_dir = f"{plot_dir}/jet_comparisons"
+    os.makedirs(comp_dir, exist_ok=True)
+    for cname, (b1, b2) in COMBINED_BRANCHES.items():
+        if b1 not in _fitted or b2 not in _fitted:
+            continue
+        fn1, edges1, norm1 = _fitted[b1]
+        fn2, edges2, norm2 = _fitted[b2]
+        x_lo = min(edges1[0], edges2[0])
+        x_hi = max(edges1[-1], edges2[-1])
+        xfine = np.linspace(x_lo, x_hi, 600)
+        def _norm_curve(fn, lo, hi):
+            integ = _quad(fn, lo, hi, limit=300)[0]
+            return fn(xfine) / max(integ, 1e-300)
+        fig, ax = plt.subplots(figsize=(7, 4), layout="constrained")
+        ax.plot(xfine, _norm_curve(fn1, x_lo, x_hi), color="tab:blue",   lw=2, label=b1)
+        ax.plot(xfine, _norm_curve(fn2, x_lo, x_hi), color="tab:orange", lw=2, label=b2)
+        if cname in _fitted:
+            fn_c, _, _ = _fitted[cname]
+            ax.plot(xfine, _norm_curve(fn_c, x_lo, x_hi), color="crimson", lw=1.5,
+                    ls=":", label=f"{cname} (combined fit)")
+        ax.set_xlabel(cname, fontsize=11)
+        ax.set_ylabel("Normalised PDF", fontsize=11)
+        ax.set_title(f"{cname}  [ecm{ecm}]  — jet1 vs jet2", fontsize=11)
+        ax.legend(fontsize=9, frameon=False)
+        ax.set_ylim(bottom=0)
+        for fmt in ("png", "pdf"):
+            fig.savefig(f"{comp_dir}/{cname}_comparison.{fmt}", dpi=150)
+        plt.close(fig)
+    print(f"  Jet comparison plots → {comp_dir}/")
 
     # ── JSON ──────────────────────────────────────────────────────────────────
     class _NpEncoder(json.JSONEncoder):
