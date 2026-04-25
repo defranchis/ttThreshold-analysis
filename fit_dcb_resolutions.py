@@ -58,6 +58,10 @@ BRANCH_CONFIG = {
     # Jet2: sharp core — single DCB describes it better than DCB+G
     "jet2_p_resp":          {"clip": (0.2, 99.8), "nbins": 150, "model": "dcb2g"},
     "jet2_p_fromele_resp":  {"clip": (1.0, 99.0), "nbins": 150, "model": "dcb2g"},
+    # Gen-level total momenta: narrow ISR-free spike + broad wings → DCB+G
+    "px_tot_gen":           {"clip": (0.5, 99.5), "nbins": 200, "model": "dcb2g"},
+    "py_tot_gen":           {"clip": (0.5, 99.5), "nbins": 200, "model": "dcb2g"},
+    "pz_tot_gen":           {"clip": (0.5, 99.5), "nbins": 200, "model": "dcb2g"},
 }
 
 # ── Model functions ──────────────────────────────────────────────────────────
@@ -153,6 +157,10 @@ def fit_dcb2g_iminuit(centers, counts, mu0, sig0):
         [N0, mu0, sig0 * 0.5,  0.5,  3., 1.5, 3., 0.30, mu0 - 3*sig0,  6*sig0],
         [N0, mu0, sig0 * 0.4,  0.4,  2., 1.2, 3., 0.40, mu0 - 4*sig0,  8*sig0],
         [N0, mu0, sig0 * 0.5,  0.5,  5., 1.5, 3., 0.50, mu0 - 6*sig0, 12*sig0],
+        # very narrow spike + broad symmetric wings (ISR total-momentum distributions)
+        [N0, mu0, sig0 * 0.04, 1.5,  5., 1.5,  5., 0.60, mu0, sig0 * 1.0],
+        [N0, mu0, sig0 * 0.03, 1.0,  3., 1.0,  3., 0.70, mu0, sig0 * 0.8],
+        [N0, mu0, sig0 * 0.05, 1.0,  5., 1.0,  5., 0.80, mu0, sig0 * 1.2],
     ]
     limits = [(1e-3, None), (None, None), (1e-6, None), (0.3, 8.),
               (1.01, 200.), (0.3, 8.), (1.01, 200.), (0.01, 0.95),
@@ -246,6 +254,11 @@ def fit_dcb2g(centers, counts, mu0, sig0):
         [N0, mu0, sig0 * 0.4,  0.4,  2., 1.2, 3., 0.40, mu0 - 4*sig0,  8 * sig0],
         [N0, mu0, sig0 * 0.5,  0.3,  2., 1.0, 2., 0.35, mu0 - 5*sig0, 10 * sig0],
         [N0, mu0, sig0 * 0.5,  0.5,  5., 1.5, 3., 0.50, mu0 - 6*sig0, 12 * sig0],
+        # very narrow spike + broad symmetric wings (ISR total-momentum distributions)
+        [N0, mu0, sig0 * 0.04, 1.5,  5., 1.5,  5., 0.60, mu0, sig0 * 1.0],
+        [N0, mu0, sig0 * 0.03, 1.0,  3., 1.0,  3., 0.70, mu0, sig0 * 0.8],
+        [N0, mu0, sig0 * 0.05, 1.0,  5., 1.0,  5., 0.80, mu0, sig0 * 1.2],
+        [N0, mu0, sig0 * 0.04, 1.5,  5., 1.5,  5., 0.55, mu0, sig0 * 0.9],
     ]
     return _best_fit(dcb_gauss, centers, counts, starts, lo, hi)
 
@@ -279,8 +292,12 @@ for ecm in ECM_LIST:
     with uproot.open(INFILE) as f:
         tree = f["events"]
         available = set(tree.keys())
+        EXTRA_BRANCHES   = {"px_tot_gen", "py_tot_gen", "pz_tot_gen"}
+        EXCLUDE_BRANCHES = {"px_tot_resol", "py_tot_resol", "pz_tot_resol"}
         branches = sorted([b for b in available
-                           if b.endswith("_resol") or b.endswith("_resp")])
+                           if ((b.endswith("_resol") or b.endswith("_resp"))
+                               and b not in EXCLUDE_BRANCHES)
+                           or b in EXTRA_BRANCHES])
         data_all = tree.arrays(branches, library="np")
 
     missing_cfg = [b for b in BRANCH_CONFIG if b not in available]

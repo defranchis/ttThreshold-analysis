@@ -130,6 +130,9 @@ all_branches+=["kinfit_mW","kinfit_gW","kinfit_s1","kinfit_s2","kinfit_sl","kinf
 all_branches+=["pf_qq_mass","pf_qq_p","pf_qq_costheta","pf_qq_phi",
                "Whad_gen_mass","Whad_gen_p","Whad_gen_costheta","Whad_gen_phi",
                "pf_qq_m_resol","pf_qq_p_resol","pf_qq_costheta_resol","pf_qq_phi_resol"]
+all_branches+=["px_tot_gen","py_tot_gen","pz_tot_gen",
+               "px_tot_reco","py_tot_reco","pz_tot_reco",
+               "px_tot_resol","py_tot_resol","pz_tot_resol"]
 #print('saving these branches',all_branches)
 # Mandatory: RDFanalysis class where the use defines the operations on the TTree
 _dataset_iter = iter(processList.keys())
@@ -621,8 +624,20 @@ class RDFanalysis:
         df = df.Define("sumPx","(Wlep_reco.Px() + Whad_reco.Px())");
         df = df.Define("sumPy","(Wlep_reco.Py() + Whad_reco.Py())");
         df = df.Define("sumPz","(Wlep_reco.Pz() + Whad_reco.Pz())");
-        
-        
+
+        # Gen-level total momenta: lep + neutrino + quarks_fromele (same objects as m_gen_lnuqq)
+        df = df.Define("px_tot_gen", "gen_leps_status1_px[0] + gen_neutrinos_status1_px[0] + ROOT::VecOps::Sum(gen_lightquarks_fromele_px)")
+        df = df.Define("py_tot_gen", "gen_leps_status1_py[0] + gen_neutrinos_status1_py[0] + ROOT::VecOps::Sum(gen_lightquarks_fromele_py)")
+        df = df.Define("pz_tot_gen", "gen_leps_status1_pz[0] + gen_neutrinos_status1_pz[0] + ROOT::VecOps::Sum(gen_lightquarks_fromele_pz)")
+        # Reco-level total momenta: Wlep_reco + Whad_reco (same objects as m_lnuqq)
+        df = df.Define("px_tot_reco", "Wlep_reco.Px() + Whad_reco.Px()")
+        df = df.Define("py_tot_reco", "Wlep_reco.Py() + Whad_reco.Py()")
+        df = df.Define("pz_tot_reco", "Wlep_reco.Pz() + Whad_reco.Pz()")
+        df = df.Define("px_tot_resol", "px_tot_reco - px_tot_gen")
+        df = df.Define("py_tot_resol", "py_tot_reco - py_tot_gen")
+        df = df.Define("pz_tot_resol", "pz_tot_reco - pz_tot_gen")
+
+
         df = df.Define(
             "deltaM",
             "FCCAnalyses::WWFunctions::deltaM(nIsolep, nRecoJets, Wlep_reco, Whad_reco)"
