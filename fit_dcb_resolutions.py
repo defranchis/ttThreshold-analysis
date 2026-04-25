@@ -54,10 +54,10 @@ BRANCH_CONFIG = {
     "m_lnuqq_resol":        {"clip": (1.0, 99.5), "nbins": 150},
     # Jet momentum responses (reco/gen ratios); two-component structure → DCB+G
     "jet1_p_resp":          {"clip": (0.2, 99.8), "nbins": 150, "model": "dcb2g"},
-    "jet1_p_fromele_resp":  {"clip": (0.2, 99.8), "nbins": 150, "model": "expleft2g"},
+    "jet1_p_fromele_resp":  {"clip": (0.2, 99.8), "nbins": 150, "model": "dcb2g"},
     # Jet2: sharp core — single DCB describes it better than DCB+G
     "jet2_p_resp":          {"clip": (0.2, 99.8), "nbins": 150, "model": "dcb2g"},
-    "jet2_p_fromele_resp":  {"clip": (1.0, 99.0), "nbins": 150},
+    "jet2_p_fromele_resp":  {"clip": (1.0, 99.0), "nbins": 150, "model": "dcb2g"},
 }
 
 # ── Model functions ──────────────────────────────────────────────────────────
@@ -149,6 +149,10 @@ def fit_dcb2g_iminuit(centers, counts, mu0, sig0):
         [N0, mu0, sig0 * 0.4,  0.4,  2., 0.7, 3., 0.20, mu0 + 4*sig0, 10*sig0],
         [N0, mu0, sig0 * 0.5,  0.5,  4., 0.5, 2., 0.25, mu0,           8*sig0],
         [N0, mu0, sig0,        1.2,  5., 0.8, 3., 0.15, mu0 + 3*sig0,  8*sig0],
+        # broad LEFT component (for left-heavy distributions like fromele responses)
+        [N0, mu0, sig0 * 0.5,  0.5,  3., 1.5, 3., 0.30, mu0 - 3*sig0,  6*sig0],
+        [N0, mu0, sig0 * 0.4,  0.4,  2., 1.2, 3., 0.40, mu0 - 4*sig0,  8*sig0],
+        [N0, mu0, sig0 * 0.5,  0.5,  5., 1.5, 3., 0.50, mu0 - 6*sig0, 12*sig0],
     ]
     limits = [(1e-3, None), (None, None), (1e-6, None), (0.3, 8.),
               (1.01, 200.), (0.3, 8.), (1.01, 200.), (0.01, 0.95),
@@ -237,6 +241,11 @@ def fit_dcb2g(centers, counts, mu0, sig0):
         # sharp-core: early power-law transitions
         [N0, mu0, sig0 * 0.5,  0.5,  3., 0.5, 2., 0.15, mu0,           5 * sig0],
         [N0, mu0, sig0 * 0.5,  0.4,  2., 0.4, 2., 0.20, mu0 + 2*sig0,  8 * sig0],
+        # broad LEFT component (for left-heavy distributions like fromele responses)
+        [N0, mu0, sig0 * 0.5,  0.5,  3., 1.5, 3., 0.30, mu0 - 3*sig0,  6 * sig0],
+        [N0, mu0, sig0 * 0.4,  0.4,  2., 1.2, 3., 0.40, mu0 - 4*sig0,  8 * sig0],
+        [N0, mu0, sig0 * 0.5,  0.3,  2., 1.0, 2., 0.35, mu0 - 5*sig0, 10 * sig0],
+        [N0, mu0, sig0 * 0.5,  0.5,  5., 1.5, 3., 0.50, mu0 - 6*sig0, 12 * sig0],
     ]
     return _best_fit(dcb_gauss, centers, counts, starts, lo, hi)
 
