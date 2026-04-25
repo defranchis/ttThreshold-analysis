@@ -21,6 +21,7 @@ import uproot
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from scipy.stats import median_abs_deviation
+from scipy.integrate import quad as _quad
 
 os.makedirs("response/functions", exist_ok=True)
 
@@ -400,6 +401,11 @@ for ecm in ECM_LIST:
                    rf"$\alpha_L$={aL:.2f}, $n_L$={nL:.1f}, $\alpha_R$={aR:.2f}, $n_R$={nR:.1f}"
                    rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
 
+        # Normalise shape to unit integral; yfn includes N_f so divide it out
+        _integ, _ = _quad(lambda x: yfn(x) / N_f, -np.inf, np.inf,
+                          limit=500, epsabs=0, epsrel=1e-6)
+        results[bname]["norm"] = float(1.0 / max(_integ, 1e-300))
+
         print(f"  {bname:40s}  χ²/ndf={chi2_ndof:.2f}  "
               f"{'OK' if fit_ok else 'WARN'}  [{model}]")
 
@@ -478,16 +484,19 @@ for ecm in ECM_LIST:
         "",
         "struct DcbParams {",
         "    double mu, sigma, aL, nL, aR, nR;",
+        "    double norm;                           // 1/integral, shape integrates to 1",
         "};",
         "",
         "struct DcbGaussParams {",
         "    double mu, sigma, aL, nL, aR, nR;     // narrow DCB core",
         "    double f_wide, mu_wide, sigma_wide;    // broad Gaussian component",
+        "    double norm;                           // 1/integral, shape integrates to 1",
         "};",
         "",
         "struct DcbExpLeftGaussParams {",
         "    double mu, sigma, aL, kL, aR, nR;     // exp-left DCB core (kL: exp decay rate)",
         "    double f_wide, mu_wide, sigma_wide;    // broad Gaussian component",
+        "    double norm;                           // 1/integral, shape integrates to 1",
         "};",
         "",
         "namespace detail {",
@@ -519,21 +528,21 @@ for ecm in ECM_LIST:
         "",
         "inline double dcb_neg2logpdf(double x, const DcbParams& p) {",
         "    double f = detail::dcb_unnorm((x - p.mu)/p.sigma, p.aL, p.nL, p.aR, p.nR);",
-        "    return -2.0 * std::log(std::max(f, 1e-300));",
+        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
         "}",
         "",
         "inline double dcb_gauss_neg2logpdf(double x, const DcbGaussParams& p) {",
         "    double core = detail::dcb_unnorm((x - p.mu)/p.sigma, p.aL, p.nL, p.aR, p.nR);",
         "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
         "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
-        "    return -2.0 * std::log(std::max(f, 1e-300));",
+        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
         "}",
         "",
         "inline double dcb_expleft_gauss_neg2logpdf(double x, const DcbExpLeftGaussParams& p) {",
         "    double core = detail::dcb_expleft_unnorm((x - p.mu)/p.sigma, p.aL, p.kL, p.aR, p.nR);",
         "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
         "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
-        "    return -2.0 * std::log(std::max(f, 1e-300));",
+        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
         "}",
         "",
         "// ── Fitted parameters ────────────────────────────────────────────────",
@@ -547,20 +556,23 @@ for ecm in ECM_LIST:
                 f"constexpr DcbGaussParams DCBG_{tag} = "
                 f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
                 f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
-                f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f} }};  {note}"
+                f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
+                f"{p['norm']:.10e} }};  {note}"
             )
         elif p["model"] == "expleft2g":
             cpp.append(
                 f"constexpr DcbExpLeftGaussParams DCBELG_{tag} = "
                 f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
                 f"{p['aL']:.6f}, {p['kL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
-                f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f} }};  {note}"
+                f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
+                f"{p['norm']:.10e} }};  {note}"
             )
         else:
             cpp.append(
                 f"constexpr DcbParams DCB_{tag} = "
                 f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
-                f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f} }};  {note}"
+                f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
+                f"{p['norm']:.10e} }};  {note}"
             )
 
     cpp += ["", "} // namespace WWFunctions", ""]
