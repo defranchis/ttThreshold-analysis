@@ -81,6 +81,13 @@ COMBINED_BRANCHES = {
     "jet_theta_resol":      ("jet1_theta_resol",       "jet2_theta_resol"),
 }
 
+# Standard vs fromele pairs (per-jet and combined)
+FROMELE_PAIRS = {
+    "jet1_p_resp": ("jet1_p_resp", "jet1_p_fromele_resp"),
+    "jet2_p_resp": ("jet2_p_resp", "jet2_p_fromele_resp"),
+    "jet_p_resp":  ("jet_p_resp",  "jet_p_fromele_resp"),
+}
+
 # ── Model functions ──────────────────────────────────────────────────────────
 
 def _dcb_core(t, aL, nL, aR, nR):
@@ -511,36 +518,57 @@ for ecm in ECM_LIST:
             fig.savefig(f"{plot_dir}/{bname}.{fmt}", dpi=150)
         plt.close(fig)
 
+    # ── Comparison plot helpers ───────────────────────────────────────────────
+    def _norm_curve(fn, xfine, x_lo, x_hi):
+        integ = _quad(fn, x_lo, x_hi, limit=300)[0]
+        return fn(xfine) / max(integ, 1e-300)
+
+    def _comparison_plot(pairs, title_suffix, out_dir, label_a, label_b,
+                         combined_label=None):
+        os.makedirs(out_dir, exist_ok=True)
+        for tag, (ba, bb) in pairs.items():
+            if ba not in _fitted or bb not in _fitted:
+                continue
+            fn_a, edges_a, _ = _fitted[ba]
+            fn_b, edges_b, _ = _fitted[bb]
+            x_lo = min(edges_a[0], edges_b[0])
+            x_hi = max(edges_a[-1], edges_b[-1])
+            xfine = np.linspace(x_lo, x_hi, 600)
+            fig, ax = plt.subplots(figsize=(7, 4), layout="constrained")
+            ax.plot(xfine, _norm_curve(fn_a, xfine, x_lo, x_hi),
+                    color="tab:blue",   lw=2, label=label_a.format(ba))
+            ax.plot(xfine, _norm_curve(fn_b, xfine, x_lo, x_hi),
+                    color="tab:orange", lw=2, label=label_b.format(bb))
+            if combined_label and tag in _fitted:
+                fn_c, _, _ = _fitted[tag]
+                ax.plot(xfine, _norm_curve(fn_c, xfine, x_lo, x_hi),
+                        color="crimson", lw=1.5, ls=":",
+                        label=combined_label.format(tag))
+            ax.set_xlabel(tag, fontsize=11)
+            ax.set_ylabel("Normalised PDF", fontsize=11)
+            ax.set_title(f"{tag}  [ecm{ecm}]  — {title_suffix}", fontsize=11)
+            ax.legend(fontsize=9, frameon=False)
+            ax.set_ylim(bottom=0)
+            for fmt in ("png", "pdf"):
+                fig.savefig(f"{out_dir}/{tag}_comparison.{fmt}", dpi=150)
+            plt.close(fig)
+
     # ── Jet1 vs jet2 comparison plots ────────────────────────────────────────
     comp_dir = f"{plot_dir}/jet_comparisons"
-    os.makedirs(comp_dir, exist_ok=True)
-    for cname, (b1, b2) in COMBINED_BRANCHES.items():
-        if b1 not in _fitted or b2 not in _fitted:
-            continue
-        fn1, edges1, norm1 = _fitted[b1]
-        fn2, edges2, norm2 = _fitted[b2]
-        x_lo = min(edges1[0], edges2[0])
-        x_hi = max(edges1[-1], edges2[-1])
-        xfine = np.linspace(x_lo, x_hi, 600)
-        def _norm_curve(fn, lo, hi):
-            integ = _quad(fn, lo, hi, limit=300)[0]
-            return fn(xfine) / max(integ, 1e-300)
-        fig, ax = plt.subplots(figsize=(7, 4), layout="constrained")
-        ax.plot(xfine, _norm_curve(fn1, x_lo, x_hi), color="tab:blue",   lw=2, label=b1)
-        ax.plot(xfine, _norm_curve(fn2, x_lo, x_hi), color="tab:orange", lw=2, label=b2)
-        if cname in _fitted:
-            fn_c, _, _ = _fitted[cname]
-            ax.plot(xfine, _norm_curve(fn_c, x_lo, x_hi), color="crimson", lw=1.5,
-                    ls=":", label=f"{cname} (combined fit)")
-        ax.set_xlabel(cname, fontsize=11)
-        ax.set_ylabel("Normalised PDF", fontsize=11)
-        ax.set_title(f"{cname}  [ecm{ecm}]  — jet1 vs jet2", fontsize=11)
-        ax.legend(fontsize=9, frameon=False)
-        ax.set_ylim(bottom=0)
-        for fmt in ("png", "pdf"):
-            fig.savefig(f"{comp_dir}/{cname}_comparison.{fmt}", dpi=150)
-        plt.close(fig)
+    _comparison_plot(
+        COMBINED_BRANCHES, "jet1 vs jet2", comp_dir,
+        label_a="{0}", label_b="{0}",
+        combined_label="{0} (combined fit)",
+    )
     print(f"  Jet comparison plots → {comp_dir}/")
+
+    # ── Standard vs fromele comparison plots ─────────────────────────────────
+    fromele_dir = f"{plot_dir}/fromele_comparisons"
+    _comparison_plot(
+        FROMELE_PAIRS, "standard vs fromele", fromele_dir,
+        label_a="{0} (standard)", label_b="{0} (fromele)",
+    )
+    print(f"  Fromele comparison plots → {fromele_dir}/")
 
     # ── JSON ──────────────────────────────────────────────────────────────────
     class _NpEncoder(json.JSONEncoder):
