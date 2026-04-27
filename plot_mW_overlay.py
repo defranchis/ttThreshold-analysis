@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 
-infile = "outputs/histmaker/lnuqq/wzp6_ee_munumuqq_noCut_ecm160.root"
+infile = "outputs/histmaker/lnuqq/semihad/wzp6_ee_munumuqq_noCut_ecm160.root"
 outdir = "outputs/plots/lnuqq/allbranches/"
 os.makedirs(outdir, exist_ok=True)
 
