@@ -69,6 +69,10 @@ BRANCH_CONFIG = {
     "px_tot_gen":           {"clip": (0.5, 99.5), "nbins": 200, "model": "dcb2g"},
     "py_tot_gen":           {"clip": (0.5, 99.5), "nbins": 200, "model": "dcb2g"},
     "pz_tot_gen":           {"clip": (0.5, 99.5), "nbins": 200, "model": "dcb2g"},
+    # ISR sqrts constraint: gen WW mass minus beam energy (≤0 by construction).
+    # Sharp spike at 0 (no ISR) + long left tail (ISR carries away energy) → DCB+G.
+    # Left clip at 0.5% removes extreme multi-photon ISR; right clip at 100% keeps the 0 edge.
+    "m_gen_lnuqq_minus_ecm": {"clip": (0.5, 100.0), "nbins": 200, "model": "dcb2g"},
 }
 
 # ── Virtual combined branches (concatenation of two tree branches) ──────────
@@ -316,7 +320,7 @@ for ecm in ECM_LIST:
     with uproot.open(INFILE) as f:
         tree = f["events"]
         available = set(tree.keys())
-        EXTRA_BRANCHES   = {"px_tot_gen", "py_tot_gen", "pz_tot_gen"}
+        EXTRA_BRANCHES   = {"px_tot_gen", "py_tot_gen", "pz_tot_gen", "m_gen_lnuqq_minus_ecm"}
         EXCLUDE_BRANCHES = {"px_tot_resol", "py_tot_resol", "pz_tot_resol"}
         branches = sorted([b for b in available
                            if ((b.endswith("_resol") or b.endswith("_resp"))
@@ -465,9 +469,14 @@ for ecm in ECM_LIST:
                    rf"$\alpha_L$={aL:.2f}, $n_L$={nL:.1f}, $\alpha_R$={aR:.2f}, $n_R$={nR:.1f}"
                    rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
 
-        # Normalise shape to unit integral; yfn includes N_f so divide it out
-        _integ, _ = _quad(lambda x: yfn(x) / N_f, -np.inf, np.inf,
-                          limit=500, epsabs=0, epsrel=1e-6)
+        # Normalise shape to unit integral; yfn includes N_f so divide it out.
+        # Integrate over a finite range (10x histogram span on each side) rather
+        # than ±inf: DCB power-law tails with small n converge too slowly for
+        # quad to reach the requested relative tolerance over infinite limits.
+        _span = edges[-1] - edges[0]
+        _integ, _ = _quad(lambda x: yfn(x) / N_f,
+                          edges[0] - 10 * _span, edges[-1] + 10 * _span,
+                          limit=500, epsrel=1e-6)
         results[bname]["norm"] = float(1.0 / max(_integ, 1e-300))
         _fitted[bname] = (yfn, edges, results[bname]["norm"])
 
