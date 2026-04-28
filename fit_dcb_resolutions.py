@@ -25,16 +25,17 @@ from scipy.integrate import quad as _quad
 from scipy.special import erf as _sp_erf
 
 _ap = argparse.ArgumentParser(description=__doc__, add_help=True)
-_ap.add_argument("--kinfit-only", action="store_true",
-                 help="Fit only the branches used in the kinematic fit "
-                      "(default: fit all _resol/_resp branches in the tree)")
+_ap.add_argument("--kinfit-only", action="store_true", default=True,
+                 help="Fit only the branches used in the kinematic fit (default)")
+_ap.add_argument("--all-branches", dest="kinfit_only", action="store_false",
+                 help="Fit all _resol/_resp branches in the tree")
 _args, _ = _ap.parse_known_args()
 KINFIT_ONLY = _args.kinfit_only
 
 os.makedirs("response/functions", exist_ok=True)
 
 ECM_LIST    = [157, 160, 163]
-INFILE_TMPL = "outputs/treemaker/lnuqq/semihad/wzp6_ee_munumuqq_noCut_ecm{ecm}.root"
+INFILE_TMPL = "outputs/treemaker/lnuqq/step1/semihad/wzp6_ee_munumuqq_noCut_ecm{ecm}.root"
 NBINS_DEF   = 100
 CLIP_DEF  = (0.5, 99.5)
 
