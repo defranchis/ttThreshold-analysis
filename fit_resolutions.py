@@ -15,14 +15,21 @@ Outputs (per ECM)
   response/functions/dcb_results_ecm<N>.json  full numerical fit results
 """
 
-import os, json, warnings, argparse
+import os, json, math, warnings, argparse
+from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import uproot
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from scipy.stats import median_abs_deviation
 from scipy.integrate import quad as _quad
 from scipy.special import erf as _sp_erf
+
+_SQRT2   = math.sqrt(2.0)
+_LOG_MAX = math.log(np.finfo(np.float64).max)   # max safe float64 exponent ≈ 709.78
+_LOG_MIN = -_LOG_MAX
 
 _ap = argparse.ArgumentParser(description=__doc__, add_help=True)
 _ap.add_argument("--kinfit-only", action="store_true", default=True,
@@ -83,10 +90,8 @@ BRANCH_CONFIG = {
     "px_tot_gen":           {"clip": (0.1, 99.9), "nbins": 150, "model": "dcbgb"},
     "py_tot_gen":           {"clip": (0.1, 99.9), "nbins": 150, "model": "dcbgb"},
     "pz_tot_gen":           {"clip": (0.1, 99.9), "nbins": 150, "model": "dcbgb"},
-    # ISR sqrts constraint: gen WW mass minus beam energy (≤0 by construction).
-    # Peak at 0 (no ISR) + long left tail (ISR carries away energy).
-    # expleft2g: exponential left tail is physically correct and converges faster than dcb2g.
-    # fix_mu0: constrain mu_c and aR to force the hard-right-cutoff solution (peak near 0).
+    # Gen WW invariant mass minus ECM. Peak just below 0 (ISR shifts mass down); hard boundary at 0.
+    # dcber2g: power-law left tail + exponential right cutoff + Gaussian.
     "m_gen_lnuqq_minus_ecm": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber2g"},
 }
 
@@ -133,10 +138,10 @@ def _dcb_core(t, aL, nL, aR, nR):
     log_AR = nR * np.log(nR / aR) - 0.5 * aR * aR
     return np.where(
         t < -aL,
-        np.exp(np.clip(log_AL - nL * np.log(np.maximum(BL - t, 1e-10)), -745., 709.)),
+        np.exp(np.minimum(np.maximum(log_AL - nL * np.log(np.maximum(BL - t, 1e-10)), _LOG_MIN), _LOG_MAX)),
         np.where(
             t > aR,
-            np.exp(np.clip(log_AR - nR * np.log(np.maximum(BR + t, 1e-10)), -745., 709.)),
+            np.exp(np.minimum(np.maximum(log_AR - nR * np.log(np.maximum(BR + t, 1e-10)), _LOG_MIN), _LOG_MAX)),
             np.exp(-0.5 * t * t)
         )
     )
@@ -166,7 +171,7 @@ def _dcb_expleft_core(t, aL, kL, aR, nR):
         np.exp(-0.5 * aL * aL + np.minimum(kL * (aL + t), 0.0)),
         np.where(
             t > aR,
-            np.exp(np.clip(log_AR - nR * np.log(np.maximum(BR + t, 1e-10)), -745., 709.)),
+            np.exp(np.minimum(np.maximum(log_AR - nR * np.log(np.maximum(BR + t, 1e-10)), _LOG_MIN), _LOG_MAX)),
             np.exp(-0.5 * t * t)
         )
     )
@@ -190,10 +195,10 @@ def _dcb_expright_core(t, aL, nL, aR, kR):
     log_AL = nL * np.log(nL / aL) - 0.5 * aL * aL
     return np.where(
         t < -aL,
-        np.exp(np.clip(log_AL - nL * np.log(np.maximum(BL - t, 1e-10)), -745., 709.)),
+        np.exp(np.minimum(np.maximum(log_AL - nL * np.log(np.maximum(BL - t, 1e-10)), _LOG_MIN), _LOG_MAX)),
         np.where(
             t > aR,
-            np.exp(-0.5 * aR * aR - kR * (t - aR)),
+            np.exp(np.minimum(-0.5 * aR * aR - kR * (t - aR), _LOG_MAX)),
             np.exp(-0.5 * t * t)
         )
     )
@@ -208,7 +213,7 @@ def dcb_expright_gauss(x, N, mu_c, sigma_c, aL, nL, aR, kR, f_wide, mu_w, sigma_
 
 def exp_right_gauss(x, N, x_cut, kL, f_wide, mu_w, sigma_w):
     """Right-bounded exponential (peaks at x_cut) + Gaussian wide component.
-    Physically: ISR distribution bounded above at x_cut (= 0 for m_gen_lnuqq_minus_ecm).
+    Physically: ISR distribution bounded above at x_cut (= ECM for m_gen_lnuqq).
     kL > 0: exponential decay rate for x < x_cut.
     """
     core = np.where(x <= x_cut, np.exp(kL * (x - x_cut)), np.float64(0.0))
@@ -225,9 +230,9 @@ def gamma_right_gauss(x, N, x_cut, alpha, beta, f_wide, mu_w, sigma_w):
     log_core = np.where(
         (x <= x_cut) & (y > 0),
         (alpha - 1.0) * np.log(np.maximum(y, 1e-30)) - beta * y,
-        np.float64(-745.0)
+        np.float64(_LOG_MIN)
     )
-    core = np.exp(np.clip(log_core, -745.0, 709.0))
+    core = np.exp(np.minimum(np.maximum(log_core, _LOG_MIN), _LOG_MAX))
     wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
     return N * ((1.0 - f_wide) * core + f_wide * wide)
 
@@ -240,11 +245,9 @@ def dcb_gaussbox(x, N, mu_c, sigma_c, aL, nL, aR, nR, f_wide, p_max, sigma_box):
     core = _dcb_core((x - mu_c) / sigma_c, aL, nL, aR, nR)
     p_max = abs(p_max)
     sb = max(abs(sigma_box), 1e-10)
-    sq2 = np.sqrt(2.0) * sb
+    sq2 = _SQRT2 * sb
     wide = 0.5 * (_sp_erf((x + p_max) / sq2) - _sp_erf((x - p_max) / sq2))
-    wide_peak = float(_sp_erf(p_max / sq2))
-    if wide_peak < 1e-10:
-        wide_peak = 1.0
+    wide_peak = max(float(_sp_erf(p_max / sq2)), 1e-10)
     return N * ((1.0 - f_wide) * core + f_wide * wide / wide_peak)
 
 
@@ -898,7 +901,7 @@ class _NpEncoder(json.JSONEncoder):
         return super().default(o)
 
 
-for ecm in ECM_LIST:
+def process_ecm(ecm):
     INFILE   = INFILE_TMPL.format(ecm=ecm)
     plot_dir = f"response/plots/ecm{ecm}"
     os.makedirs(plot_dir, exist_ok=True)
@@ -952,7 +955,7 @@ for ecm in ECM_LIST:
         vals = _flatten_raw(data_all[bname])
         vals = vals[np.isfinite(vals)]
         if len(vals) < 100:
-            print(f"  SKIP {bname}: {len(vals)} entries"); continue
+            print(f"  [{ecm}]  SKIP {bname}: {len(vals)} entries"); continue
 
         lo_p, hi_p = np.percentile(vals, [clip_lo, clip_hi])
         vals_c = vals[(vals >= lo_p) & (vals <= hi_p)]
@@ -1034,7 +1037,7 @@ for ecm in ECM_LIST:
         chi2_ndof = chi2 / ndof
 
         if popt is None:
-            print(f"  FAIL {bname}: all starts failed, using Gaussian-like fallback")
+            print(f"  [{ecm}]  FAIL {bname}: all starts failed, using Gaussian-like fallback")
             popt = [float(counts.max()), mu0, sig0, 5., 100., 5., 100.]
             if model == "dcber2g":
                 _s = max((float(centers[-1]) - mu0) * 0.4, 0.15)
@@ -1212,7 +1215,7 @@ for ecm in ECM_LIST:
         results[bname]["norm"] = float(1.0 / max(_integ, 1e-300))
         _fitted[bname] = (yfn, edges, results[bname]["norm"])
 
-        print(f"  {bname:40s}  χ²/ndf={chi2_ndof:.2f}  "
+        print(f"  [{ecm}]  {bname:40s}  χ²/ndf={chi2_ndof:.2f}  "
               f"{'OK' if fit_ok else 'WARN'}  [{model}]")
 
         # ── plot ─────────────────────────────────────────────────────────────
@@ -1318,132 +1321,14 @@ for ecm in ECM_LIST:
         f"// Fitted from wzp6_ee_munumuqq_noCut_ecm{ecm}.",
         "//",
         "// Usage:",
-        "//   single DCB:          dcb_neg2logpdf(x, DCB_<BRANCH>)",
-        "//   DCB+Gaussian:        dcb_gauss_neg2logpdf(x, DCBG_<BRANCH>)",
-        "//   ExpLeft+Gaussian:    dcb_expleft_gauss_neg2logpdf(x, DCBELG_<BRANCH>)",
+        f"//   single DCB:          dcb_neg2logpdf(x, DCB_<BRANCH>_{ecm})",
+        f"//   DCB+Gaussian:        dcb_gauss_neg2logpdf(x, DCBG_<BRANCH>_{ecm})",
+        f"//   ExpLeft+Gaussian:    dcb_expleft_gauss_neg2logpdf(x, DCBELG_<BRANCH>_{ecm})",
         "// All return -2*log(PDF(x)), drop-in for gaussian pull^2.",
         "",
-        "#include <cmath>",
-        "#include <algorithm>",
+        '#include "response/functions/dcb_params_common.h"',
         "",
         "namespace WWFunctions {",
-        "",
-        "struct DcbParams {",
-        "    double mu, sigma, aL, nL, aR, nR;",
-        "    double norm;                           // 1/integral, shape integrates to 1",
-        "};",
-        "",
-        "struct DcbGaussParams {",
-        "    double mu, sigma, aL, nL, aR, nR;     // narrow DCB core",
-        "    double f_wide, mu_wide, sigma_wide;    // broad Gaussian component",
-        "    double norm;                           // 1/integral, shape integrates to 1",
-        "};",
-        "",
-        "struct DcbExpLeftGaussParams {",
-        "    double mu, sigma, aL, kL, aR, nR;     // exp-left DCB core (kL: exp decay rate)",
-        "    double f_wide, mu_wide, sigma_wide;    // broad Gaussian component",
-        "    double norm;                           // 1/integral, shape integrates to 1",
-        "};",
-        "",
-        "struct ExpRightGaussParams {",
-        "    double x_cut, kL;                     // right-bounded exp, peaks at x_cut",
-        "    double f_wide, mu_wide, sigma_wide;    // broad Gaussian component",
-        "    double norm;                           // 1/integral, shape integrates to 1",
-        "};",
-        "",
-        "struct GammaRightGaussParams {",
-        "    double x_cut, alpha, beta;             // reflected Gamma: peak at x_cut-(alpha-1)/beta",
-        "    double f_wide, mu_wide, sigma_wide;    // broad Gaussian component",
-        "    double norm;                           // 1/integral, shape integrates to 1",
-        "};",
-        "",
-        "struct DcbExpRightGaussParams {",
-        "    double mu, sigma, aL, nL;              // power-law left tail (ISR heavy tail)",
-        "    double aR, kR;                         // exponential right tail: exp(-kR*(t-aR))",
-        "    double f_wide, mu_wide, sigma_wide;    // broad Gaussian component",
-        "    double norm;                           // 1/integral, shape integrates to 1",
-        "};",
-        "",
-        "namespace detail {",
-        "inline double dcb_unnorm(double t, double aL, double nL,",
-        "                          double aR, double nR) {",
-        "    if (t < -aL) {",
-        "        double AL = std::pow(nL/aL, nL) * std::exp(-0.5*aL*aL);",
-        "        double BL = nL/aL - aL;",
-        "        return AL * std::pow(std::max(BL - t, 1e-10), -nL);",
-        "    }",
-        "    if (t > aR) {",
-        "        double AR = std::pow(nR/aR, nR) * std::exp(-0.5*aR*aR);",
-        "        double BR = nR/aR - aR;",
-        "        return AR * std::pow(std::max(BR + t, 1e-10), -nR);",
-        "    }",
-        "    return std::exp(-0.5*t*t);",
-        "}",
-        "inline double dcb_expleft_unnorm(double t, double aL, double kL,",
-        "                                  double aR, double nR) {",
-        "    if (t < -aL) return std::exp(-0.5*aL*aL) * std::exp(kL*(aL + t));",
-        "    if (t > aR) {",
-        "        double AR = std::pow(nR/aR, nR) * std::exp(-0.5*aR*aR);",
-        "        double BR = nR/aR - aR;",
-        "        return AR * std::pow(std::max(BR + t, 1e-10), -nR);",
-        "    }",
-        "    return std::exp(-0.5*t*t);",
-        "}",
-        "} // namespace detail",
-        "",
-        "inline double dcb_neg2logpdf(double x, const DcbParams& p) {",
-        "    double f = detail::dcb_unnorm((x - p.mu)/p.sigma, p.aL, p.nL, p.aR, p.nR);",
-        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
-        "}",
-        "",
-        "inline double dcb_gauss_neg2logpdf(double x, const DcbGaussParams& p) {",
-        "    double core = detail::dcb_unnorm((x - p.mu)/p.sigma, p.aL, p.nL, p.aR, p.nR);",
-        "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
-        "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
-        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
-        "}",
-        "",
-        "inline double dcb_expleft_gauss_neg2logpdf(double x, const DcbExpLeftGaussParams& p) {",
-        "    double core = detail::dcb_expleft_unnorm((x - p.mu)/p.sigma, p.aL, p.kL, p.aR, p.nR);",
-        "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
-        "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
-        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
-        "}",
-        "",
-        "inline double exp_right_gauss_neg2logpdf(double x, const ExpRightGaussParams& p) {",
-        "    double core = (x <= p.x_cut) ? std::exp(p.kL * (x - p.x_cut)) : 0.0;",
-        "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
-        "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
-        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
-        "}",
-        "",
-        "inline double gamma_right_gauss_neg2logpdf(double x, const GammaRightGaussParams& p) {",
-        "    double y    = p.x_cut - x;",
-        "    double lcore = (x <= p.x_cut && y > 0)",
-        "                 ? (p.alpha - 1.0) * std::log(y) - p.beta * y",
-        "                 : -1e300;",
-        "    double core = std::exp(std::max(lcore, -745.0));",
-        "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
-        "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
-        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
-        "}",
-        "",
-        "inline double dcb_expright_gauss_neg2logpdf(double x, const DcbExpRightGaussParams& p) {",
-        "    double t    = (x - p.mu) / p.sigma;",
-        "    double core;",
-        "    if (t < -p.aL) {",
-        "        double AL = std::pow(p.nL/p.aL, p.nL) * std::exp(-0.5*p.aL*p.aL);",
-        "        double BL = p.nL/p.aL - p.aL;",
-        "        core = AL * std::pow(std::max(BL - t, 1e-10), -p.nL);",
-        "    } else if (t > p.aR) {",
-        "        core = std::exp(-0.5*p.aR*p.aR - p.kR*(t - p.aR));",
-        "    } else {",
-        "        core = std::exp(-0.5*t*t);",
-        "    }",
-        "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
-        "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
-        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
-        "}",
         "",
         "// ── Fitted parameters ────────────────────────────────────────────────",
     ]
@@ -1453,7 +1338,7 @@ for ecm in ECM_LIST:
         note = f"// chi2/ndf={p['chi2_ndof']:.2f}  {'OK' if p['fit_ok'] else 'WARN'}"
         if p["model"] == "dcb2g":
             cpp.append(
-                f"constexpr DcbGaussParams DCBG_{tag} = "
+                f"constexpr DcbGaussParams DCBG_{tag}_{ecm} = "
                 f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
                 f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
                 f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
@@ -1461,7 +1346,7 @@ for ecm in ECM_LIST:
             )
         elif p["model"] == "expleft2g":
             cpp.append(
-                f"constexpr DcbExpLeftGaussParams DCBELG_{tag} = "
+                f"constexpr DcbExpLeftGaussParams DCBELG_{tag}_{ecm} = "
                 f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
                 f"{p['aL']:.6f}, {p['kL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
                 f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
@@ -1469,21 +1354,21 @@ for ecm in ECM_LIST:
             )
         elif p["model"] == "exprcut2g":
             cpp.append(
-                f"constexpr ExpRightGaussParams ERG_{tag} = "
+                f"constexpr ExpRightGaussParams ERG_{tag}_{ecm} = "
                 f"{{ {p['x_cut']:+.6f}, {p['kL']:.6f}, "
                 f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
                 f"{p['norm']:.10e} }};  {note}"
             )
         elif p["model"] == "gamright2g":
             cpp.append(
-                f"constexpr GammaRightGaussParams GRG_{tag} = "
+                f"constexpr GammaRightGaussParams GRG_{tag}_{ecm} = "
                 f"{{ {p['x_cut']:+.6f}, {p['alpha']:.6f}, {p['beta']:.6f}, "
                 f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
                 f"{p['norm']:.10e} }};  {note}"
             )
         elif p["model"] == "dcber2g":
             cpp.append(
-                f"constexpr DcbExpRightGaussParams DCBERG_{tag} = "
+                f"constexpr DcbExpRightGaussParams DCBERG_{tag}_{ecm} = "
                 f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
                 f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['kR']:.6f}, "
                 f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
@@ -1491,7 +1376,7 @@ for ecm in ECM_LIST:
             )
         else:
             cpp.append(
-                f"constexpr DcbParams DCB_{tag} = "
+                f"constexpr DcbParams DCB_{tag}_{ecm} = "
                 f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
                 f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
                 f"{p['norm']:.10e} }};  {note}"
@@ -1503,3 +1388,8 @@ for ecm in ECM_LIST:
         fh.write("\n".join(cpp))
 
     print(f"\nDone ecm{ecm}. Plots → {plot_dir}/  |  C++ → {h_path}  |  JSON → {json_path}")
+
+
+if __name__ == '__main__':
+    with ProcessPoolExecutor(max_workers=len(ECM_LIST)) as pool:
+        list(pool.map(process_ecm, ECM_LIST))

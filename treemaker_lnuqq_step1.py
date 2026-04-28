@@ -1,6 +1,6 @@
 # Step 1 of 2 — produce only the branches needed by fit_dcb_resolutions.py.
 # Run fit_dcb_resolutions.py on the output before running treemaker_lnuqq_step2.py.
-import os, copy, re, ROOT
+import re, ROOT
 processList = {
     "wzp6_ee_munumuqq_noCut_ecm160": {"fraction": 1, "crossSection": 1},
     "wzp6_ee_munumuqq_noCut_ecm157": {"fraction": 1, "crossSection": 1},
@@ -36,7 +36,7 @@ all_branches = [
     "lep_theta_resol", "lep_phi_resol",
     "met_theta_resol", "met_phi_resol",
     "px_tot_gen", "py_tot_gen", "pz_tot_gen",
-    "m_gen_lnuqq_minus_ecm",
+    "m_gen_lnuqq", "m_gen_lnuqq_minus_ecm",
 ]
 
 _dataset_iter = iter(processList.keys())
@@ -51,6 +51,7 @@ class RDFanalysis:
         if str(_ecm) not in available_ecm:
             raise ValueError(f"ecm={_ecm} parsed from '{_dataset}' not in available_ecm={available_ecm}")
         ROOT.gInterpreter.ProcessLine(f"FCCAnalyses::WWFunctions::ECM = {_ecm};")
+        ROOT.gInterpreter.ProcessLine('std::cout << "[DEBUG step1] ECM from WWFunctions = " << FCCAnalyses::WWFunctions::ECM << std::endl;')
 
         df = df.Alias("Muon0", "Muon#0.index")
         df = df.Alias("Electron0", "Electron#0.index")
@@ -126,8 +127,7 @@ class RDFanalysis:
         df = df.Define("recoJet_phi", "JetClusteringUtils::get_phi_std(jet)")
         df = df.Define("jet1_phi", "recoJet_phi[0]")
         df = df.Define("jet2_phi", "recoJet_phi[1]")
-        df = df.Define("nRecoJets", "jets_p4.size()")
-        df = df.Filter("nRecoJets == 2")
+        df = df.Filter("jets_p4.size() == 2")
 
         # ── MC aliases & early gen filter ──────────────────────────────────────
         df = df.Alias("Particle0", "Particle#0.index")
@@ -141,10 +141,8 @@ class RDFanalysis:
             "FCCAnalyses::MCParticle::sel_genleps(13,13,true)(status1parts)")
         df = df.Define("ngen_leps_status1",
             "FCCAnalyses::MCParticle::get_n(gen_leps_status1)")
-        df = df.Define("neutrinos",
-            "FCCAnalyses::MCParticle::sel_genleps(14,14, true)(status1parts)")
         df = df.Define("gen_neutrinos_status1",
-            "FCCAnalyses::MCParticle::sel_genleps(14,14, true)(neutrinos)")
+            "FCCAnalyses::MCParticle::sel_genleps(14,14, true)(status1parts)")
         df = df.Define("gen_neutrinos_status1_p",
             "FCCAnalyses::MCParticle::get_p(gen_neutrinos_status1)")
         df = df.Define("gen_lightquarks_fromele",
@@ -169,7 +167,6 @@ class RDFanalysis:
         df = df.Define("gen_leps_status1_eta", "FCCAnalyses::MCParticle::get_eta(gen_leps_status1)")
         df = df.Define("gen_leps_status1_phi", "FCCAnalyses::MCParticle::get_phi(gen_leps_status1)")
         df = df.Define("gen_leps_status1_theta","FCCAnalyses::MCParticle::get_theta(gen_leps_status1)")
-        df = df.Define("gen_leps_status1_e",   "FCCAnalyses::MCParticle::get_e(gen_leps_status1)")
 
         df = df.Define("gen_neutrinos_status1_px",  "FCCAnalyses::MCParticle::get_px(gen_neutrinos_status1)")
         df = df.Define("gen_neutrinos_status1_py",  "FCCAnalyses::MCParticle::get_py(gen_neutrinos_status1)")
@@ -183,9 +180,6 @@ class RDFanalysis:
         df = df.Define("gen_lightquarks_fromele_px", "FCCAnalyses::MCParticle::get_px(gen_lightquarks_fromele)")
         df = df.Define("gen_lightquarks_fromele_py", "FCCAnalyses::MCParticle::get_py(gen_lightquarks_fromele)")
         df = df.Define("gen_lightquarks_fromele_pz", "FCCAnalyses::MCParticle::get_pz(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_pt", "FCCAnalyses::MCParticle::get_pt(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_eta","FCCAnalyses::MCParticle::get_eta(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_phi","FCCAnalyses::MCParticle::get_phi(gen_lightquarks_fromele)")
         df = df.Define("gen_lightquarks_fromele_e",  "FCCAnalyses::MCParticle::get_e(gen_lightquarks_fromele)")
 
         df = df.Define("gen_lightquarks",
@@ -203,9 +197,9 @@ class RDFanalysis:
 
         df = df.Define("lep_p_resp",      "Isolep_p / gen_leps_status1_p[0]")
         df = df.Define("met_p_resp",      "missing_p / gen_neutrinos_status1_p[0]")
-        df = df.Define("lep_theta_resol", "Isolep_theta - gen_leps_status1_theta")
+        df = df.Define("lep_theta_resol", "Isolep_theta - gen_leps_status1_theta[0]")
         df = df.Define("lep_phi_resol",   "TVector2::Phi_mpi_pi(Isoleps_p4_reco.Phi() - lep_p4_gen.Phi())")
-        df = df.Define("met_theta_resol", "missing_p_theta - gen_neutrinos_status1_theta")
+        df = df.Define("met_theta_resol", "missing_p_theta - gen_neutrinos_status1_theta[0]")
         df = df.Define("met_phi_resol",   "TVector2::Phi_mpi_pi(missing_p_p4.Phi() - nu_p4_gen.Phi())")
 
         df = df.Define("gen_lightquarks_p4",

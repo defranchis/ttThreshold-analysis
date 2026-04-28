@@ -8,8 +8,8 @@ processList = {
 
 prodTag    = None
 procDict   = "FCCee_procDict_winter2023_IDEA.json"
-inputDir   = "outputs/treemaker/lnuqq/semihad/"
-outputDir  = "outputs/histmaker/lnuqq/semihad/"
+inputDir   = "outputs/treemaker/lnuqq/step2/semihad/"
+outputDir  = "outputs/histmaker/lnuqq/step2/semihad/"
 nCPUS      = -1
 doScale    = False
 intLumi    = 1
@@ -30,8 +30,8 @@ def _binning(var):
                "m_qq_status2", "m_qq_fromele", "m_iso_lnu",
                "m_iso_lnuexcljj", "mlnu_plus_mjj_reco",
                "mlnu_plus_mqq_status2_truth", "mlnu_plus_mqq_fromele_truth",
-               "jet1_mass", "jet2_mass", "lep_res"):
-        return (100, 0, 200)
+               "jet1_mass", "jet2_mass", "lep_res", "Wlep_reco_mass", "Whad_reco_mass"):
+        return (400, 0, 200)
     if var == "kinfit_gW":
         return (100, 0, 5)
     if var in ("kinfit_s1", "kinfit_s2", "kinfit_sl", "kinfit_sn"):

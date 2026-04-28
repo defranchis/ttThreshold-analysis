@@ -1,6 +1,6 @@
 # Step 2 of 2 — runs kinematic fit using DCB params from fit_dcb_resolutions.py.
 # Requires response/functions/dcb_params_ecm<N>.h headers to be present before compiling.
-import os, copy, re, ROOT
+import os, re, ROOT
 import urllib
 processList = {
     "wzp6_ee_munumuqq_noCut_ecm160": {
@@ -19,8 +19,6 @@ processList = {
 
 available_ecm = ['157', '160', '163'] #for a redundant check
 
-hadronic  = False
-
 def _parse_ecm(name):
     m = re.search(r'_ecm(\d+)', name)
     if not m:
@@ -28,9 +26,6 @@ def _parse_ecm(name):
     return int(m.group(1))
 
 
-
-saveExclJets = True
-saveMCTruth = True
 
 # ── kinematic fit method ───────────────────────────────────────────────────
 # "minuit" → ROOT Minuit2 (robust, ~200-500 function evaluations per event)
@@ -45,8 +40,6 @@ channel = "CHANNELNAMEHERE"
 if  channel not in ["lep","semihad","had"]:
     channel="semihad"
 print(channel)
-
-lepFlav="mu"
 
 # Production tag when running over EDM4Hep centrally produced events, this points to the yaml files for getting sample statistics (mandatory)
 prodTag     = "FCCee/winter2023/IDEA/"
@@ -80,13 +73,6 @@ def get_file_path(url, filename):
     else:
         urllib.request.urlretrieve(url, os.path.basename(url))
         return os.path.basename(url)
-
-def get_files(eos_dir, proc):
-    files=[]
-    basepath=os.path.join(eos_dir,proc)
-    if os.path.exists(basepath):
-        files =  [os.path.join(basepath,x) for x in os.listdir(basepath) if os.path.isfile(os.path.join(basepath, x)) ]
-    return files
 
 weaver_preproc = get_file_path(url_preproc, local_preproc)
 weaver_model = get_file_path(url_model, local_model)
@@ -130,8 +116,7 @@ all_branches+=["pf_qq_mass","pf_qq_p","pf_qq_costheta","pf_qq_phi",
                "pf_qq_m_resol","pf_qq_p_resol","pf_qq_costheta_resol","pf_qq_phi_resol"]
 all_branches+=["px_tot_gen","py_tot_gen","pz_tot_gen",
                "px_tot_reco","py_tot_reco","pz_tot_reco",
-               "px_tot_resol","py_tot_resol","pz_tot_resol",
-               "m_gen_lnuqq_minus_ecm"]
+               "px_tot_resol","py_tot_resol","pz_tot_resol","m_gen_lnuqq_minus_ecm"]
 
 _dataset_iter = iter(processList.keys())
 
@@ -144,7 +129,8 @@ class RDFanalysis:
         print(f"[treemaker] dataset={_dataset}  ecm={_ecm}")
         if str(_ecm) not in available_ecm:
             raise ValueError(f"ecm={_ecm} parsed from '{_dataset}' not in available_ecm={available_ecm}")
-        ROOT.gInterpreter.ProcessLine(f"FCCAnalyses::WWFunctions::ECM = {_ecm};")
+        ROOT.gInterpreter.ProcessLine(f"FCCAnalyses::WWFunctions::setKinFitParams({_ecm});")
+        ROOT.gInterpreter.ProcessLine('std::cout << "[DEBUG step2] ECM from WWFunctions = " << FCCAnalyses::WWFunctions::ECM << std::endl;')
 
         df = df.Alias("Muon0", "Muon#0.index")
         df = df.Alias("Electron0","Electron#0.index")
@@ -293,7 +279,7 @@ class RDFanalysis:
 
         nJets = 2 if  channel == "semihad" else 4
 
-        collections_noleps = copy.deepcopy(collections)
+        collections_noleps = dict(collections)
         collections_noleps["PFParticles"] = "ReconstructedParticlesNoMuNoEl"
 
         jetClusteringHelper = ExclusiveJetClusteringHelper(
@@ -359,8 +345,7 @@ class RDFanalysis:
         df = df.Define("status1parts",            "FCCAnalyses::MCParticle::sel_genStatus(1)(Particle)")
         df = df.Define("gen_leps_status1",        "FCCAnalyses::MCParticle::sel_genleps(13,13,true)(status1parts)")
         df = df.Define("ngen_leps_status1",       "FCCAnalyses::MCParticle::get_n(gen_leps_status1)")
-        df = df.Define("neutrinos",               "FCCAnalyses::MCParticle::sel_genleps(14,14, true)(status1parts)")
-        df = df.Define("gen_neutrinos_status1",   "FCCAnalyses::MCParticle::sel_genleps(14,14, true)(neutrinos)")
+        df = df.Define("gen_neutrinos_status1",   "FCCAnalyses::MCParticle::sel_genleps(14,14, true)(status1parts)")
         df = df.Define("gen_neutrinos_status1_p", "FCCAnalyses::MCParticle::get_p(gen_neutrinos_status1)")
         df = df.Define("gen_lightquarks_fromele", "FCCAnalyses::MCParticle::sel_lightQuarks_fromele(true)(Particle,Particle0)")
 
@@ -471,11 +456,11 @@ class RDFanalysis:
         df = df.Define("lep_gen_costheta", "lep_p4_gen.Pz() / lep_p4_gen.P()");
         df = df.Define("lep_costheta", "Isoleps_p4_reco.Pz() / Isoleps_p4_reco.P()");
         df = df.Define("lep_costheta_resol", "lep_costheta - lep_gen_costheta")
-        df = df.Define("lep_theta_resol",    "Isolep_theta - gen_leps_status1_theta")
+        df = df.Define("lep_theta_resol",    "Isolep_theta - gen_leps_status1_theta[0]")
 
         df = df.Define("met_gen_costheta", "nu_p4_gen.Pz() / nu_p4_gen.P()");
         df = df.Define("met_costheta", "missing_p_p4.Pz() / missing_p_p4.P()");
-        df = df.Define("met_theta_resol",    "missing_p_theta - gen_neutrinos_status1_theta")
+        df = df.Define("met_theta_resol",    "missing_p_theta - gen_neutrinos_status1_theta[0]")
         df = df.Define("met_costheta_resol", "met_costheta - met_gen_costheta")
         df = df.Define("Whad_gen_old",
             "FCCAnalyses::WWFunctions::Whad_gen_old(gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)"
@@ -501,6 +486,7 @@ class RDFanalysis:
             "m_gen_lnuqq",
             "FCCAnalyses::WWFunctions::m_gen_lnuqq(gen_leps_status2_p, gen_lightquarks_fromele_p, gen_leps_status1_px, gen_leps_status1_py, gen_leps_status1_pz, gen_leps_status1_p, gen_neutrinos_status1_px, gen_neutrinos_status1_py, gen_neutrinos_status1_pz, gen_neutrinos_status1_p, gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)"
         )
+        df = df.Define("m_gen_lnuqq_minus_ecm", "m_gen_lnuqq - FCCAnalyses::WWFunctions::ECM")
 
         df = df.Define("jet1", "jets_p4[0]")
         df = df.Define("jet2", "jets_p4[1]")
@@ -567,8 +553,6 @@ class RDFanalysis:
         df = df.Define("px_tot_resol", "px_tot_reco - px_tot_gen")
         df = df.Define("py_tot_resol", "py_tot_reco - py_tot_gen")
         df = df.Define("pz_tot_resol", "pz_tot_reco - pz_tot_gen")
-        df = df.Define("m_gen_lnuqq_minus_ecm", "m_gen_lnuqq - FCCAnalyses::WWFunctions::ECM")
-
         df = df.Define(
             "deltaM",
             "FCCAnalyses::WWFunctions::deltaM(nIsolep, nRecoJets, Wlep_reco, Whad_reco)"
@@ -627,7 +611,6 @@ class RDFanalysis:
                   .Define("m_qq_resol",   "reco_mjj - truth_mqq_fromele")
                   .Define("p_qq_resol",   "p_excljj - p_qq_status2")
                   .Define("met_p_resp",   "missing_p / gen_neutrinos_status1_p[0]")
-                  .Define("eta_miss", "-log(tan(missing_p_theta/2.))")
                 )
 
         # ── kinematic fit ──────────────────────────────────────────────────
