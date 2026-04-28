@@ -335,7 +335,10 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
             double dh   = mh*mh - mW*mW,  dl = ml*ml - mW*mW;
             double bw_h = mwgw / (dh*dh + mwgw*mwgw);
             double bw_l = mwgw / (dl*dl + mwgw*mwgw);
-            double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l));
+            double s_ww = WW.M2();
+            double lam  = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
+            if (lam <= 0.0) return 1e10;
+            double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l)) - std::log(lam);
 
             double cons = dcb_neg2logpdf(WW.Px(), kf_px_tot_gen)
                         + dcb_neg2logpdf(WW.Py(), kf_py_tot_gen)
@@ -393,7 +396,10 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
             double dh   = mh*mh - mW*mW,  dl = ml*ml - mW*mW;
             double bw_h = mwgw / (dh*dh + mwgw*mwgw);
             double bw_l = mwgw / (dl*dl + mwgw*mwgw);
-            double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l));
+            double s_ww = WW.M2();
+            double lam  = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
+            if (lam <= 0.0) return 1e10;
+            double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l)) - std::log(lam);
 
             double cons = dcb_neg2logpdf(WW.Px(), kf_px_tot_gen)
                         + dcb_neg2logpdf(WW.Py(), kf_py_tot_gen)
