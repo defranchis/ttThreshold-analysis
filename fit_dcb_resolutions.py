@@ -86,7 +86,7 @@ BRANCH_CONFIG = {
     # Peak at 0 (no ISR) + long left tail (ISR carries away energy).
     # expleft2g: exponential left tail is physically correct and converges faster than dcb2g.
     # fix_mu0: constrain mu_c and aR to force the hard-right-cutoff solution (peak near 0).
-    "m_gen_lnuqq_minus_ecm": {"clip": (0.5, 100.0), "nbins": 150, "model": "exprcut2g"},
+    "m_gen_lnuqq_minus_ecm": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber2g"},
 }
 
 # ── Virtual combined branches (concatenation of two tree branches) ──────────
@@ -178,12 +178,55 @@ def dcb_expleft_gauss(x, N, mu_c, sigma_c, aL, kL, aR, nR, f_wide, mu_w, sigma_w
     return N * ((1.0 - f_wide) * core + f_wide * wide)
 
 
+def _dcb_expright_core(t, aL, nL, aR, kR):
+    """Power-law left tail + Gaussian core + exponential right tail.
+    Left:  standard DCB power-law for t < -aL.
+    Right: exp(-0.5*aR^2 - kR*(t-aR)) for t > aR (kR > 0 = fast right decay).
+    Physically: heavy ISR tail on left, sharp kinematic cutoff on right.
+    """
+    aL, nL, aR, kR = abs(aL), abs(nL), abs(aR), abs(kR)
+    BL = nL / aL - aL
+    log_AL = nL * np.log(nL / aL) - 0.5 * aL * aL
+    return np.where(
+        t < -aL,
+        np.exp(np.clip(log_AL - nL * np.log(np.maximum(BL - t, 1e-10)), -745., 709.)),
+        np.where(
+            t > aR,
+            np.exp(-0.5 * aR * aR - kR * (t - aR)),
+            np.exp(-0.5 * t * t)
+        )
+    )
+
+
+def dcb_expright_gauss(x, N, mu_c, sigma_c, aL, nL, aR, kR, f_wide, mu_w, sigma_w):
+    """Power-law-left DCB core + broad Gaussian. kR: exponential right-tail decay rate."""
+    core = _dcb_expright_core((x - mu_c) / sigma_c, aL, nL, aR, kR)
+    wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
+    return N * ((1.0 - f_wide) * core + f_wide * wide)
+
+
 def exp_right_gauss(x, N, x_cut, kL, f_wide, mu_w, sigma_w):
     """Right-bounded exponential (peaks at x_cut) + Gaussian wide component.
     Physically: ISR distribution bounded above at x_cut (= 0 for m_gen_lnuqq_minus_ecm).
     kL > 0: exponential decay rate for x < x_cut.
     """
     core = np.where(x <= x_cut, np.exp(kL * (x - x_cut)), np.float64(0.0))
+    wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
+    return N * ((1.0 - f_wide) * core + f_wide * wide)
+
+
+def gamma_right_gauss(x, N, x_cut, alpha, beta, f_wide, mu_w, sigma_w):
+    """Reflected Gamma distribution (right-bounded at x_cut) + Gaussian wide component.
+    Core: (x_cut-x)^(alpha-1) * exp(-beta*(x_cut-x)) for x <= x_cut, 0 otherwise.
+    Peak at x_cut - (alpha-1)/beta for alpha > 1; reduces to pure exponential at alpha=1.
+    """
+    y = x_cut - x
+    log_core = np.where(
+        (x <= x_cut) & (y > 0),
+        (alpha - 1.0) * np.log(np.maximum(y, 1e-30)) - beta * y,
+        np.float64(-745.0)
+    )
+    core = np.exp(np.clip(log_core, -745.0, 709.0))
     wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
     return N * ((1.0 - f_wide) * core + f_wide * wide)
 
@@ -294,24 +337,19 @@ def fit_dcb_gaussbox_iminuit(centers, counts, mu0, sig0):
         return 2.0 * float(np.sum(pred - counts * np.log(pred)))
 
     starts = [
-        # steep Gaussian core + correct plateau fraction (f_wide = plateau/peak ≈ 0.15–0.25)
         [N0, mu0, sig0*0.005, 1.0, 50., 1.0, 50., 0.20, x_span*0.85, sig0*0.15],
         [N0, mu0, sig0*0.005, 1.5, 30., 1.5, 30., 0.18, x_span*0.80, sig0*0.15],
         [N0, mu0, sig0*0.010, 1.0,100., 1.0,100., 0.22, x_span*0.80, sig0*0.12],
         [N0, mu0, sig0*0.003, 1.2, 80., 1.2, 80., 0.16, x_span*0.75, sig0*0.10],
         [N0, mu0, sig0*0.007, 2.0, 20., 2.0, 20., 0.20, x_span*0.90, sig0*0.20],
         [N0, mu0, sig0*0.010, 1.5, 50., 1.5, 50., 0.25, x_span*0.85, sig0*0.18],
-        # broader core fallback
-        [N0, mu0, sig0*0.02, 1.5,  5., 1.5,  5., 0.70, x_span*0.85, sig0*0.20],
-        [N0, mu0, sig0*0.02, 1.0,  3., 1.0,  3., 0.75, x_span*0.80, sig0*0.15],
-        [N0, mu0, sig0*0.03, 2.0,  8., 2.0,  8., 0.65, x_span*0.90, sig0*0.25],
-        [N0, mu0, sig0*0.01, 1.0,  5., 1.0,  5., 0.80, x_span*0.75, sig0*0.12],
-        [N0, mu0, sig0*0.02, 2.0, 10., 2.0, 10., 0.78, x_span*0.80, sig0*0.18],
-        [N0, mu0, sig0*0.04, 1.0,  4., 1.0,  4., 0.60, x_span*0.95, sig0*0.30],
-        [N0, mu0, sig0*0.01, 1.5,  7., 1.5,  7., 0.82, x_span*0.70, sig0*0.10],
+        [N0, mu0, sig0*0.003, 1.0,200., 1.0,200., 0.15, x_span*0.90, sig0*0.08],
+        [N0, mu0, sig0*0.007, 1.0, 30., 1.0, 30., 0.30, x_span*0.80, sig0*0.20],
+        [N0, mu0, sig0*0.015, 2.0, 15., 2.0, 15., 0.35, x_span*0.85, sig0*0.25],
+        [N0, mu0, sig0*0.020, 1.5, 10., 1.5, 10., 0.40, x_span*0.80, sig0*0.30],
     ]
     limits = [(1e-3,None),(None,None),(1e-6,None),(0.3,8.),(1.01,200.),
-              (0.3,8.),(1.01,200.),(0.01,0.95),(1.,None),(1e-4,None)]
+              (0.3,8.),(1.01,200.),(0.01,0.40),(1.,None),(1e-4,None)]
     names = ['N','mu_c','sc','aL','nL','aR','nR','fw','p_max','sw']
 
     best_popt, best_chi2 = None, np.inf
@@ -499,26 +537,21 @@ def fit_dcb_gaussbox(centers, counts, mu0, sig0):
     """
     N0 = float(counts.max())
     x_span = 0.5 * (centers[-1] - centers[0])
+    # f_wide upper bound 0.40: plateau/peak ≈ 0.15–0.25 physically; high f_wide pulls N down
+    # to match plateau, causing the optimizer to undershoot the spike peak.
     lo = [0, -np.inf, 1e-6, 0.3, 1.01, 0.3, 1.01, 0.01,  1., 1e-4]
-    hi = [np.inf, np.inf, np.inf, 8., 200., 8., 200., 0.95, np.inf, np.inf]
-    # f_wide ≈ plateau/peak height ratio ≈ 0.15–0.25 for narrow-spike + flat-plateau distributions.
-    # Large nL/nR gives a steep Gaussian core (fast transition) instead of a broad power-law.
+    hi = [np.inf, np.inf, np.inf, 8., 200., 8., 200., 0.40, np.inf, np.inf]
     starts = [
-        # steep Gaussian core + correct plateau fraction
         [N0, mu0, sig0*0.005, 1.0, 50., 1.0, 50., 0.20, x_span*0.85, sig0*0.15],
         [N0, mu0, sig0*0.005, 1.5, 30., 1.5, 30., 0.18, x_span*0.80, sig0*0.15],
         [N0, mu0, sig0*0.010, 1.0,100., 1.0,100., 0.22, x_span*0.80, sig0*0.12],
         [N0, mu0, sig0*0.003, 1.2, 80., 1.2, 80., 0.16, x_span*0.75, sig0*0.10],
         [N0, mu0, sig0*0.007, 2.0, 20., 2.0, 20., 0.20, x_span*0.90, sig0*0.20],
         [N0, mu0, sig0*0.010, 1.5, 50., 1.5, 50., 0.25, x_span*0.85, sig0*0.18],
-        # broader core (moderate nL/nR): fallback for softer spike shapes
-        [N0, mu0, sig0*0.02, 1.5,  5., 1.5,  5., 0.70, x_span*0.85, sig0*0.20],
-        [N0, mu0, sig0*0.02, 1.0,  3., 1.0,  3., 0.75, x_span*0.80, sig0*0.15],
-        [N0, mu0, sig0*0.03, 2.0,  8., 2.0,  8., 0.65, x_span*0.90, sig0*0.25],
-        [N0, mu0, sig0*0.01, 1.0,  5., 1.0,  5., 0.80, x_span*0.75, sig0*0.12],
-        [N0, mu0, sig0*0.02, 2.0, 10., 2.0, 10., 0.78, x_span*0.80, sig0*0.18],
-        [N0, mu0, sig0*0.04, 1.0,  4., 1.0,  4., 0.60, x_span*0.95, sig0*0.30],
-        [N0, mu0, sig0*0.01, 1.5,  7., 1.5,  7., 0.82, x_span*0.70, sig0*0.10],
+        [N0, mu0, sig0*0.003, 1.0,200., 1.0,200., 0.15, x_span*0.90, sig0*0.08],
+        [N0, mu0, sig0*0.007, 1.0, 30., 1.0, 30., 0.30, x_span*0.80, sig0*0.20],
+        [N0, mu0, sig0*0.015, 2.0, 15., 2.0, 15., 0.35, x_span*0.85, sig0*0.25],
+        [N0, mu0, sig0*0.020, 1.5, 10., 1.5, 10., 0.40, x_span*0.80, sig0*0.30],
     ]
     return _best_fit(dcb_gaussbox, centers, counts, starts, lo, hi)
 
@@ -580,21 +613,30 @@ def fit_dcb_expleft2g(centers, counts, mu0, sig0, constrain_mu0=False):
 
 
 def fit_exp_right_gauss(centers, counts, mu0, sig0):
-    """Right-bounded exponential + Gaussian. Params: N, x_cut, kL, f_wide, mu_w, sigma_w."""
+    """Right-bounded exponential + Gaussian. Params: N, x_cut, kL, f_wide, mu_w, sigma_w.
+    Two roles for the Gaussian:
+      (a) narrow component at mu0 — captures the soft-ISR peak away from x_cut
+      (b) broad component far from x_cut — secondary smooth shoulder
+    """
     N0   = float(counts.max())
     x_max = float(centers[-1])
-    lo = [0,  x_max - 2.0, 0.01, 0.0, -np.inf, 1e-4]
+    # narrow sigma: physically motivated width of the soft-ISR peak (~0.5–2 GeV)
+    sw_narrow = max(abs(x_max - mu0) * 0.5, 0.5)
+    lo = [0,  x_max - 2.0, 0.005, 0.0, -np.inf, 1e-4]
     hi = [np.inf, x_max + 0.5, 5.0, 0.95,  np.inf, np.inf]
     starts = [
+        # Gaussian at the data mode (soft-ISR peak): these are the key starts
+        [N0, x_max, 0.10, 0.40, mu0, sw_narrow],
+        [N0, x_max, 0.08, 0.50, mu0, sw_narrow * 1.2],
+        [N0, x_max, 0.12, 0.35, mu0, sw_narrow * 0.8],
+        [N0, x_max, 0.07, 0.60, mu0, sw_narrow * 1.5],
+        [N0, x_max, 0.15, 0.30, mu0, sw_narrow * 1.0],
+        [N0, x_max, 0.05, 0.70, mu0, sw_narrow * 1.3],
+        # Gaussian away from mode (broad background component)
         [N0, x_max, 0.12, 0.10, mu0 - 2*sig0, 5*sig0],
-        [N0, x_max, 0.10, 0.05, mu0 - 1*sig0, 4*sig0],
+        [N0, x_max, 0.10, 0.15, mu0 - 1*sig0, 4*sig0],
         [N0, x_max, 0.15, 0.20, mu0 - 2*sig0, 4*sig0],
-        [N0, x_max, 0.12, 0.00, mu0 - 1*sig0, 5*sig0],
-        [N0, x_max, 0.08, 0.15, mu0 - 2*sig0, 6*sig0],
-        [N0, x_max, 0.20, 0.25, mu0 - 3*sig0, 5*sig0],
-        [N0, x_max, 0.10, 0.30, mu0 - 3*sig0, 4*sig0],
-        [N0, x_max - 0.2, 0.12, 0.10, mu0 - 2*sig0, 5*sig0],
-        [N0, x_max, 0.18, 0.10, mu0 - 1*sig0, 3*sig0],
+        [N0, x_max, 0.08, 0.25, mu0 - 2*sig0, 6*sig0],
     ]
     return _best_fit(exp_right_gauss, centers, counts, starts, lo, hi)
 
@@ -613,15 +655,16 @@ def fit_exp_right_gauss_iminuit(centers, counts, mu0, sig0):
         pred = np.maximum(pred, 1e-300)
         return 2.0 * float(np.sum(pred - counts * np.log(pred)))
 
+    sw_narrow = max(abs(x_max - mu0) * 0.5, 0.5)
     starts = [
+        [N0, x_max, 0.10, 0.40, mu0, sw_narrow],
+        [N0, x_max, 0.08, 0.50, mu0, sw_narrow * 1.2],
+        [N0, x_max, 0.12, 0.35, mu0, sw_narrow * 0.8],
+        [N0, x_max, 0.07, 0.60, mu0, sw_narrow * 1.5],
+        [N0, x_max, 0.15, 0.30, mu0, sw_narrow * 1.0],
         [N0, x_max, 0.12, 0.10, mu0 - 2*sig0, 5*sig0],
-        [N0, x_max, 0.10, 0.05, mu0 - 1*sig0, 4*sig0],
-        [N0, x_max, 0.15, 0.20, mu0 - 2*sig0, 4*sig0],
-        [N0, x_max, 0.08, 0.15, mu0 - 2*sig0, 6*sig0],
-        [N0, x_max, 0.20, 0.25, mu0 - 3*sig0, 5*sig0],
-        [N0, x_max - 0.2, 0.12, 0.10, mu0 - 2*sig0, 5*sig0],
     ]
-    limits = [(1e-3,None),(x_max-2., x_max+0.5),(0.01,5.),(0.,0.95),(None,None),(1e-4,None)]
+    limits = [(1e-3,None),(x_max-2., x_max+0.5),(0.005,5.),(0.,0.95),(None,None),(1e-4,None)]
     names  = ['N','x_cut','kL','fw','mu_w','sw']
 
     best_popt, best_chi2 = None, np.inf
@@ -637,6 +680,161 @@ def fit_exp_right_gauss_iminuit(centers, counts, mu0, sig0):
                 popt = list(m.values)
                 pred = exp_right_gauss(centers, *[abs(v) if j not in (1, 4) else v
                                                    for j, v in enumerate(popt)])
+                chi2 = float(np.sum(((counts - pred) / errs) ** 2))
+                if chi2 < best_chi2:
+                    best_chi2, best_popt = chi2, popt
+        except Exception:
+            pass
+
+    if best_popt is None:
+        return None, None, False, np.inf
+    return best_popt, None, True, best_chi2
+
+
+def fit_gamma_right_gauss(centers, counts, mu0, sig0):
+    """Reflected Gamma + Gaussian. Params: N, x_cut, alpha, beta, f_wide, mu_w, sigma_w."""
+    N0    = float(counts.max())
+    x_max = float(centers[-1])
+    # delta0: expected distance from x_cut to peak; anchored from data mode
+    delta0 = max(x_max - mu0, 1.0)
+    lo = [0, x_max - 0.01, 1.0, 1e-4, 0.0, -np.inf, 1e-4]
+    hi = [np.inf, x_max + 1.0, 50., 5.0, 0.95, np.inf, np.inf]
+    starts = [
+        # alpha, beta anchored to observed peak offset delta0 = x_cut - mu0
+        [N0, x_max, 2.0, 1.0/delta0,        0.05, mu0 - 2*sig0, 3*sig0],
+        [N0, x_max, 3.0, 2.0/delta0,        0.05, mu0 - 2*sig0, 4*sig0],
+        [N0, x_max, 1.5, 0.5/delta0,        0.10, mu0 - 1*sig0, 3*sig0],
+        [N0, x_max, 4.0, 3.0/delta0,        0.05, mu0 - 3*sig0, 5*sig0],
+        [N0, x_max, 2.0, 1.0/delta0,        0.20, mu0 - 2*sig0, 4*sig0],
+        [N0, x_max, 3.0, 2.0/delta0,        0.20, mu0 - 3*sig0, 5*sig0],
+        # wider spread of alpha/beta
+        [N0, x_max, 2.0, 0.5/max(delta0,1), 0.05, mu0 - 1*sig0, 3*sig0],
+        [N0, x_max, 5.0, 4.0/delta0,        0.05, mu0 - 3*sig0, 6*sig0],
+        [N0, x_max, 1.5, 1.0/delta0,        0.30, mu0 - 2*sig0, 4*sig0],
+        [N0, x_max, 2.0, 2.0/delta0,        0.00, mu0 - 1*sig0, 3*sig0],
+    ]
+    return _best_fit(gamma_right_gauss, centers, counts, starts, lo, hi)
+
+
+def fit_gamma_right_gauss_iminuit(centers, counts, mu0, sig0):
+    """Poisson NLL with iminuit for reflected Gamma + Gaussian."""
+    from iminuit import Minuit
+    N0    = float(counts.max())
+    errs  = np.maximum(np.sqrt(counts), 1.0)
+    x_max = float(centers[-1])
+    delta0 = max(x_max - mu0, 1.0)
+
+    def nll(N, x_cut, alpha, beta, fw, mu_w, sw):
+        if alpha < 1.0 or beta <= 0 or sw <= 0:
+            return 1e15
+        pred = gamma_right_gauss(centers, abs(N), x_cut, alpha, abs(beta),
+                                 abs(fw), mu_w, abs(sw))
+        pred = np.maximum(pred, 1e-300)
+        return 2.0 * float(np.sum(pred - counts * np.log(pred)))
+
+    starts = [
+        [N0, x_max, 2.0, 1.0/delta0,        0.05, mu0 - 2*sig0, 3*sig0],
+        [N0, x_max, 3.0, 2.0/delta0,        0.05, mu0 - 2*sig0, 4*sig0],
+        [N0, x_max, 1.5, 0.5/delta0,        0.10, mu0 - 1*sig0, 3*sig0],
+        [N0, x_max, 4.0, 3.0/delta0,        0.05, mu0 - 3*sig0, 5*sig0],
+        [N0, x_max, 2.0, 1.0/delta0,        0.20, mu0 - 2*sig0, 4*sig0],
+        [N0, x_max, 3.0, 2.0/delta0,        0.20, mu0 - 3*sig0, 5*sig0],
+    ]
+    limits = [(1e-3,None),(x_max-0.01, x_max+1.0),(1.0,50.),(1e-4,5.),(0.,0.95),(None,None),(1e-4,None)]
+    names  = ['N','x_cut','alpha','beta','fw','mu_w','sw']
+
+    best_popt, best_chi2 = None, np.inf
+    for p0 in starts:
+        try:
+            m = Minuit(nll, *p0, name=names)
+            for i, (lo_i, hi_i) in enumerate(limits):
+                m.limits[i] = (lo_i, hi_i)
+            m.migrad()
+            if not m.valid:
+                m.migrad()
+            if m.valid:
+                popt = list(m.values)
+                pred = gamma_right_gauss(centers, abs(popt[0]), popt[1], popt[2],
+                                         abs(popt[3]), abs(popt[4]), popt[5], abs(popt[6]))
+                chi2 = float(np.sum(((counts - pred) / errs) ** 2))
+                if chi2 < best_chi2:
+                    best_chi2, best_popt = chi2, popt
+        except Exception:
+            pass
+
+    if best_popt is None:
+        return None, None, False, np.inf
+    return best_popt, None, True, best_chi2
+
+
+def fit_dcb_expright2g(centers, counts, mu0, sig0):
+    """Scipy fit: power-law left DCB + exponential right tail + Gaussian wide component."""
+    N0 = float(counts.max())
+    # Anchor sigma_c to the narrow right-side width (peak → x_max), not to MAD which is
+    # inflated by the heavy ISR left tail.
+    x_right_span = max(float(centers[-1]) - mu0, 0.5)
+    s = max(x_right_span * 0.40, 0.15)   # narrow Gaussian core
+
+    lo = [0, -np.inf, 1e-6, 0.1, 1.01, 0.1, 0.05, 0.0, -np.inf, 1e-4]
+    hi = [np.inf, np.inf, np.inf, 5., 50., 10., 100., 0.80, np.inf, np.inf]
+    starts = [
+        [N0, mu0, s,       0.5, 2.0, 1.5,  5.0, 0.05, mu0 - 4*s, 6*s],
+        [N0, mu0, s,       0.3, 1.5, 1.0,  3.0, 0.10, mu0 - 5*s, 8*s],
+        [N0, mu0, s*0.7,   0.5, 2.0, 2.0,  8.0, 0.05, mu0 - 5*s, 8*s],
+        [N0, mu0, s*1.5,   0.4, 1.5, 1.5,  5.0, 0.05, mu0 - 4*s, 7*s],
+        [N0, mu0, s,       0.7, 3.0, 2.0, 10.0, 0.05, mu0 - 5*s,10*s],
+        [N0, mu0, s*0.5,   0.3, 1.2, 1.0,  5.0, 0.10, mu0 - 4*s, 6*s],
+        [N0, mu0, s,       1.0, 2.0, 3.0, 15.0, 0.05, mu0 - 6*s,12*s],
+        [N0, mu0, s*2.0,   0.5, 2.0, 2.0,  5.0, 0.10, mu0 - 4*s, 7*s],
+        [N0, mu0, s*0.7,   0.4, 1.5, 1.5, 10.0, 0.20, mu0 - 6*s,12*s],
+        [N0, mu0, s,       0.5, 1.5, 1.0,  3.0, 0.30, mu0 - 5*s,10*s],
+    ]
+    return _best_fit(dcb_expright_gauss, centers, counts, starts, lo, hi)
+
+
+def fit_dcb_expright2g_iminuit(centers, counts, mu0, sig0):
+    """Poisson NLL iminuit fit: power-law left DCB + exponential right + Gaussian wide."""
+    from iminuit import Minuit
+    N0   = float(counts.max())
+    errs = np.maximum(np.sqrt(counts), 1.0)
+    x_right_span = max(float(centers[-1]) - mu0, 0.5)
+    s = max(x_right_span * 0.40, 0.15)
+
+    def nll(N, mu_c, sc, aL, nL, aR, kR, fw, mu_w, sw):
+        if sc <= 0 or nL < 1.0 or aL <= 0 or aR <= 0 or kR <= 0 or sw <= 0:
+            return 1e15
+        pred = dcb_expright_gauss(centers, abs(N), mu_c, abs(sc),
+                                   abs(aL), abs(nL), abs(aR), abs(kR),
+                                   abs(fw), mu_w, abs(sw))
+        pred = np.maximum(pred, 1e-300)
+        return 2.0 * float(np.sum(pred - counts * np.log(pred)))
+
+    starts = [
+        [N0, mu0, s,     0.5, 2.0, 1.5,  5.0, 0.05, mu0 - 4*s,  6*s],
+        [N0, mu0, s,     0.3, 1.5, 1.0,  3.0, 0.10, mu0 - 5*s,  8*s],
+        [N0, mu0, s*0.7, 0.5, 2.0, 2.0,  8.0, 0.05, mu0 - 5*s,  8*s],
+        [N0, mu0, s,     0.7, 3.0, 2.0, 10.0, 0.05, mu0 - 5*s, 10*s],
+        [N0, mu0, s*0.5, 0.3, 1.2, 1.0,  5.0, 0.10, mu0 - 4*s,  6*s],
+        [N0, mu0, s,     1.0, 2.0, 3.0, 15.0, 0.05, mu0 - 6*s, 12*s],
+    ]
+    limits = [(1e-3,None),(None,None),(1e-6,None),(0.1,5.),(1.01,50.),
+              (0.1,10.),(0.05,100.),(0.,0.80),(None,None),(1e-4,None)]
+    names  = ['N','mu_c','sc','aL','nL','aR','kR','fw','mu_w','sw']
+
+    best_popt, best_chi2 = None, np.inf
+    for p0 in starts:
+        try:
+            m = Minuit(nll, *p0, name=names)
+            for i, (lo_i, hi_i) in enumerate(limits):
+                m.limits[i] = (lo_i, hi_i)
+            m.migrad()
+            if not m.valid:
+                m.migrad()
+            if m.valid:
+                popt = list(m.values)
+                pred = dcb_expright_gauss(centers, abs(popt[0]), popt[1], abs(popt[2]),
+                                          abs(popt[3]), abs(popt[4]), abs(popt[5]), abs(popt[6]),
+                                          abs(popt[7]), popt[8], abs(popt[9]))
                 chi2 = float(np.sum(((counts - pred) / errs) ** 2))
                 if chi2 < best_chi2:
                     best_chi2, best_popt = chi2, popt
@@ -725,7 +923,25 @@ for ecm in ECM_LIST:
         mu0  = float(centers[np.argmax(counts)])
         sig0 = float(median_abs_deviation(vals_c, scale="normal"))
 
-        if model == "exprcut2g":
+        if model == "dcber2g":
+            popt, pcov, fit_ok, chi2 = fit_dcb_expright2g(centers[mask], counts[mask], mu0, sig0)
+            _ndof_est = max(int(mask.sum()) - 10, 1)
+            if popt is None or chi2 / _ndof_est > 5.0:
+                popt2, _, fit_ok2, chi2_2 = fit_dcb_expright2g_iminuit(
+                    centers[mask], counts[mask], mu0, sig0)
+                if popt2 is not None and (popt is None or chi2_2 < chi2):
+                    popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
+            nparams = 10
+        elif model == "gamright2g":
+            popt, pcov, fit_ok, chi2 = fit_gamma_right_gauss(centers[mask], counts[mask], mu0, sig0)
+            _ndof_est = max(int(mask.sum()) - 7, 1)
+            if popt is None or chi2 / _ndof_est > 5.0:
+                popt2, _, fit_ok2, chi2_2 = fit_gamma_right_gauss_iminuit(
+                    centers[mask], counts[mask], mu0, sig0)
+                if popt2 is not None and (popt is None or chi2_2 < chi2):
+                    popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
+            nparams = 7
+        elif model == "exprcut2g":
             popt, pcov, fit_ok, chi2 = fit_exp_right_gauss(centers[mask], counts[mask], mu0, sig0)
             _ndof_est = max(int(mask.sum()) - 6, 1)
             if popt is None or chi2 / _ndof_est > 5.0:
@@ -735,13 +951,16 @@ for ecm in ECM_LIST:
                     popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
             nparams = 6
         elif model == "dcbgb":
-            popt, pcov, fit_ok, chi2 = fit_dcb_gaussbox(centers[mask], counts[mask], mu0, sig0)
+            # Poisson NLL primary: correctly weights spike peak vs flat plateau.
+            # chi² over-weights plateau bins (small sigma), forcing N down and undershooting peak.
+            popt, pcov, fit_ok, chi2 = fit_dcb_gaussbox_iminuit(
+                centers[mask], counts[mask], mu0, sig0)
             _ndof_est = max(int(mask.sum()) - 10, 1)
             if popt is None or chi2 / _ndof_est > 3.0:
-                popt2, _, fit_ok2, chi2_2 = fit_dcb_gaussbox_iminuit(
+                popt2, pcov2, fit_ok2, chi2_2 = fit_dcb_gaussbox(
                     centers[mask], counts[mask], mu0, sig0)
                 if popt2 is not None and (popt is None or chi2_2 < chi2):
-                    popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
+                    popt, pcov, fit_ok, chi2 = popt2, pcov2, fit_ok2, chi2_2
             nparams = 10
         elif model == "dcb2g":
             popt, pcov, fit_ok, chi2 = fit_dcb2g(centers[mask], counts[mask], mu0, sig0)
@@ -776,7 +995,15 @@ for ecm in ECM_LIST:
         if popt is None:
             print(f"  FAIL {bname}: all starts failed, using Gaussian-like fallback")
             popt = [float(counts.max()), mu0, sig0, 5., 100., 5., 100.]
-            if model == "exprcut2g":
+            if model == "dcber2g":
+                _s = max((float(centers[-1]) - mu0) * 0.4, 0.15)
+                popt = [float(counts.max()), mu0, _s, 0.5, 2.0, 1.5, 5.0, 0.05,
+                        mu0 - 4*_s, 6*_s]
+            elif model == "gamright2g":
+                _xm = float(centers[-1])
+                popt = [float(counts.max()), _xm, 2.0, 1.0/max(_xm - mu0, 1.), 0.05,
+                        mu0 - 2*sig0, 3*sig0]
+            elif model == "exprcut2g":
                 popt = [float(counts.max()), float(centers[-1]), 0.12, 0.10, mu0 - 2*sig0, 5*sig0]
             elif model == "dcbgb":
                 x_span = 0.5 * (centers[-1] - centers[0])
@@ -787,7 +1014,49 @@ for ecm in ECM_LIST:
             chi2_ndof = np.inf
 
         # ── unpack and sanitise ──────────────────────────────────────────────
-        if model == "exprcut2g":
+        if model == "dcber2g":
+            N_f, mu_c, sc, aL, nL, aR, kR, fw, muw, sw = popt
+            mu_c = float(mu_c);  sc  = abs(float(sc))
+            aL   = abs(float(aL)); nL = abs(float(nL))
+            aR   = abs(float(aR)); kR = abs(float(kR))
+            fw   = abs(float(fw)); muw = float(muw); sw = abs(float(sw))
+            N_f  = abs(float(N_f))
+            results[bname] = dict(
+                model="dcber2g",
+                mu=mu_c, sigma=sc, aL=aL, nL=nL, aR=aR, kR=kR,
+                f_wide=fw, mu_wide=muw, sigma_wide=sw,
+                chi2_ndof=round(float(chi2_ndof), 3), fit_ok=bool(fit_ok),
+            )
+            def yfn(x, _N=N_f, _mc=mu_c, _sc=sc, _aL=aL, _nL=nL, _aR=aR, _kR=kR,
+                    _fw=fw, _mw=muw, _sw=sw):
+                return dcb_expright_gauss(x, _N, _mc, _sc, _aL, _nL, _aR, _kR, _fw, _mw, _sw)
+            _xscan = np.linspace(centers[0], centers[-1], 2000)
+            _x_peak = float(_xscan[np.argmax(yfn(_xscan))])
+            lbl = (rf"DCBExpRight+G: $x_{{peak}}$={_x_peak:+.3g}, $\mu_c$={mu_c:+.3g}"
+                   "\n"
+                   rf"$\sigma_c$={sc:.3g}, $\alpha_L$={aL:.2f}, $n_L$={nL:.2f}, $k_R$={kR:.3g}"
+                   "\n"
+                   rf"$f_w$={fw:.3f}, $\mu_w$={muw:.3g}, $\sigma_w$={sw:.3g}"
+                   rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
+        elif model == "gamright2g":
+            N_f, x_cut, alpha_r, beta_r, fw, muw, sw = popt
+            N_f    = abs(float(N_f));  x_cut  = float(x_cut)
+            alpha_r = abs(float(alpha_r)); beta_r = abs(float(beta_r))
+            fw     = abs(float(fw));   muw    = float(muw); sw = abs(float(sw))
+            x_peak_r = x_cut - (alpha_r - 1.0) / max(beta_r, 1e-10) if alpha_r > 1 else x_cut
+            results[bname] = dict(
+                model="gamright2g",
+                x_cut=x_cut, alpha=alpha_r, beta=beta_r,
+                f_wide=fw, mu_wide=muw, sigma_wide=sw,
+                chi2_ndof=round(float(chi2_ndof), 3), fit_ok=bool(fit_ok),
+            )
+            def yfn(x, _N=N_f, _xc=x_cut, _a=alpha_r, _b=beta_r, _fw=fw, _mw=muw, _sw=sw):
+                return gamma_right_gauss(x, _N, _xc, _a, _b, _fw, _mw, _sw)
+            lbl = (rf"GammaRight+G: $x_{{cut}}$={x_cut:+.3g}, $\alpha$={alpha_r:.3g}, $\beta$={beta_r:.3g}"
+                   "\n"
+                   rf"$x_{{peak}}$={x_peak_r:+.3g}, $f_w$={fw:.3f}"
+                   rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
+        elif model == "exprcut2g":
             N_f, x_cut, kL_r, fw, muw, sw = popt
             N_f   = abs(float(N_f));  x_cut = float(x_cut)
             kL_r  = abs(float(kL_r)); fw   = abs(float(fw))
@@ -918,7 +1187,21 @@ for ecm in ECM_LIST:
         ax.bar(centers, counts, width=bw, color="steelblue", alpha=0.55, label="data")
         ax.plot(xfine, yfine, color="crimson", lw=2, label=lbl)
 
-        if model == "exprcut2g":
+        if model == "dcber2g":
+            y_core = dcb_expright_gauss(xfine, N_f, mu_c, sc, aL, nL, aR, kR, 0., muw, sw)
+            y_wide = dcb_expright_gauss(xfine, N_f, mu_c, sc, aL, nL, aR, kR, 1., muw, sw)
+            ax.plot(xfine, y_core * (1 - fw), color="tab:orange", lw=1.2, ls="--",
+                    label="DCBExpRight core")
+            ax.plot(xfine, y_wide * fw,       color="tab:green",  lw=1.2, ls=":",
+                    label="Gaussian component")
+        elif model == "gamright2g":
+            y_core = gamma_right_gauss(xfine, N_f, x_cut, alpha_r, beta_r, 0., muw, sw)
+            y_wide = gamma_right_gauss(xfine, N_f, x_cut, alpha_r, beta_r, 1., muw, sw)
+            ax.plot(xfine, y_core * (1 - fw), color="tab:orange", lw=1.2, ls="--",
+                    label="Gamma core")
+            ax.plot(xfine, y_wide * fw,       color="tab:green",  lw=1.2, ls=":",
+                    label="Gaussian component")
+        elif model == "exprcut2g":
             y_core = exp_right_gauss(xfine, N_f, x_cut, kL_r, 0., muw, sw)
             y_wide = exp_right_gauss(xfine, N_f, x_cut, kL_r, 1., muw, sw)
             ax.plot(xfine, y_core * (1 - fw), color="tab:orange", lw=1.2, ls="--",
@@ -1068,6 +1351,19 @@ for ecm in ECM_LIST:
         "    double norm;                           // 1/integral, shape integrates to 1",
         "};",
         "",
+        "struct GammaRightGaussParams {",
+        "    double x_cut, alpha, beta;             // reflected Gamma: peak at x_cut-(alpha-1)/beta",
+        "    double f_wide, mu_wide, sigma_wide;    // broad Gaussian component",
+        "    double norm;                           // 1/integral, shape integrates to 1",
+        "};",
+        "",
+        "struct DcbExpRightGaussParams {",
+        "    double mu, sigma, aL, nL;              // power-law left tail (ISR heavy tail)",
+        "    double aR, kR;                         // exponential right tail: exp(-kR*(t-aR))",
+        "    double f_wide, mu_wide, sigma_wide;    // broad Gaussian component",
+        "    double norm;                           // 1/integral, shape integrates to 1",
+        "};",
+        "",
         "namespace detail {",
         "inline double dcb_unnorm(double t, double aL, double nL,",
         "                          double aR, double nR) {",
@@ -1121,6 +1417,34 @@ for ecm in ECM_LIST:
         "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
         "}",
         "",
+        "inline double gamma_right_gauss_neg2logpdf(double x, const GammaRightGaussParams& p) {",
+        "    double y    = p.x_cut - x;",
+        "    double lcore = (x <= p.x_cut && y > 0)",
+        "                 ? (p.alpha - 1.0) * std::log(y) - p.beta * y",
+        "                 : -1e300;",
+        "    double core = std::exp(std::max(lcore, -745.0));",
+        "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
+        "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
+        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
+        "}",
+        "",
+        "inline double dcb_expright_gauss_neg2logpdf(double x, const DcbExpRightGaussParams& p) {",
+        "    double t    = (x - p.mu) / p.sigma;",
+        "    double core;",
+        "    if (t < -p.aL) {",
+        "        double AL = std::pow(p.nL/p.aL, p.nL) * std::exp(-0.5*p.aL*p.aL);",
+        "        double BL = p.nL/p.aL - p.aL;",
+        "        core = AL * std::pow(std::max(BL - t, 1e-10), -p.nL);",
+        "    } else if (t > p.aR) {",
+        "        core = std::exp(-0.5*p.aR*p.aR - p.kR*(t - p.aR));",
+        "    } else {",
+        "        core = std::exp(-0.5*t*t);",
+        "    }",
+        "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
+        "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
+        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
+        "}",
+        "",
         "// ── Fitted parameters ────────────────────────────────────────────────",
     ]
 
@@ -1147,6 +1471,21 @@ for ecm in ECM_LIST:
             cpp.append(
                 f"constexpr ExpRightGaussParams ERG_{tag} = "
                 f"{{ {p['x_cut']:+.6f}, {p['kL']:.6f}, "
+                f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
+                f"{p['norm']:.10e} }};  {note}"
+            )
+        elif p["model"] == "gamright2g":
+            cpp.append(
+                f"constexpr GammaRightGaussParams GRG_{tag} = "
+                f"{{ {p['x_cut']:+.6f}, {p['alpha']:.6f}, {p['beta']:.6f}, "
+                f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
+                f"{p['norm']:.10e} }};  {note}"
+            )
+        elif p["model"] == "dcber2g":
+            cpp.append(
+                f"constexpr DcbExpRightGaussParams DCBERG_{tag} = "
+                f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
+                f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['kR']:.6f}, "
                 f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
                 f"{p['norm']:.10e} }};  {note}"
             )
