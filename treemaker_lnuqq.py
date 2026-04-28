@@ -58,7 +58,7 @@ outputDir   = "outputs/treemaker/lnuqq/{}".format(channel)
 
 
 # additional/costom C++ functions, defined in header files (optional)
-includePaths = ["examples/functions.h", "examples/WWFunctions.h"]
+includePaths = ["examples/functions.h", "WWFunctions/WWFunctions.h"] + (["WWFunctions/WWKinReco.h"] if RUN_KINFIT else [])
 
 ## latest particle transformer model, trained on 9M jets in winter2023 samples
 model_name = "fccee_flavtagging_edm4hep_wc" #"fccee_flavtagging_edm4hep_wc_v1"
