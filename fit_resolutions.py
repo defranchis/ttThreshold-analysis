@@ -847,6 +847,57 @@ def fit_dcb_expright2g_iminuit(centers, counts, mu0, sig0):
     return best_popt, None, True, best_chi2
 
 
+def _flatten_raw(raw):
+    arr = np.asarray(raw)
+    if arr.dtype == object:
+        return np.concatenate([np.asarray(x, dtype=float).ravel() for x in arr])
+    return arr.astype(float).ravel()
+
+
+def _norm_curve(fn, xfine, x_lo, x_hi):
+    integ = _quad(fn, x_lo, x_hi, limit=300)[0]
+    return fn(xfine) / max(integ, 1e-300)
+
+
+def _comparison_plot(ecm, _fitted, pairs, title_suffix, out_dir, label_a, label_b,
+                     combined_label=None):
+    os.makedirs(out_dir, exist_ok=True)
+    for tag, (ba, bb) in pairs.items():
+        if ba not in _fitted or bb not in _fitted:
+            continue
+        fn_a, edges_a, _ = _fitted[ba]
+        fn_b, edges_b, _ = _fitted[bb]
+        x_lo = min(edges_a[0], edges_b[0])
+        x_hi = max(edges_a[-1], edges_b[-1])
+        xfine = np.linspace(x_lo, x_hi, 600)
+        fig, ax = plt.subplots(figsize=(7, 4), layout="constrained")
+        ax.plot(xfine, _norm_curve(fn_a, xfine, x_lo, x_hi),
+                color="tab:blue",   lw=2, label=label_a.format(ba))
+        ax.plot(xfine, _norm_curve(fn_b, xfine, x_lo, x_hi),
+                color="tab:orange", lw=2, label=label_b.format(bb))
+        if combined_label and tag in _fitted:
+            fn_c, _, _ = _fitted[tag]
+            ax.plot(xfine, _norm_curve(fn_c, xfine, x_lo, x_hi),
+                    color="crimson", lw=1.5, ls=":",
+                    label=combined_label.format(tag))
+        ax.set_xlabel(tag, fontsize=11)
+        ax.set_ylabel("Normalised PDF", fontsize=11)
+        ax.set_title(f"{tag}  [ecm{ecm}]  — {title_suffix}", fontsize=11)
+        ax.legend(fontsize=9, frameon=False)
+        ax.set_ylim(bottom=0)
+        for fmt in ("png", "pdf"):
+            fig.savefig(f"{out_dir}/{tag}_comparison.{fmt}", dpi=150)
+        plt.close(fig)
+
+
+class _NpEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, np.floating): return float(o)
+        if isinstance(o, np.integer):  return int(o)
+        if isinstance(o, np.bool_):    return bool(o)
+        return super().default(o)
+
+
 for ecm in ECM_LIST:
     INFILE   = INFILE_TMPL.format(ecm=ecm)
     plot_dir = f"response/plots/ecm{ecm}"
@@ -857,12 +908,6 @@ for ecm in ECM_LIST:
     with uproot.open(INFILE) as f:
         tree = f["events"]
         available = set(tree.keys())
-
-        def _flatten_raw(raw):
-            arr = np.asarray(raw)
-            if arr.dtype == object:
-                return np.concatenate([np.asarray(x, dtype=float).ravel() for x in arr])
-            return arr.astype(float).ravel()
 
         if KINFIT_ONLY:
             branches = [b for b in KINFIT_BRANCHES if b in available]
@@ -904,12 +949,7 @@ for ecm in ECM_LIST:
         nbins            = cfg.get("nbins", NBINS_DEF)
         clip_lo, clip_hi = cfg.get("clip", CLIP_DEF)
 
-        raw = data_all[bname]
-        arr = np.asarray(raw)
-        if arr.dtype == object:
-            vals = np.concatenate([np.asarray(x, dtype=float).ravel() for x in arr])
-        else:
-            vals = arr.astype(float).ravel()
+        vals = _flatten_raw(data_all[bname])
         vals = vals[np.isfinite(vals)]
         if len(vals) < 100:
             print(f"  SKIP {bname}: {len(vals)} entries"); continue
@@ -1249,44 +1289,10 @@ for ecm in ECM_LIST:
 
     # ── Comparison plots (skipped in --kinfit-only mode) ─────────────────────
     if not KINFIT_ONLY:
-        def _norm_curve(fn, xfine, x_lo, x_hi):
-            integ = _quad(fn, x_lo, x_hi, limit=300)[0]
-            return fn(xfine) / max(integ, 1e-300)
-
-        def _comparison_plot(pairs, title_suffix, out_dir, label_a, label_b,
-                             combined_label=None):
-            os.makedirs(out_dir, exist_ok=True)
-            for tag, (ba, bb) in pairs.items():
-                if ba not in _fitted or bb not in _fitted:
-                    continue
-                fn_a, edges_a, _ = _fitted[ba]
-                fn_b, edges_b, _ = _fitted[bb]
-                x_lo = min(edges_a[0], edges_b[0])
-                x_hi = max(edges_a[-1], edges_b[-1])
-                xfine = np.linspace(x_lo, x_hi, 600)
-                fig, ax = plt.subplots(figsize=(7, 4), layout="constrained")
-                ax.plot(xfine, _norm_curve(fn_a, xfine, x_lo, x_hi),
-                        color="tab:blue",   lw=2, label=label_a.format(ba))
-                ax.plot(xfine, _norm_curve(fn_b, xfine, x_lo, x_hi),
-                        color="tab:orange", lw=2, label=label_b.format(bb))
-                if combined_label and tag in _fitted:
-                    fn_c, _, _ = _fitted[tag]
-                    ax.plot(xfine, _norm_curve(fn_c, xfine, x_lo, x_hi),
-                            color="crimson", lw=1.5, ls=":",
-                            label=combined_label.format(tag))
-                ax.set_xlabel(tag, fontsize=11)
-                ax.set_ylabel("Normalised PDF", fontsize=11)
-                ax.set_title(f"{tag}  [ecm{ecm}]  — {title_suffix}", fontsize=11)
-                ax.legend(fontsize=9, frameon=False)
-                ax.set_ylim(bottom=0)
-                for fmt in ("png", "pdf"):
-                    fig.savefig(f"{out_dir}/{tag}_comparison.{fmt}", dpi=150)
-                plt.close(fig)
-
         # ── Jet1 vs jet2 comparison plots ────────────────────────────────────
         comp_dir = f"{plot_dir}/jet_comparisons"
         _comparison_plot(
-            COMBINED_BRANCHES, "jet1 vs jet2", comp_dir,
+            ecm, _fitted, COMBINED_BRANCHES, "jet1 vs jet2", comp_dir,
             label_a="{0}", label_b="{0}",
             combined_label="{0} (combined fit)",
         )
@@ -1295,19 +1301,12 @@ for ecm in ECM_LIST:
         # ── Standard vs fromele comparison plots ─────────────────────────────
         fromele_dir = f"{plot_dir}/fromele_comparisons"
         _comparison_plot(
-            FROMELE_PAIRS, "standard vs fromele", fromele_dir,
+            ecm, _fitted, FROMELE_PAIRS, "standard vs fromele", fromele_dir,
             label_a="{0} (standard)", label_b="{0} (fromele)",
         )
         print(f"  Fromele comparison plots → {fromele_dir}/")
 
     # ── JSON ──────────────────────────────────────────────────────────────────
-    class _NpEncoder(json.JSONEncoder):
-        def default(self, o):
-            if isinstance(o, np.floating): return float(o)
-            if isinstance(o, np.integer):  return int(o)
-            if isinstance(o, np.bool_):    return bool(o)
-            return super().default(o)
-
     json_path = f"response/functions/dcb_results_ecm{ecm}.json"
     with open(json_path, "w") as fj:
         json.dump(results, fj, indent=2, cls=_NpEncoder)
@@ -1315,7 +1314,7 @@ for ecm in ECM_LIST:
     # ── C++ header ────────────────────────────────────────────────────────────
     cpp = [
         "#pragma once",
-        "// Auto-generated by fit_dcb_resolutions.py (v2)",
+        "// Auto-generated by fit_resolutions.py",
         f"// Fitted from wzp6_ee_munumuqq_noCut_ecm{ecm}.",
         "//",
         "// Usage:",
