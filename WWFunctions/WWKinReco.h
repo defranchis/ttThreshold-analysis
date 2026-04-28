@@ -7,10 +7,7 @@
 #include "Math/Minimizer.h"
 #include "Math/Factory.h"
 #include "Math/Functor.h"
-#include "response/functions/dcb_params_common.h"
-#include "response/functions/dcb_params_ecm157.h"
-#include "response/functions/dcb_params_ecm160.h"
-#include "response/functions/dcb_params_ecm163.h"
+#include "response/functions/dcb_params.h"
 #include "WWFunctions/WWFunctions.h"
 
 namespace FCCAnalyses { namespace WWFunctions {
@@ -110,7 +107,7 @@ struct KinFitResult {
     float p1, p2, pn, pl;   // phi shifts:   jet1, jet2, MET, lepton
     float chi2;
     int   valid;
-    float mWlep_postfit, mWhad_postfit;
+    float mWlep_postfit, mWhad_postfit, mWW_postfit;
     float pt_j1_postfit, pt_j2_postfit, pt_lep_postfit, pt_nu_postfit;
     float Wlep_px_postfit, Wlep_py_postfit, Wlep_pz_postfit;
     float Whad_px_postfit, Whad_py_postfit, Whad_pz_postfit;
@@ -127,69 +124,7 @@ static TLorentzVector _vec_spherical(double p, double theta, double phi) {
     return v;
 }
 
-// ── lightweight massless 4-vector (E = p) for chi2 evaluations ───────────
-// Avoids TLorentzVector construction/virtual-dispatch overhead in the hot path.
-struct Vec4 {
-    double px, py, pz, E;
-    static Vec4 spherical(double p, double th, double ph) {
-        double sth = std::sin(th), cth = std::cos(th);
-        return {p * sth * std::cos(ph), p * sth * std::sin(ph), p * cth, p};
-    }
-    Vec4 operator+(const Vec4& o) const { return {px+o.px, py+o.py, pz+o.pz, E+o.E}; }
-    double M2() const { return E*E - px*px - py*py - pz*pz; }
-    double M()  const { double m2 = M2(); return m2 > 0.0 ? std::sqrt(m2) : 0.0; }
-};
 
-// Shared chi2 kernel — called by both kinFit and kinFitBFGS lambdas.
-static double _chi2_eval(
-    double mW, double gW,
-    double s1, double s2, double sl, double sn,
-    double t1, double t2, double tn,
-    double p1, double p2, double pn,
-    double jet1_p, double jet1_theta, double jet1_phi,
-    double jet2_p, double jet2_theta, double jet2_phi,
-    double lep_p,  double lep_theta,  double lep_phi,
-    double nu_p,   double nu_theta,   double nu_phi)
-{
-    if (gW <= 0.0 || s1 <= 0.0 || s2 <= 0.0 || sl <= 0.0 || sn <= 0.0) return 1e10;
-
-    // s = response = p_reco/p_gen  →  p_fit = p_meas / s
-    // t, p = absolute angular shifts in radians  →  angle_fit = angle_meas - shift
-    Vec4 j1 = Vec4::spherical(jet1_p/s1, jet1_theta - t1, jet1_phi - p1);
-    Vec4 j2 = Vec4::spherical(jet2_p/s2, jet2_theta - t2, jet2_phi - p2);
-    Vec4 lf = Vec4::spherical(lep_p/sl,  lep_theta,        lep_phi);
-    Vec4 nf = Vec4::spherical(nu_p/sn,   nu_theta   - tn,  nu_phi  - pn);
-
-    Vec4 Wh = j1 + j2;
-    Vec4 Wl = lf + nf;
-
-    double mh = Wh.M(), ml = Wl.M();
-    double mwgw = mW * gW;
-    double dh   = mh*mh - mW*mW,  dl = ml*ml - mW*mW;
-    double bw_h = mwgw / (dh*dh + mwgw*mwgw);
-    double bw_l = mwgw / (dl*dl + mwgw*mwgw);
-    double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l));
-
-    Vec4 WW = Wh + Wl;
-    double cons = dcb_neg2logpdf(WW.px, kf_px_tot_gen)
-                + dcb_neg2logpdf(WW.py, kf_py_tot_gen)
-                + dcb_neg2logpdf(WW.pz, kf_pz_tot_gen)
-                + dcb_expright_gauss_neg2logpdf(WW.M() - ECM, kf_m_gen_lnuqq_minus_ecm);
-
-    double scale_pen = dcb_gauss_neg2logpdf(s1, kf_jet1_p_resp)
-                     + dcb_gauss_neg2logpdf(s2, kf_jet2_p_resp)
-                     + dcb_neg2logpdf(sl, kf_lep_p_resp)
-                     + dcb_neg2logpdf(sn, kf_met_p_resp);
-
-    double angular = dcb_neg2logpdf(t1, kf_jet1_theta_resol)
-                   + dcb_neg2logpdf(t2, kf_jet2_theta_resol)
-                   + dcb_neg2logpdf(tn, kf_met_theta_resol)
-                   + dcb_neg2logpdf(p1, kf_jet1_phi_resol)
-                   + dcb_neg2logpdf(p2, kf_jet2_phi_resol)
-                   + dcb_neg2logpdf(pn, kf_met_phi_resol);
-
-    return bw_term + cons + scale_pen + angular;
-}
 
 // ── BFGS minimizer ────────────────────────────────────────────────────────
 // Template avoids std::function overhead (no heap, no virtual dispatch).
@@ -359,7 +294,9 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
                            + dcb_neg2logpdf(pn, kf_met_phi_resol)
                            + dcb_neg2logpdf(pl, kf_lep_phi_resol);
 
-            return bw_term + cons + scale_pen + angular;
+            double ecm_over = WW.M() - static_cast<double>(ECM);
+            double ecm_veto = (ecm_over > 0.0) ? 100.0 * ecm_over * ecm_over : 0.0;
+            return bw_term + cons + scale_pen + angular + ecm_veto;
         };
 
         // s-params init at DCB mode (jet resp ≈ 0.97, lep/MET resp ≈ 1.0)
@@ -420,7 +357,9 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
                            + dcb_neg2logpdf(pn, kf_met_phi_resol)
                            + dcb_neg2logpdf(pl, kf_lep_phi_resol);
 
-            return bw_term + cons + scale_pen + angular;
+            double ecm_over = WW.M() - static_cast<double>(ECM);
+            double ecm_veto = (ecm_over > 0.0) ? 100.0 * ecm_over * ecm_over : 0.0;
+            return bw_term + cons + scale_pen + angular + ecm_veto;
         };
 
         double x0[KF_NDIM] = {KF_MW_INIT, 0.97, 0.97, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
@@ -443,7 +382,7 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
     TLorentzVector Wh = j1f + j2f;
     TLorentzVector Wl = lf  + nf;
 
-    result.mWlep_postfit    = Wl.M();       result.mWhad_postfit    = Wh.M();
+    result.mWlep_postfit    = Wl.M();       result.mWhad_postfit    = Wh.M();  result.mWW_postfit = (Wl+Wh).M();
     result.pt_j1_postfit    = j1f.Pt();     result.pt_j2_postfit    = j2f.Pt();
     result.pt_lep_postfit   = lf.Pt();      result.pt_nu_postfit    = nf.Pt();
     result.Wlep_px_postfit  = Wl.Px();      result.Wlep_py_postfit  = Wl.Py();  result.Wlep_pz_postfit = Wl.Pz();
@@ -516,7 +455,9 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                        + dcb_neg2logpdf(pn, kf_met_phi_resol)
                        + dcb_neg2logpdf(pl, kf_lep_phi_resol);
 
-        return bw_term + cons + scale_pen + angular;
+        double ecm_over = WW.M() - static_cast<double>(ECM);
+        double ecm_veto = (ecm_over > 0.0) ? 100.0 * ecm_over * ecm_over : 0.0;
+        return bw_term + cons + scale_pen + angular + ecm_veto;
     };
 
     std::function<double(const double*)> fObj = chi2fn;
@@ -570,7 +511,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     TLorentzVector Wh = j1f + j2f;
     TLorentzVector Wl = lf  + nf;
 
-    result.mWlep_postfit    = Wl.M();       result.mWhad_postfit    = Wh.M();
+    result.mWlep_postfit    = Wl.M();       result.mWhad_postfit    = Wh.M();  result.mWW_postfit = (Wl+Wh).M();
     result.pt_j1_postfit    = j1f.Pt();     result.pt_j2_postfit    = j2f.Pt();
     result.pt_lep_postfit   = lf.Pt();      result.pt_nu_postfit    = nf.Pt();
     result.Wlep_px_postfit  = Wl.Px();      result.Wlep_py_postfit  = Wl.Py();  result.Wlep_pz_postfit = Wl.Pz();

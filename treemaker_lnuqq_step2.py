@@ -110,7 +110,9 @@ all_branches+=["kinfit_mW","kinfit_gW","kinfit_s1","kinfit_s2","kinfit_sl","kinf
                "kinfit_Whad_px","kinfit_Whad_py","kinfit_Whad_pz",
                "kinfit_theta_j1","kinfit_theta_j2","kinfit_theta_nu",
                "kinfit_phi_j1","kinfit_phi_j2","kinfit_phi_nu",
-               "kinfit_deltaP"]
+               "kinfit_deltaP",
+               "kinfit_WW_px","kinfit_WW_py","kinfit_WW_pz",
+               "kinfit_WW_m","kinfit_WW_m_minus_ecm"]
 all_branches+=["pf_qq_mass","pf_qq_p","pf_qq_costheta","pf_qq_phi",
                "Whad_gen_mass","Whad_gen_p","Whad_gen_costheta","Whad_gen_phi",
                "pf_qq_m_resol","pf_qq_p_resol","pf_qq_costheta_resol","pf_qq_phi_resol"]
@@ -659,9 +661,14 @@ class RDFanalysis:
         df = df.Define("kinfit_phi_j1",   "kinfit.phi_j1_postfit")
         df = df.Define("kinfit_phi_j2",   "kinfit.phi_j2_postfit")
         df = df.Define("kinfit_phi_nu",   "kinfit.phi_nu_postfit")
-        df = df.Define("kinfit_tl",       "kinfit.tl")
-        df = df.Define("kinfit_pl",       "kinfit.pl")
-        df = df.Define("kinfit_deltaP",   "kinfit.deltaP_postfit")
+        df = df.Define("kinfit_tl",             "kinfit.tl")
+        df = df.Define("kinfit_pl",             "kinfit.pl")
+        df = df.Define("kinfit_deltaP",         "kinfit.deltaP_postfit")
+        df = df.Define("kinfit_WW_px",          "kinfit.Wlep_px_postfit + kinfit.Whad_px_postfit")
+        df = df.Define("kinfit_WW_py",          "kinfit.Wlep_py_postfit + kinfit.Whad_py_postfit")
+        df = df.Define("kinfit_WW_pz",          "kinfit.Wlep_pz_postfit + kinfit.Whad_pz_postfit")
+        df = df.Define("kinfit_WW_m",           "kinfit.mWW_postfit")
+        df = df.Define("kinfit_WW_m_minus_ecm", "kinfit.mWW_postfit - FCCAnalyses::WWFunctions::ECM")
 
         return df
 
