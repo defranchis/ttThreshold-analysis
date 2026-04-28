@@ -122,7 +122,8 @@ all_branches+=["gen_leps_status1_p","ngen_leps_status2","gen_leps_status2_p","m_
 all_branches+=[ "nRecoJets", "jet1_p", "jet2_p", "d_12","m_iso_lnuexcljj","jet1_pt","jet2_pt","jet1_eta","jet2_eta","jet1_phi","jet2_phi","jet1_mass","jet2_mass"]
 if RUN_KINFIT:
     all_branches+=["kinfit_mW","kinfit_gW","kinfit_s1","kinfit_s2","kinfit_sl","kinfit_sn",
-                   "kinfit_t1","kinfit_t2","kinfit_tn","kinfit_p1","kinfit_p2","kinfit_pn",
+                   "kinfit_t1","kinfit_t2","kinfit_tn","kinfit_tl",
+                   "kinfit_p1","kinfit_p2","kinfit_pn","kinfit_pl",
                    "kinfit_chi2","kinfit_valid",
                    "kinfit_mWlep","kinfit_mWhad",
                    "kinfit_pt_j1","kinfit_pt_j2","kinfit_pt_lep","kinfit_pt_nu",
@@ -763,6 +764,8 @@ class RDFanalysis:
             df = df.Define("kinfit_phi_j1",   "kinfit.phi_j1_postfit")
             df = df.Define("kinfit_phi_j2",   "kinfit.phi_j2_postfit")
             df = df.Define("kinfit_phi_nu",   "kinfit.phi_nu_postfit")
+            df = df.Define("kinfit_tl",       "kinfit.tl")
+            df = df.Define("kinfit_pl",       "kinfit.pl")
             df = df.Define("kinfit_deltaP",   "kinfit.deltaP_postfit")
 
             #            m_on  = max(m_lnu , m_jj)

@@ -12,8 +12,12 @@
 #include "Math/Minimizer.h"
 #include "Math/Factory.h"
 #include "Math/Functor.h"
+#include "response/functions/dcb_params_ecm160.h"
 
 namespace FCCAnalyses { namespace WWFunctions {
+
+// Pull in DCB evaluators and fitted params from the generated header.
+using namespace ::WWFunctions;
 
 inline float ECM = 160.0f;
 
@@ -311,30 +315,21 @@ float sumP_gen_new(const TLorentzVector& Wlep, const TLorentzVector& Whad) {
 
 // ── kinematic fit ──────────────────────────────────────────────────────────
 
-// Fit constants (matching W_kin_fit.py)
-static constexpr double KF_SIGMA_SQRTS      = 0.12;
-static constexpr double KF_JET_SCALE_BIAS   = 1.01;
-static constexpr double KF_JET_SCALE_SIGMA  = 0.05;
-static constexpr double KF_LEP_SCALE_BIAS   = 1.0;
-static constexpr double KF_LEP_SCALE_SIGMA  = 0.002;
-static constexpr double KF_MET_SCALE_BIAS   = 1.0;
-static constexpr double KF_MET_SCALE_SIGMA  = 0.015;
-static constexpr double KF_MOMENTUM_PENALTY = 100.0;
-static constexpr double KF_JET1_THETA_RMS   = 0.05;
-static constexpr double KF_JET1_PHI_RMS     = 0.05;
-static constexpr double KF_JET2_THETA_RMS   = 0.05;
-static constexpr double KF_JET2_PHI_RMS     = 0.06;
-static constexpr double KF_MET_THETA_RMS    = 0.04;
-static constexpr double KF_MET_PHI_RMS      = 0.05;
-static constexpr double KF_MW_INIT          = 80.419;
-static constexpr double KF_GW_FIXED         = 2.049;
-static constexpr int    KF_NDIM             = 11;   // free parameters when gW is fixed
+// Kinematic fit constants.
+// Momentum scale params (s1,s2,sl,sn) are now response = p_reco/p_gen;
+// angular params (t1,t2,tn,p1,p2,pn) are now absolute shifts in radians.
+// Constraints use DCB/DCB+G PDFs from dcb_params_ecm160.h.
+// sqrts constraint uses DCBG_M_GEN_LNUQQ_MINUS_ECM: fitted PDF of (m_gen_WW - ECM),
+// which is the physically correct ISR-induced invariant-mass deficit of the final state.
+static constexpr double KF_MW_INIT = 80.419;
+static constexpr double KF_GW_FIXED = 2.049;
+static constexpr int    KF_NDIM    = 13;   // free parameters when gW is fixed (added tl, pl)
 
 struct KinFitResult {
     float mW, gW;
     float s1, s2, sl, sn;
-    float t1, t2, tn;
-    float p1, p2, pn;
+    float t1, t2, tn, tl;   // theta shifts: jet1, jet2, MET, lepton
+    float p1, p2, pn, pl;   // phi shifts:   jet1, jet2, MET, lepton
     float chi2;
     int   valid;
     float mWlep_postfit, mWhad_postfit;
@@ -378,12 +373,14 @@ static double _chi2_eval(
     double lep_p,  double lep_theta,  double lep_phi,
     double nu_p,   double nu_theta,   double nu_phi)
 {
-    if (gW <= 0.0) return 1e10;
+    if (gW <= 0.0 || s1 <= 0.0 || s2 <= 0.0 || sl <= 0.0 || sn <= 0.0) return 1e10;
 
-    Vec4 j1 = Vec4::spherical(jet1_p*s1, jet1_theta + t1*KF_JET1_THETA_RMS, jet1_phi + p1*KF_JET1_PHI_RMS);
-    Vec4 j2 = Vec4::spherical(jet2_p*s2, jet2_theta + t2*KF_JET2_THETA_RMS, jet2_phi + p2*KF_JET2_PHI_RMS);
-    Vec4 lf = Vec4::spherical(lep_p*sl,  lep_theta,                          lep_phi);
-    Vec4 nf = Vec4::spherical(nu_p*sn,   nu_theta   + tn*KF_MET_THETA_RMS,   nu_phi  + pn*KF_MET_PHI_RMS);
+    // s = response = p_reco/p_gen  →  p_fit = p_meas / s
+    // t, p = absolute angular shifts in radians  →  angle_fit = angle_meas - shift
+    Vec4 j1 = Vec4::spherical(jet1_p/s1, jet1_theta - t1, jet1_phi - p1);
+    Vec4 j2 = Vec4::spherical(jet2_p/s2, jet2_theta - t2, jet2_phi - p2);
+    Vec4 lf = Vec4::spherical(lep_p/sl,  lep_theta,        lep_phi);
+    Vec4 nf = Vec4::spherical(nu_p/sn,   nu_theta   - tn,  nu_phi  - pn);
 
     Vec4 Wh = j1 + j2;
     Vec4 Wl = lf + nf;
@@ -396,15 +393,23 @@ static double _chi2_eval(
     double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l));
 
     Vec4 WW = Wh + Wl;
-    double cons = std::pow(WW.E - ECM, 2) / (KF_SIGMA_SQRTS * KF_SIGMA_SQRTS)
-                + (WW.px*WW.px + WW.py*WW.py + WW.pz*WW.pz) * KF_MOMENTUM_PENALTY;
+    // sqrts: gen WW mass minus ECM (ISR energy deficit); 3-momentum: gen-level ISR distributions
+    double cons = dcb_gauss_neg2logpdf(WW.M() - ECM, DCBG_M_GEN_LNUQQ_MINUS_ECM)
+                + dcb_gauss_neg2logpdf(WW.px, DCBG_PX_TOT_GEN)
+                + dcb_gauss_neg2logpdf(WW.py, DCBG_PY_TOT_GEN)
+                + dcb_gauss_neg2logpdf(WW.pz, DCBG_PZ_TOT_GEN);
 
-    double scale_pen = std::pow((s1-KF_JET_SCALE_BIAS)/KF_JET_SCALE_SIGMA, 2)
-                     + std::pow((s2-KF_JET_SCALE_BIAS)/KF_JET_SCALE_SIGMA, 2)
-                     + std::pow((sl-KF_LEP_SCALE_BIAS)/KF_LEP_SCALE_SIGMA, 2)
-                     + std::pow((sn-KF_MET_SCALE_BIAS)/KF_MET_SCALE_SIGMA, 2);
+    double scale_pen = dcb_gauss_neg2logpdf(s1, DCBG_JET1_P_RESP)
+                     + dcb_gauss_neg2logpdf(s2, DCBG_JET2_P_RESP)
+                     + dcb_neg2logpdf(sl, DCB_LEP_P_RESP)
+                     + dcb_neg2logpdf(sn, DCB_MET_P_RESP);
 
-    double angular = t1*t1 + t2*t2 + tn*tn + p1*p1 + p2*p2 + pn*pn;
+    double angular = dcb_neg2logpdf(t1, DCB_JET1_THETA_RESOL)
+                   + dcb_neg2logpdf(t2, DCB_JET2_THETA_RESOL)
+                   + dcb_neg2logpdf(tn, DCB_MET_THETA_RESOL)
+                   + dcb_neg2logpdf(p1, DCB_JET1_PHI_RESOL)
+                   + dcb_neg2logpdf(p2, DCB_JET2_PHI_RESOL)
+                   + dcb_neg2logpdf(pn, DCB_MET_PHI_RESOL);
 
     return bw_term + cons + scale_pen + angular;
 }
@@ -529,18 +534,20 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
     double fmin = 0;
 
     if (fit_gW) {
-        // 12 free parameters: x[0]=mW, x[1]=gW, x[2..5]=scales, x[6..8]=theta, x[9..11]=phi
+        // 14 free parameters: x[0]=mW, x[1]=gW, x[2..5]=scales, x[6..8]=jet/MET theta, x[9..11]=jet/MET phi, x[12..13]=lep angles
         auto chi2fn = [=](const double* x) -> double {
             const double mW = x[0], gW = x[1];
             if (gW <= 0.0) return 1e10;
             const double s1 = x[2], s2 = x[3], sl = x[4], sn = x[5];
             const double t1 = x[6], t2 = x[7], tn = x[8];
             const double p1 = x[9], p2 = x[10], pn = x[11];
+            const double tl = x[12], pl = x[13];
+            if (s1 <= 0.0 || s2 <= 0.0 || sl <= 0.0 || sn <= 0.0) return 1e10;
 
-            TLorentzVector j1f = _vec_spherical(jet1_p*s1,    jet1_theta    + t1*KF_JET1_THETA_RMS, jet1_phi    + p1*KF_JET1_PHI_RMS);
-            TLorentzVector j2f = _vec_spherical(jet2_p*s2,    jet2_theta    + t2*KF_JET2_THETA_RMS, jet2_phi    + p2*KF_JET2_PHI_RMS);
-            TLorentzVector lf  = _vec_spherical(Isolep_p*sl,  Isolep_theta,                         Isolep_phi);
-            TLorentzVector nf  = _vec_spherical(missing_p*sn, missing_p_theta + tn*KF_MET_THETA_RMS, missing_p_phi + pn*KF_MET_PHI_RMS);
+            TLorentzVector j1f = _vec_spherical(jet1_p/s1,    jet1_theta    - t1, jet1_phi    - p1);
+            TLorentzVector j2f = _vec_spherical(jet2_p/s2,    jet2_theta    - t2, jet2_phi    - p2);
+            TLorentzVector lf  = _vec_spherical(Isolep_p/sl,  Isolep_theta  - tl, Isolep_phi  - pl);
+            TLorentzVector nf  = _vec_spherical(missing_p/sn, missing_p_theta - tn, missing_p_phi - pn);
 
             TLorentzVector Wh = j1f + j2f;
             TLorentzVector Wl = lf  + nf;
@@ -553,39 +560,52 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
             double bw_l = mwgw / (dl*dl + mwgw*mwgw);
             double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l));
 
-            double cons = std::pow(WW.E() - ECM, 2) / (KF_SIGMA_SQRTS * KF_SIGMA_SQRTS)
-                        + (std::pow(Wh.Px()+Wl.Px(), 2) + std::pow(Wh.Py()+Wl.Py(), 2) + std::pow(Wh.Pz()+Wl.Pz(), 2)) * KF_MOMENTUM_PENALTY;
+            double cons = dcb_gauss_neg2logpdf(WW.M() - ECM, DCBG_M_GEN_LNUQQ_MINUS_ECM)
+                        + dcb_gauss_neg2logpdf(WW.Px(), DCBG_PX_TOT_GEN)
+                        + dcb_gauss_neg2logpdf(WW.Py(), DCBG_PY_TOT_GEN)
+                        + dcb_gauss_neg2logpdf(WW.Pz(), DCBG_PZ_TOT_GEN);
 
-            double scale_pen = std::pow((s1-KF_JET_SCALE_BIAS)/KF_JET_SCALE_SIGMA, 2)
-                             + std::pow((s2-KF_JET_SCALE_BIAS)/KF_JET_SCALE_SIGMA, 2)
-                             + std::pow((sl-KF_LEP_SCALE_BIAS)/KF_LEP_SCALE_SIGMA, 2)
-                             + std::pow((sn-KF_MET_SCALE_BIAS)/KF_MET_SCALE_SIGMA, 2);
+            double scale_pen = dcb_gauss_neg2logpdf(s1, DCBG_JET1_P_RESP)
+                             + dcb_gauss_neg2logpdf(s2, DCBG_JET2_P_RESP)
+                             + dcb_neg2logpdf(sl, DCB_LEP_P_RESP)
+                             + dcb_neg2logpdf(sn, DCB_MET_P_RESP);
 
-            double angular = t1*t1 + t2*t2 + tn*tn + p1*p1 + p2*p2 + pn*pn;
+            double angular = dcb_neg2logpdf(t1, DCB_JET1_THETA_RESOL)
+                           + dcb_neg2logpdf(t2, DCB_JET2_THETA_RESOL)
+                           + dcb_neg2logpdf(tn, DCB_MET_THETA_RESOL)
+                           + dcb_neg2logpdf(tl, DCB_LEP_THETA_RESOL)
+                           + dcb_neg2logpdf(p1, DCB_JET1_PHI_RESOL)
+                           + dcb_neg2logpdf(p2, DCB_JET2_PHI_RESOL)
+                           + dcb_neg2logpdf(pn, DCB_MET_PHI_RESOL)
+                           + dcb_neg2logpdf(pl, DCB_LEP_PHI_RESOL);
 
             return bw_term + cons + scale_pen + angular;
         };
 
-        double x0[12] = {KF_MW_INIT, KF_GW_FIXED, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-        int status = _bfgs_minimize<decltype(chi2fn), 12>(chi2fn, x0, fmin);
+        // s-params init at DCB mode (jet resp ≈ 0.97, lep/MET resp ≈ 1.0)
+        double x0[14] = {KF_MW_INIT, KF_GW_FIXED, 0.97, 0.97, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        int status = _bfgs_minimize<decltype(chi2fn), 14>(chi2fn, x0, fmin);
         result.valid = (status == 0) ? 1 : 0;
         result.chi2  = fmin;
         result.mW = x0[0]; result.gW = x0[1];
         result.s1 = x0[2]; result.s2 = x0[3]; result.sl = x0[4]; result.sn = x0[5];
         result.t1 = x0[6]; result.t2 = x0[7]; result.tn = x0[8];
         result.p1 = x0[9]; result.p2 = x0[10]; result.pn = x0[11];
+        result.tl = x0[12]; result.pl = x0[13];
     } else {
-        // 11 free parameters: x[0]=mW, x[1..4]=scales, x[5..7]=theta, x[8..10]=phi
+        // 13 free parameters (KF_NDIM): x[0]=mW, x[1..4]=scales, x[5..7]=jet/MET theta, x[8..10]=jet/MET phi, x[11..12]=lep angles
         auto chi2fn = [=](const double* x) -> double {
             const double mW = x[0];
             const double s1 = x[1], s2 = x[2], sl = x[3], sn = x[4];
             const double t1 = x[5], t2 = x[6], tn = x[7];
             const double p1 = x[8], p2 = x[9], pn = x[10];
+            const double tl = x[11], pl = x[12];
+            if (s1 <= 0.0 || s2 <= 0.0 || sl <= 0.0 || sn <= 0.0) return 1e10;
 
-            TLorentzVector j1f = _vec_spherical(jet1_p*s1,    jet1_theta    + t1*KF_JET1_THETA_RMS, jet1_phi    + p1*KF_JET1_PHI_RMS);
-            TLorentzVector j2f = _vec_spherical(jet2_p*s2,    jet2_theta    + t2*KF_JET2_THETA_RMS, jet2_phi    + p2*KF_JET2_PHI_RMS);
-            TLorentzVector lf  = _vec_spherical(Isolep_p*sl,  Isolep_theta,                         Isolep_phi);
-            TLorentzVector nf  = _vec_spherical(missing_p*sn, missing_p_theta + tn*KF_MET_THETA_RMS, missing_p_phi + pn*KF_MET_PHI_RMS);
+            TLorentzVector j1f = _vec_spherical(jet1_p/s1,    jet1_theta    - t1, jet1_phi    - p1);
+            TLorentzVector j2f = _vec_spherical(jet2_p/s2,    jet2_theta    - t2, jet2_phi    - p2);
+            TLorentzVector lf  = _vec_spherical(Isolep_p/sl,  Isolep_theta  - tl, Isolep_phi  - pl);
+            TLorentzVector nf  = _vec_spherical(missing_p/sn, missing_p_theta - tn, missing_p_phi - pn);
 
             TLorentzVector Wh = j1f + j2f;
             TLorentzVector Wl = lf  + nf;
@@ -598,20 +618,29 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
             double bw_l = mwgw / (dl*dl + mwgw*mwgw);
             double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l));
 
-            double cons = std::pow(WW.E() - ECM, 2) / (KF_SIGMA_SQRTS * KF_SIGMA_SQRTS)
-                        + (std::pow(Wh.Px()+Wl.Px(), 2) + std::pow(Wh.Py()+Wl.Py(), 2) + std::pow(Wh.Pz()+Wl.Pz(), 2)) * KF_MOMENTUM_PENALTY;
+            double cons = dcb_gauss_neg2logpdf(WW.M() - ECM, DCBG_M_GEN_LNUQQ_MINUS_ECM)
+                        + dcb_gauss_neg2logpdf(WW.Px(), DCBG_PX_TOT_GEN)
+                        + dcb_gauss_neg2logpdf(WW.Py(), DCBG_PY_TOT_GEN)
+                        + dcb_gauss_neg2logpdf(WW.Pz(), DCBG_PZ_TOT_GEN);
 
-            double scale_pen = std::pow((s1-KF_JET_SCALE_BIAS)/KF_JET_SCALE_SIGMA, 2)
-                             + std::pow((s2-KF_JET_SCALE_BIAS)/KF_JET_SCALE_SIGMA, 2)
-                             + std::pow((sl-KF_LEP_SCALE_BIAS)/KF_LEP_SCALE_SIGMA, 2)
-                             + std::pow((sn-KF_MET_SCALE_BIAS)/KF_MET_SCALE_SIGMA, 2);
+            double scale_pen = dcb_gauss_neg2logpdf(s1, DCBG_JET1_P_RESP)
+                             + dcb_gauss_neg2logpdf(s2, DCBG_JET2_P_RESP)
+                             + dcb_neg2logpdf(sl, DCB_LEP_P_RESP)
+                             + dcb_neg2logpdf(sn, DCB_MET_P_RESP);
 
-            double angular = t1*t1 + t2*t2 + tn*tn + p1*p1 + p2*p2 + pn*pn;
+            double angular = dcb_neg2logpdf(t1, DCB_JET1_THETA_RESOL)
+                           + dcb_neg2logpdf(t2, DCB_JET2_THETA_RESOL)
+                           + dcb_neg2logpdf(tn, DCB_MET_THETA_RESOL)
+                           + dcb_neg2logpdf(tl, DCB_LEP_THETA_RESOL)
+                           + dcb_neg2logpdf(p1, DCB_JET1_PHI_RESOL)
+                           + dcb_neg2logpdf(p2, DCB_JET2_PHI_RESOL)
+                           + dcb_neg2logpdf(pn, DCB_MET_PHI_RESOL)
+                           + dcb_neg2logpdf(pl, DCB_LEP_PHI_RESOL);
 
             return bw_term + cons + scale_pen + angular;
         };
 
-        double x0[KF_NDIM] = {KF_MW_INIT, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        double x0[KF_NDIM] = {KF_MW_INIT, 0.97, 0.97, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
         int status = _bfgs_minimize<decltype(chi2fn), KF_NDIM>(chi2fn, x0, fmin);
         result.valid = (status == 0) ? 1 : 0;
         result.chi2  = fmin;
@@ -619,13 +648,14 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
         result.s1 = x0[1]; result.s2 = x0[2]; result.sl = x0[3]; result.sn = x0[4];
         result.t1 = x0[5]; result.t2 = x0[6]; result.tn = x0[7];
         result.p1 = x0[8]; result.p2 = x0[9]; result.pn = x0[10];
+        result.tl = x0[11]; result.pl = x0[12];
     }
 
     // Post-fit kinematics (shared — uses result fields filled above)
-    TLorentzVector j1f = _vec_spherical(jet1_p*result.s1,    jet1_theta    + result.t1*KF_JET1_THETA_RMS, jet1_phi    + result.p1*KF_JET1_PHI_RMS);
-    TLorentzVector j2f = _vec_spherical(jet2_p*result.s2,    jet2_theta    + result.t2*KF_JET2_THETA_RMS, jet2_phi    + result.p2*KF_JET2_PHI_RMS);
-    TLorentzVector lf  = _vec_spherical(Isolep_p*result.sl,  Isolep_theta,                                Isolep_phi);
-    TLorentzVector nf  = _vec_spherical(missing_p*result.sn, missing_p_theta + result.tn*KF_MET_THETA_RMS, missing_p_phi + result.pn*KF_MET_PHI_RMS);
+    TLorentzVector j1f = _vec_spherical(jet1_p/result.s1,    jet1_theta    - result.t1, jet1_phi    - result.p1);
+    TLorentzVector j2f = _vec_spherical(jet2_p/result.s2,    jet2_theta    - result.t2, jet2_phi    - result.p2);
+    TLorentzVector lf  = _vec_spherical(Isolep_p/result.sl,  Isolep_theta - result.tl, Isolep_phi - result.pl);
+    TLorentzVector nf  = _vec_spherical(missing_p/result.sn, missing_p_theta - result.tn, missing_p_phi - result.pn);
 
     TLorentzVector Wh = j1f + j2f;
     TLorentzVector Wl = lf  + nf;
@@ -657,7 +687,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     if (Isolep_p < 0 || jet1_p <= 0 || jet2_p <= 0 || missing_p <= 0)
         return result;
 
-    // Always 12 parameters: x[0]=mW, x[1]=gW, x[2..5]=scales, x[6..8]=theta, x[9..11]=phi.
+    // 14 parameters: x[0]=mW, x[1]=gW, x[2..5]=scales, x[6..8]=jet/MET theta, x[9..11]=jet/MET phi, x[12..13]=lep angles.
     // When fit_gW=false, gW is pinned to KF_GW_FIXED via FixVariable(1).
     auto chi2fn = [=](const double* x) -> double {
         const double mW = x[0], gW = x[1];
@@ -665,11 +695,13 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         const double s1 = x[2], s2 = x[3], sl = x[4], sn = x[5];
         const double t1 = x[6], t2 = x[7], tn = x[8];
         const double p1 = x[9], p2 = x[10], pn = x[11];
+        const double tl = x[12], pl = x[13];
+        if (s1 <= 0.0 || s2 <= 0.0 || sl <= 0.0 || sn <= 0.0) return 1e10;
 
-        TLorentzVector j1f = _vec_spherical(jet1_p*s1,    jet1_theta    + t1*KF_JET1_THETA_RMS, jet1_phi    + p1*KF_JET1_PHI_RMS);
-        TLorentzVector j2f = _vec_spherical(jet2_p*s2,    jet2_theta    + t2*KF_JET2_THETA_RMS, jet2_phi    + p2*KF_JET2_PHI_RMS);
-        TLorentzVector lf  = _vec_spherical(Isolep_p*sl,  Isolep_theta,                         Isolep_phi);
-        TLorentzVector nf  = _vec_spherical(missing_p*sn, missing_p_theta + tn*KF_MET_THETA_RMS, missing_p_phi + pn*KF_MET_PHI_RMS);
+        TLorentzVector j1f = _vec_spherical(jet1_p/s1,    jet1_theta    - t1, jet1_phi    - p1);
+        TLorentzVector j2f = _vec_spherical(jet2_p/s2,    jet2_theta    - t2, jet2_phi    - p2);
+        TLorentzVector lf  = _vec_spherical(Isolep_p/sl,  Isolep_theta  - tl, Isolep_phi  - pl);
+        TLorentzVector nf  = _vec_spherical(missing_p/sn, missing_p_theta - tn, missing_p_phi - pn);
 
         TLorentzVector Wh = j1f + j2f;
         TLorentzVector Wl = lf  + nf;
@@ -682,21 +714,30 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         double bw_l = mwgw / (dl*dl + mwgw*mwgw);
         double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l));
 
-        double cons = std::pow(WW.E() - ECM, 2) / (KF_SIGMA_SQRTS * KF_SIGMA_SQRTS)
-                    + (std::pow(Wh.Px()+Wl.Px(), 2) + std::pow(Wh.Py()+Wl.Py(), 2) + std::pow(Wh.Pz()+Wl.Pz(), 2)) * KF_MOMENTUM_PENALTY;
+        double cons = dcb_gauss_neg2logpdf(WW.E() - ECM, DCBG_PZ_TOT_GEN)
+                    + dcb_gauss_neg2logpdf(WW.Px(), DCBG_PX_TOT_GEN)
+                    + dcb_gauss_neg2logpdf(WW.Py(), DCBG_PY_TOT_GEN)
+                    + dcb_gauss_neg2logpdf(WW.Pz(), DCBG_PZ_TOT_GEN);
 
-        double scale_pen = std::pow((s1-KF_JET_SCALE_BIAS)/KF_JET_SCALE_SIGMA, 2)
-                         + std::pow((s2-KF_JET_SCALE_BIAS)/KF_JET_SCALE_SIGMA, 2)
-                         + std::pow((sl-KF_LEP_SCALE_BIAS)/KF_LEP_SCALE_SIGMA, 2)
-                         + std::pow((sn-KF_MET_SCALE_BIAS)/KF_MET_SCALE_SIGMA, 2);
+        double scale_pen = dcb_gauss_neg2logpdf(s1, DCBG_JET1_P_RESP)
+                         + dcb_gauss_neg2logpdf(s2, DCBG_JET2_P_RESP)
+                         + dcb_neg2logpdf(sl, DCB_LEP_P_RESP)
+                         + dcb_neg2logpdf(sn, DCB_MET_P_RESP);
 
-        double angular = t1*t1 + t2*t2 + tn*tn + p1*p1 + p2*p2 + pn*pn;
+        double angular = dcb_neg2logpdf(t1, DCB_JET1_THETA_RESOL)
+                       + dcb_neg2logpdf(t2, DCB_JET2_THETA_RESOL)
+                       + dcb_neg2logpdf(tn, DCB_MET_THETA_RESOL)
+                       + dcb_neg2logpdf(tl, DCB_LEP_THETA_RESOL)
+                       + dcb_neg2logpdf(p1, DCB_JET1_PHI_RESOL)
+                       + dcb_neg2logpdf(p2, DCB_JET2_PHI_RESOL)
+                       + dcb_neg2logpdf(pn, DCB_MET_PHI_RESOL)
+                       + dcb_neg2logpdf(pl, DCB_LEP_PHI_RESOL);
 
         return bw_term + cons + scale_pen + angular;
     };
 
     std::function<double(const double*)> fObj = chi2fn;
-    ROOT::Math::Functor functor(fObj, 12);
+    ROOT::Math::Functor functor(fObj, 14);
 
     std::unique_ptr<ROOT::Math::Minimizer> minimizer(
         ROOT::Math::Factory::CreateMinimizer("Minuit2", "Migrad")
@@ -707,18 +748,21 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     minimizer->SetStrategy(2);
     minimizer->SetPrintLevel(0);
 
+    // s-params: response = p_reco/p_gen; t/p-params: absolute shift in radians
     minimizer->SetVariable(0,  "mW", KF_MW_INIT,  0.1);   minimizer->SetVariableLimits(0,  0.0, 200.0);
     minimizer->SetVariable(1,  "gW", KF_GW_FIXED, 0.01);  minimizer->SetVariableLimits(1,  0.01, 10.0);
-    minimizer->SetVariable(2,  "s1", 1.0,  0.01);
-    minimizer->SetVariable(3,  "s2", 1.0,  0.01);
-    minimizer->SetVariable(4,  "sl", 1.0,  0.001);
-    minimizer->SetVariable(5,  "sn", 1.0,  0.01);
-    minimizer->SetVariable(6,  "t1", 0.0,  0.1);
-    minimizer->SetVariable(7,  "t2", 0.0,  0.1);
-    minimizer->SetVariable(8,  "tn", 0.0,  0.1);
-    minimizer->SetVariable(9,  "p1", 0.0,  0.1);
-    minimizer->SetVariable(10, "p2", 0.0,  0.1);
-    minimizer->SetVariable(11, "pn", 0.0,  0.1);
+    minimizer->SetVariable(2,  "s1", 0.97,  0.01);   // jet1 p-response, DCB mu ≈ 0.974
+    minimizer->SetVariable(3,  "s2", 0.97,  0.01);   // jet2 p-response, DCB mu ≈ 0.970
+    minimizer->SetVariable(4,  "sl", 1.0,   0.001);  // lep  p-response, DCB mu ≈ 1.000
+    minimizer->SetVariable(5,  "sn", 1.0,   0.005);  // MET  p-response, DCB mu ≈ 1.000
+    minimizer->SetVariable(6,  "t1", 0.0,   0.01);   // jet1 dtheta [rad], sigma ≈ 0.014
+    minimizer->SetVariable(7,  "t2", 0.0,   0.01);   // jet2 dtheta [rad], sigma ≈ 0.017
+    minimizer->SetVariable(8,  "tn", 0.0,   0.005);  // MET  dtheta [rad], sigma ≈ 0.008
+    minimizer->SetVariable(9,  "p1", 0.0,   0.01);   // jet1 dphi   [rad], sigma ≈ 0.016
+    minimizer->SetVariable(10, "p2", 0.0,   0.01);   // jet2 dphi   [rad], sigma ≈ 0.020
+    minimizer->SetVariable(11, "pn", 0.0,   0.003);  // MET  dphi   [rad], sigma ≈ 0.004
+    minimizer->SetVariable(12, "tl", 0.0,   0.001);  // lep  dtheta [rad]
+    minimizer->SetVariable(13, "pl", 0.0,   0.001);  // lep  dphi   [rad]
 
     if (!fit_gW) minimizer->FixVariable(1);
 
@@ -732,12 +776,13 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.s1 = x[2]; result.s2 = x[3]; result.sl = x[4]; result.sn = x[5];
     result.t1 = x[6]; result.t2 = x[7]; result.tn = x[8];
     result.p1 = x[9]; result.p2 = x[10]; result.pn = x[11];
+    result.tl = x[12]; result.pl = x[13];
 
     // Post-fit kinematics (shared — uses result fields filled above)
-    TLorentzVector j1f = _vec_spherical(jet1_p*result.s1,    jet1_theta    + result.t1*KF_JET1_THETA_RMS, jet1_phi    + result.p1*KF_JET1_PHI_RMS);
-    TLorentzVector j2f = _vec_spherical(jet2_p*result.s2,    jet2_theta    + result.t2*KF_JET2_THETA_RMS, jet2_phi    + result.p2*KF_JET2_PHI_RMS);
-    TLorentzVector lf  = _vec_spherical(Isolep_p*result.sl,  Isolep_theta,                                Isolep_phi);
-    TLorentzVector nf  = _vec_spherical(missing_p*result.sn, missing_p_theta + result.tn*KF_MET_THETA_RMS, missing_p_phi + result.pn*KF_MET_PHI_RMS);
+    TLorentzVector j1f = _vec_spherical(jet1_p/result.s1,    jet1_theta    - result.t1, jet1_phi    - result.p1);
+    TLorentzVector j2f = _vec_spherical(jet2_p/result.s2,    jet2_theta    - result.t2, jet2_phi    - result.p2);
+    TLorentzVector lf  = _vec_spherical(Isolep_p/result.sl,  Isolep_theta - result.tl, Isolep_phi - result.pl);
+    TLorentzVector nf  = _vec_spherical(missing_p/result.sn, missing_p_theta - result.tn, missing_p_phi - result.pn);
 
     TLorentzVector Wh = j1f + j2f;
     TLorentzVector Wl = lf  + nf;
