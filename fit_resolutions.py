@@ -62,11 +62,17 @@ BRANCH_CONFIG = {
     "met_p_resp":           {"clip": (0.5, 99.5),  "nbins": 150},
     "met_theta_resol":      {"clip": (0.5, 99.5),  "nbins": 150},
     "met_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150},
-    # Gen-level total momenta: narrow ISR-free spike + flat plateau with hard kinematic edge.
-    # dcbgb = DCB narrow core + Gaussian-smeared box (erf-shaped edges).
-    "px_tot_gen":           {"clip": (0.1, 99.9),  "nbins": 150, "model": "dcbgb"},
-    "py_tot_gen":           {"clip": (0.1, 99.9),  "nbins": 150, "model": "dcbgb"},
-    "pz_tot_gen":           {"clip": (0.1, 99.9),  "nbins": 150, "model": "dcbgb"},
+    # Gen-level total momenta: ~85% of events have collinear (or no) ISR → spike at 0
+    # narrower than any reasonable bin; the rest form a smooth ISR tail.
+    # dcb2g (narrow DCB core + wide Gaussian) handles the unresolved spike + smooth
+    # tail; dcbgb's box plateau does not match the data and gives chi²/ndf in the
+    # hundreds for px/py.
+    "px_tot_gen":           {"clip": (0.1, 99.9),  "nbins": 1500, "model": "dcb2g",
+                             "zoom_xlim": (-0.5, 0.5)},
+    "py_tot_gen":           {"clip": (0.1, 99.9),  "nbins": 1500, "model": "dcb2g",
+                             "zoom_xlim": (-0.5, 0.5)},
+    "pz_tot_gen":           {"clip": (0.1, 99.9),  "nbins": 1500, "model": "dcb2g",
+                             "zoom_xlim": (-3.0, 3.0)},
     # Gen WW invariant mass minus ECM. Peak just below 0 (ISR), hard boundary at 0.
     "m_gen_lnuqq_minus_ecm": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber2g"},
 }
@@ -941,7 +947,14 @@ def process_ecm(ecm):
               f"{'OK' if fit_ok else 'WARN'}  [{model}]")
 
         # ── plot ─────────────────────────────────────────────────────────────
-        xfine = np.linspace(edges[0], edges[-1], 600)
+        # Build xfine with a uniform global grid plus a dense sub-grid around
+        # mu_c so very narrow cores (e.g. σ_c sub-mGeV for px/py_tot_gen) are
+        # actually resolved by the displayed curve, not skipped between samples.
+        xfine_uniform = np.linspace(edges[0], edges[-1], 600)
+        _w = max(20.0 * sc, 5.0 * (edges[1] - edges[0]))
+        xfine_peak = np.linspace(max(edges[0], mu_c - _w),
+                                 min(edges[-1], mu_c + _w), 1500)
+        xfine = np.unique(np.concatenate([xfine_uniform, xfine_peak]))
         yfine = yfn(xfine)
         bw    = np.diff(edges)[0]
 
@@ -996,6 +1009,21 @@ def process_ecm(ecm):
 
         for fmt in ("png", "pdf"):
             fig.savefig(f"{plot_dir}/{bname}.{fmt}", dpi=150)
+
+        # Optional zoomed-in view: same fit/binning, narrower x-range + log-y so
+        # the unresolved peak and the wide tail are both visible.
+        zoom_xlim = cfg.get("zoom_xlim")
+        if zoom_xlim is not None:
+            ax.set_xlim(*zoom_xlim)
+            ax_res.set_xlim(*zoom_xlim)
+            in_zoom = (centers >= zoom_xlim[0]) & (centers <= zoom_xlim[1]) & (counts > 0)
+            if in_zoom.any():
+                ax.set_ylim(max(0.5, float(counts[in_zoom].min()) * 0.5),
+                            float(counts[in_zoom].max()) * 1.5)
+                ax.set_yscale("log")
+            for fmt in ("png", "pdf"):
+                fig.savefig(f"{plot_dir}/{bname}_zoom.{fmt}", dpi=150)
+
         plt.close(fig)
 
     # ── Jet1 vs jet2 comparison plots ────────────────────────────────────────

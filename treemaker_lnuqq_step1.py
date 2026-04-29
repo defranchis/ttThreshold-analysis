@@ -83,24 +83,9 @@ class RDFanalysis:
         else:
             df = df.Filter("muons_sel_iso.size() + electrons_sel_iso.size() == 2", "channel: 2 isolated leptons (lep)")
 
-        df = df.Define("Isolep_p",
-            "muons_sel_iso.size() >0 ? FCCAnalyses::ReconstructedParticle::get_p(muons_sel_iso)[0] : (electrons_sel_iso.size() > 0 ? FCCAnalyses::ReconstructedParticle::get_p(electrons_sel_iso)[0] : -999)")
-        df = df.Define("Isolep_e",
-            "muons_sel_iso.size() >0 ? FCCAnalyses::ReconstructedParticle::get_e(muons_sel_iso)[0] : (electrons_sel_iso.size() > 0 ? FCCAnalyses::ReconstructedParticle::get_e(electrons_sel_iso)[0] : -999)")
-        df = df.Define("Isolep_theta",
-            "muons_sel_iso.size() >0 ? FCCAnalyses::ReconstructedParticle::get_theta(muons_sel_iso)[0] : (electrons_sel_iso.size() > 0 ? FCCAnalyses::ReconstructedParticle::get_theta(electrons_sel_iso)[0] : -999)")
-        df = df.Define("Isolep_phi",
-            "muons_sel_iso.size() >0 ? FCCAnalyses::ReconstructedParticle::get_phi(muons_sel_iso)[0] : (electrons_sel_iso.size() > 0 ? FCCAnalyses::ReconstructedParticle::get_phi(electrons_sel_iso)[0] : -999)")
-
-        df = df.Define("Isoleps_p4_reco",
-            "FCCAnalyses::WWFunctions::Isoleps_p4_reco(Isolep_p, Isolep_phi, Isolep_theta, Isolep_e)")
-
-        df = df.Define("missing_p",     "FCCAnalyses::ReconstructedParticle::get_p(MissingET)[0]")
-        df = df.Define("missing_p_theta", "ReconstructedParticle::get_theta(MissingET)[0]")
-        df = df.Define("missing_p_phi",   "ReconstructedParticle::get_phi(MissingET)[0]")
-
-        df = df.Define("missing_p_p4",
-            "FCCAnalyses::WWFunctions::missing_p_p4(missing_p, missing_p_phi, missing_p_theta)")
+        df = df.Define("Isoleps", "ROOT::VecOps::Concatenate(muons_sel_iso, electrons_sel_iso)")
+        df = df.Define("Isoleps_p4_reco", "FCCAnalyses::ReconstructedParticle::get_tlv(Isoleps, 0)")
+        df = df.Define("missing_p_p4",    "FCCAnalyses::ReconstructedParticle::get_tlv(MissingET, 0)")
 
         # ── jet clustering (no flavour tagging needed for kinfit inputs) ───────
         global jetClusteringHelper
@@ -119,11 +104,6 @@ class RDFanalysis:
 
         df = df.Define("jet1", "jets_p4[0]")
         df = df.Define("jet2", "jets_p4[1]")
-        df = df.Define("jet1_p", "jet1.P()")
-        df = df.Define("jet2_p", "jet2.P()")
-        df = df.Define("recoJet_theta", "JetClusteringUtils::get_theta(jet)")
-        df = df.Define("jet1_theta", "recoJet_theta[0]")
-        df = df.Define("jet2_theta", "recoJet_theta[1]")
         df = df.Filter("jets_p4.size() == 2", "exactly 2 reco jets")
 
         # ── gen-level filter (W-daughter selectors via parent==e±) ─────────────
@@ -141,69 +121,48 @@ class RDFanalysis:
         df = df.Filter("gen_lightquarks_fromele.size() == 2",          "gen: exactly 2 light quarks fromele (W daughters)")
 
         # ── gen kinematics (all from W-daughter selectors) ─────────────────────
-        df = df.Define("gen_leps_fromele_p",     "FCCAnalyses::MCParticle::get_p(gen_leps_fromele)")
-        df = df.Define("gen_leps_fromele_pt",    "FCCAnalyses::MCParticle::get_pt(gen_leps_fromele)")
-        df = df.Define("gen_leps_fromele_eta",   "FCCAnalyses::MCParticle::get_eta(gen_leps_fromele)")
-        df = df.Define("gen_leps_fromele_phi",   "FCCAnalyses::MCParticle::get_phi(gen_leps_fromele)")
-        df = df.Define("gen_leps_fromele_theta", "FCCAnalyses::MCParticle::get_theta(gen_leps_fromele)")
-        df = df.Define("gen_leps_fromele_px",    "FCCAnalyses::MCParticle::get_px(gen_leps_fromele)")
-        df = df.Define("gen_leps_fromele_py",    "FCCAnalyses::MCParticle::get_py(gen_leps_fromele)")
-        df = df.Define("gen_leps_fromele_pz",    "FCCAnalyses::MCParticle::get_pz(gen_leps_fromele)")
+        df = df.Define("gen_leps_fromele_tlv",       "FCCAnalyses::MCParticle::get_tlv(gen_leps_fromele)")
+        df = df.Define("gen_neutrinos_fromele_tlv",  "FCCAnalyses::MCParticle::get_tlv(gen_neutrinos_fromele)")
+        df = df.Define("gen_lightquarks_fromele_tlv","FCCAnalyses::MCParticle::get_tlv(gen_lightquarks_fromele)")
 
-        df = df.Define("gen_neutrinos_fromele_p",     "FCCAnalyses::MCParticle::get_p(gen_neutrinos_fromele)")
-        df = df.Define("gen_neutrinos_fromele_pt",    "FCCAnalyses::MCParticle::get_pt(gen_neutrinos_fromele)")
-        df = df.Define("gen_neutrinos_fromele_eta",   "FCCAnalyses::MCParticle::get_eta(gen_neutrinos_fromele)")
-        df = df.Define("gen_neutrinos_fromele_phi",   "FCCAnalyses::MCParticle::get_phi(gen_neutrinos_fromele)")
-        df = df.Define("gen_neutrinos_fromele_theta", "FCCAnalyses::MCParticle::get_theta(gen_neutrinos_fromele)")
-        df = df.Define("gen_neutrinos_fromele_px",    "FCCAnalyses::MCParticle::get_px(gen_neutrinos_fromele)")
-        df = df.Define("gen_neutrinos_fromele_py",    "FCCAnalyses::MCParticle::get_py(gen_neutrinos_fromele)")
-        df = df.Define("gen_neutrinos_fromele_pz",    "FCCAnalyses::MCParticle::get_pz(gen_neutrinos_fromele)")
-
-        df = df.Define("gen_lightquarks_fromele_p",  "FCCAnalyses::MCParticle::get_p(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_px", "FCCAnalyses::MCParticle::get_px(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_py", "FCCAnalyses::MCParticle::get_py(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_pz", "FCCAnalyses::MCParticle::get_pz(gen_lightquarks_fromele)")
-        df = df.Define("gen_lightquarks_fromele_e",  "FCCAnalyses::MCParticle::get_e(gen_lightquarks_fromele)")
+        df = df.Define("lep_p4_gen", "gen_leps_fromele_tlv[0]")
+        df = df.Define("nu_p4_gen",  "gen_neutrinos_fromele_tlv[0]")
+        df = df.Define("gen_q1_p4",  "gen_lightquarks_fromele_tlv[0]")
+        df = df.Define("gen_q2_p4",  "gen_lightquarks_fromele_tlv[1]")
+        # Massless quark TLVs (same 3-momentum, E = |p|) — used for m_gen_lnuqq so the
+        # kinfit constraint PDF is fitted to a mass treatment matching the kinfit's
+        # massless-jet WW.M() postfit.
+        df = df.Define("gen_q1_p4_massless",
+            "TLorentzVector(gen_q1_p4.Px(), gen_q1_p4.Py(), gen_q1_p4.Pz(), gen_q1_p4.P())")
+        df = df.Define("gen_q2_p4_massless",
+            "TLorentzVector(gen_q2_p4.Px(), gen_q2_p4.Py(), gen_q2_p4.Pz(), gen_q2_p4.P())")
 
         # ── kinfit input branches ──────────────────────────────────────────────
-        df = df.Define("lep_p4_gen",
-            "FCCAnalyses::WWFunctions::lep_p4_gen(gen_leps_fromele_pt, gen_leps_fromele_eta, gen_leps_fromele_phi)")
-        df = df.Define("nu_p4_gen",
-            "FCCAnalyses::WWFunctions::nu_p4_gen(gen_neutrinos_fromele_pt, gen_neutrinos_fromele_eta, gen_neutrinos_fromele_phi)")
-
-        df = df.Define("lep_p_resp",      "Isolep_p / gen_leps_fromele_p[0]")
-        df = df.Define("met_p_resp",      "missing_p / gen_neutrinos_fromele_p[0]")
-        df = df.Define("lep_theta_resol", "Isolep_theta - gen_leps_fromele_theta[0]")
+        df = df.Define("lep_p_resp",      "Isoleps_p4_reco.P() / lep_p4_gen.P()")
+        df = df.Define("met_p_resp",      "missing_p_p4.P()    / nu_p4_gen.P()")
+        df = df.Define("lep_theta_resol", "Isoleps_p4_reco.Theta() - lep_p4_gen.Theta()")
         df = df.Define("lep_phi_resol",   "TVector2::Phi_mpi_pi(Isoleps_p4_reco.Phi() - lep_p4_gen.Phi())")
-        df = df.Define("met_theta_resol", "missing_p_theta - gen_neutrinos_fromele_theta[0]")
-        df = df.Define("met_phi_resol",   "TVector2::Phi_mpi_pi(missing_p_p4.Phi() - nu_p4_gen.Phi())")
+        df = df.Define("met_theta_resol", "missing_p_p4.Theta() - nu_p4_gen.Theta()")
+        df = df.Define("met_phi_resol",   "TVector2::Phi_mpi_pi(missing_p_p4.Phi()   - nu_p4_gen.Phi())")
 
-        df = df.Define("gen_lightquarks_fromele_p4",
-            "FCCAnalyses::WWFunctions::build_p4(gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)")
-        df = df.Define("matched_genjets",
-            "FCCAnalyses::WWFunctions::matchJets2(jet1, jet2, gen_lightquarks_fromele_p4[0], gen_lightquarks_fromele_p4[1])")
-        df = df.Define("jet1_matched_p4", "matched_genjets.first")
-        df = df.Define("jet2_matched_p4", "matched_genjets.second")
-        df = df.Define("jet1_p_resp",      "jet1_p / jet1_matched_p4.P()")
-        df = df.Define("jet2_p_resp",      "jet2_p / jet2_matched_p4.P()")
-        df = df.Define("jet1_theta_resol", "jet1_theta - jet1_matched_p4.Theta()")
-        df = df.Define("jet2_theta_resol", "jet2_theta - jet2_matched_p4.Theta()")
-        df = df.Define("jet1_phi_resol",   "TVector2::Phi_mpi_pi(jet1.Phi() - jet1_matched_p4.Phi())")
-        df = df.Define("jet2_phi_resol",   "TVector2::Phi_mpi_pi(jet2.Phi() - jet2_matched_p4.Phi())")
+        df = df.Define("matched_gen_quarks",
+            "FCCAnalyses::WWFunctions::matchJets2(jet1, jet2, gen_q1_p4, gen_q2_p4)")
+        df = df.Define("jet1_matched_q_p4", "matched_gen_quarks.first")
+        df = df.Define("jet2_matched_q_p4", "matched_gen_quarks.second")
+        df = df.Define("jet1_p_resp",      "jet1.P() / jet1_matched_q_p4.P()")
+        df = df.Define("jet2_p_resp",      "jet2.P() / jet2_matched_q_p4.P()")
+        df = df.Define("jet1_theta_resol", "jet1.Theta() - jet1_matched_q_p4.Theta()")
+        df = df.Define("jet2_theta_resol", "jet2.Theta() - jet2_matched_q_p4.Theta()")
+        df = df.Define("jet1_phi_resol",   "TVector2::Phi_mpi_pi(jet1.Phi() - jet1_matched_q_p4.Phi())")
+        df = df.Define("jet2_phi_resol",   "TVector2::Phi_mpi_pi(jet2.Phi() - jet2_matched_q_p4.Phi())")
 
-        df = df.Define("px_tot_gen",
-            "gen_leps_fromele_px[0] + gen_neutrinos_fromele_px[0] + ROOT::VecOps::Sum(gen_lightquarks_fromele_px)")
-        df = df.Define("py_tot_gen",
-            "gen_leps_fromele_py[0] + gen_neutrinos_fromele_py[0] + ROOT::VecOps::Sum(gen_lightquarks_fromele_py)")
-        df = df.Define("pz_tot_gen",
-            "gen_leps_fromele_pz[0] + gen_neutrinos_fromele_pz[0] + ROOT::VecOps::Sum(gen_lightquarks_fromele_pz)")
-
-        df = df.Define("m_gen_lnuqq",
-            "FCCAnalyses::WWFunctions::m_gen_lnuqq(gen_leps_fromele_p, gen_lightquarks_fromele_p, "
-            "gen_leps_fromele_px, gen_leps_fromele_py, gen_leps_fromele_pz, gen_leps_fromele_p, "
-            "gen_neutrinos_fromele_px, gen_neutrinos_fromele_py, gen_neutrinos_fromele_pz, gen_neutrinos_fromele_p, "
-            "gen_lightquarks_fromele_px, gen_lightquarks_fromele_py, gen_lightquarks_fromele_pz, gen_lightquarks_fromele_e)")
+        df = df.Define("Wlnuqq_gen",
+            "FCCAnalyses::WWFunctions::sum_p4({lep_p4_gen, nu_p4_gen, gen_q1_p4_massless, gen_q2_p4_massless})")
+        df = df.Define("m_gen_lnuqq",           "Wlnuqq_gen.M()")
         df = df.Define("m_gen_lnuqq_minus_ecm", "m_gen_lnuqq - FCCAnalyses::WWFunctions::ECM")
+        df = df.Define("px_tot_gen", "Wlnuqq_gen.Px()")
+        df = df.Define("py_tot_gen", "Wlnuqq_gen.Py()")
+        df = df.Define("pz_tot_gen", "Wlnuqq_gen.Pz()")
 
         # Cutflow diagnostic — triggers an extra pass over the data, but prints
         # pass/all and efficiency for every named Filter() above.

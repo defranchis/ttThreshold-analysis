@@ -4,45 +4,50 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 ECM_LIST  = [157, 160, 163]
-INDIR     = "outputs/histmaker/lnuqq/step2/semihad"
+INDIR     = "outputs/treemaker/lnuqq/step2/semihad"
+TREE_NAME = "events"
 OUTDIR    = "outputs/plots/lnuqq/allbranches"
 os.makedirs(OUTDIR, exist_ok=True)
 
 HISTS_CFG = [
-    ("no_cut_Wlep_reco_mass", "Wlep reco (pre-fit)",  "tab:blue",  ":"),
-    ("no_cut_Whad_reco_mass", "Whad reco (pre-fit)",  "tab:green", ":"),
-    ("no_cut_kinfit_mWlep",   "Wlep (kinfit)",         "tab:blue",  "--"),
-    ("no_cut_kinfit_mWhad",   "Whad (kinfit)",          "tab:green", "--"),
-    ("no_cut_kinfit_mW",      "W (kinfit combined)",    "tab:red",   "-"),
+    ("Wlep_reco_mass", "Wlep reco (pre-fit)",  "tab:blue",  ":",  False),
+    ("Whad_reco_mass", "Whad reco (pre-fit)",  "tab:green", ":",  False),
+    ("kinfit_mWlep",   "Wlep (kinfit)",         "tab:blue",  "--", False),
+    ("kinfit_mWhad",   "Whad (kinfit)",         "tab:green", "--", False),
+    ("kinfit_mW",      "W (kinfit combined)",   "tab:red",   "-",  False),
 ]
 
 MW = 80.419
 XLIM = (50, 100)
+NBINS = 100
 
 ECM_COLORS = {157: "tab:purple", 160: "tab:orange", 163: "tab:cyan"}
 
 
-def _load(f, hname):
-    if hname not in f:
+def _load(t, branch, require_valid):
+    if branch not in t.keys():
         return None, None
-    counts, edges = f[hname].to_numpy()
+    if require_valid:
+        arrs = t.arrays([branch, "kinfit_valid"], library="np")
+        vals = arrs[branch][arrs["kinfit_valid"].astype(bool)]
+    else:
+        vals = t[branch].array(library="np")
+    counts, edges = np.histogram(vals, bins=NBINS, range=XLIM)
     centers = 0.5 * (edges[:-1] + edges[1:])
-    mask = (centers >= XLIM[0]) & (centers <= XLIM[1])
-    c = counts[mask]
-    x = centers[mask]
-    norm = c.sum()
+    norm = counts.sum()
+    c = counts.astype(float)
     if norm > 0:
         c = c / norm
-    return x, c
+    return centers, c
 
 
-def plot_overlay_per_ecm(ecm, f):
+def plot_overlay_per_ecm(ecm, t):
     """One plot showing all mW histogram variants for a single ECM."""
     fig, ax = plt.subplots(figsize=(8, 6))
-    for hname, label, color, ls in HISTS_CFG:
-        x, c = _load(f, hname)
+    for branch, label, color, ls, require_valid in HISTS_CFG:
+        x, c = _load(t, branch, require_valid)
         if x is None:
-            print(f"  WARNING [{ecm}]: {hname} not found")
+            print(f"  WARNING [{ecm}]: {branch} not found")
             continue
         ax.step(x, c, where="mid", color=color, linestyle=ls, linewidth=2, label=label)
 
@@ -59,17 +64,17 @@ def plot_overlay_per_ecm(ecm, f):
     plt.close(fig)
 
 
-def plot_ecm_comparison(files):
+def plot_ecm_comparison(trees):
     """One plot per histogram showing all ECMs overlaid."""
-    for hname, label, _, _ in HISTS_CFG:
+    for branch, label, _, _, require_valid in HISTS_CFG:
         fig, ax = plt.subplots(figsize=(8, 6))
         plotted = False
-        for ecm, f in files.items():
-            if f is None:
+        for ecm, t in trees.items():
+            if t is None:
                 continue
-            x, c = _load(f, hname)
+            x, c = _load(t, branch, require_valid)
             if x is None:
-                print(f"  WARNING [{ecm}]: {hname} not found")
+                print(f"  WARNING [{ecm}]: {branch} not found")
                 continue
             ax.step(x, c, where="mid", color=ECM_COLORS[ecm], linewidth=2,
                     label=rf"$\sqrt{{s}}$ = {ecm} GeV")
@@ -88,25 +93,24 @@ def plot_ecm_comparison(files):
         ax.set_ylim(bottom=0)
         ax.legend(frameon=False, fontsize=11, loc="upper left")
         fig.tight_layout()
-        safe = hname.replace("no_cut_", "")
         for fmt in ("png", "pdf"):
-            fig.savefig(f"{OUTDIR}/ecm_comparison_{safe}.{fmt}", dpi=150)
+            fig.savefig(f"{OUTDIR}/ecm_comparison_{branch}.{fmt}", dpi=150)
         plt.close(fig)
 
 
-files = {}
+trees = {}
 for ecm in ECM_LIST:
     path = f"{INDIR}/wzp6_ee_munumuqq_noCut_ecm{ecm}.root"
     if not os.path.exists(path):
         print(f"WARNING: {path} not found — skipping ecm{ecm}")
-        files[ecm] = None
+        trees[ecm] = None
         continue
-    files[ecm] = uproot.open(path)
+    trees[ecm] = uproot.open(path)[TREE_NAME]
 
-for ecm, f in files.items():
-    if f is not None:
-        plot_overlay_per_ecm(ecm, f)
+for ecm, t in trees.items():
+    if t is not None:
+        plot_overlay_per_ecm(ecm, t)
         print(f"Saved mW_overlay_ecm{ecm}.[png|pdf]")
 
-plot_ecm_comparison(files)
+plot_ecm_comparison(trees)
 print(f"Saved ecm_comparison_*.[png|pdf]  →  {OUTDIR}/")

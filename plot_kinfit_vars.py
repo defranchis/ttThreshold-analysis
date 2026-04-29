@@ -84,7 +84,7 @@ KINFIT_TO_GEN = {
     "kinfit_phi_j1":         "jet1_gen_phi",
     "kinfit_phi_j2":         "jet2_gen_phi",
     "kinfit_phi_nu":         "nu_gen_phi",
-    "kinfit_mWlep":          "m_lnu_status1",
+    "kinfit_mWlep":          "m_lnu_fromele",
     "kinfit_mWhad":          "Whad_gen_mass",
     "kinfit_WW_px":          "px_tot_gen",
     "kinfit_WW_py":          "py_tot_gen",
@@ -120,7 +120,7 @@ KINFIT_BRANCHES = [
     "kinfit_s1", "kinfit_s2", "kinfit_sl", "kinfit_sn",
     "kinfit_t1", "kinfit_t2", "kinfit_tn", "kinfit_tl",
     "kinfit_p1", "kinfit_p2", "kinfit_pn", "kinfit_pl",
-    "kinfit_chi2", "kinfit_valid",
+    "kinfit_chi2", "kinfit_chi2_ndof", "kinfit_valid",
     "kinfit_mWlep", "kinfit_mWhad",
     "kinfit_p_j1", "kinfit_p_j2", "kinfit_p_lep", "kinfit_p_nu",
     "kinfit_Wlep_px", "kinfit_Wlep_py", "kinfit_Wlep_pz",
@@ -196,22 +196,6 @@ def dcb_expright_gauss(x, N, mu_c, sigma_c, aL, nL, aR, kR, f_wide, mu_w, sigma_
     wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
     return N * ((1.0 - f_wide) * core + f_wide * wide)
 
-def exp_right_gauss(x, N, x_cut, kL, f_wide, mu_w, sigma_w):
-    core = np.where(x <= x_cut, np.exp(kL * (x - x_cut)), np.float64(0.0))
-    wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
-    return N * ((1.0 - f_wide) * core + f_wide * wide)
-
-def gamma_right_gauss(x, N, x_cut, alpha, beta, f_wide, mu_w, sigma_w):
-    y = x_cut - x
-    log_core = np.where(
-        (x <= x_cut) & (y > 0),
-        (alpha - 1.0) * np.log(np.maximum(y, 1e-30)) - beta * y,
-        np.float64(_LOG_MIN)
-    )
-    core = np.exp(np.minimum(np.maximum(log_core, _LOG_MIN), _LOG_MAX))
-    wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
-    return N * ((1.0 - f_wide) * core + f_wide * wide)
-
 def dcb_gaussbox(x, N, mu_c, sigma_c, aL, nL, aR, nR, f_wide, p_max, sigma_box):
     from scipy.special import erf as _sp_erf
     core = _dcb_core((x - mu_c) / sigma_c, aL, nL, aR, nR)
@@ -253,16 +237,6 @@ def _make_pdf(p):
         fw, mw, sw = p["f_wide"], p["mu_wide"], p["sigma_wide"]
         def fn(x): return norm * dcb_expright_gauss(x, 1.0, mu, sg, aL, nL, aR, kR, fw, mw, sw)
 
-    elif model == "exprcut2g":
-        xc, kL = p["x_cut"], p["kL"]
-        fw, mw, sw = p["f_wide"], p["mu_wide"], p["sigma_wide"]
-        def fn(x): return norm * exp_right_gauss(x, 1.0, xc, kL, fw, mw, sw)
-
-    elif model == "gamright2g":
-        xc, alpha, beta = p["x_cut"], p["alpha"], p["beta"]
-        fw, mw, sw = p["f_wide"], p["mu_wide"], p["sigma_wide"]
-        def fn(x): return norm * gamma_right_gauss(x, 1.0, xc, alpha, beta, fw, mw, sw)
-
     elif model == "dcbgb":
         mu, sg = p["mu"], p["sigma"]
         aL, nL, aR, nR = p["aL"], p["nL"], p["aR"], p["nR"]
@@ -278,22 +252,30 @@ def _make_pdf(p):
 # ── Axis range heuristics ─────────────────────────────────────────────────────
 
 # Branches with a known fixed range; everything else is data-driven.
+# Ranges chosen to span the post-fit (green) distribution; the prior PDF
+# (red) often has heavier tails which would leave the fitted peak crammed.
 _FIXED_RANGE = {
-    "kinfit_mW":    (100, 50,   110),
-    "kinfit_mWlep": (100, 50,   110),
-    "kinfit_mWhad": (100, 50,   110),
-    "kinfit_gW":    (100,  0,     5),
+    "kinfit_mW":    (100, 50,   100),
+    "kinfit_mWlep": (100, 50,   100),
+    "kinfit_mWhad": (100, 50,   100),
+    "kinfit_gW":    (100,  1.9,  2.2),
     "kinfit_valid": (  3, -0.5,  2.5),
-    "kinfit_p_j1":  (100,  0,   100),
-    "kinfit_p_j2":  (100,  0,   100),
-    "kinfit_p_lep": (100,  0,   100),
-    "kinfit_p_nu":  (100,  0,   100),
-    "kinfit_Wlep_px": (100, -100, 100),
-    "kinfit_Wlep_py": (100, -100, 100),
-    "kinfit_Wlep_pz": (100, -100, 100),
-    "kinfit_Whad_px": (100, -100, 100),
-    "kinfit_Whad_py": (100, -100, 100),
-    "kinfit_Whad_pz": (100, -100, 100),
+    "kinfit_chi2_ndof": (100, 0, 50),
+    "kinfit_p_j1":  (100,  0,   80),
+    "kinfit_p_j2":  (100,  0,   80),
+    "kinfit_p_lep": (100,  0,   80),
+    "kinfit_p_nu":  (100,  0,   80),
+    "kinfit_Wlep_px": (100, -50, 50),
+    "kinfit_Wlep_py": (100, -50, 50),
+    "kinfit_Wlep_pz": (100, -50, 50),
+    "kinfit_Whad_px": (100, -50, 50),
+    "kinfit_Whad_py": (100, -50, 50),
+    "kinfit_Whad_pz": (100, -50, 50),
+    # Total WW system momentum: constrained near 0 by px/py/pz_tot_gen PDF
+    # (gen has a sub-bin spike at 0 from collinear ISR; fit follows it tightly)
+    "kinfit_WW_px": (100, -0.05, 0.05),
+    "kinfit_WW_py": (100, -0.05, 0.05),
+    "kinfit_WW_pz": (100, -0.3, 0.3),
     "kinfit_theta_j1":  (100, 0,   3.2),
     "kinfit_theta_j2":  (100, 0,   3.2),
     "kinfit_theta_nu":  (100, 0,   3.2),
@@ -303,6 +285,20 @@ _FIXED_RANGE = {
     # WW system post-fit: mass near ECM, mass-minus-ECM near 0 (slightly below, ISR)
     "kinfit_WW_m":           (100, 150, 170),
     "kinfit_WW_m_minus_ecm": (100,  -8,   1),
+    # Pull/scale parameters: span post-fit data, not the wider prior tails.
+    "kinfit_s1":  (100, 0.85, 1.15),
+    "kinfit_s2":  (100, 0.85, 1.15),
+    "kinfit_sl":  (100, 0.85, 1.15),
+    "kinfit_sn":  (100, 0.92, 1.05),
+    "kinfit_t1":  (100, -0.15, 0.15),
+    "kinfit_t2":  (100, -0.15, 0.15),
+    "kinfit_tn":  (100, -0.03, 0.03),
+    "kinfit_tl":  (100, -0.001, 0.001),
+    "kinfit_p1":  (100, -0.15, 0.15),
+    "kinfit_p2":  (100, -0.15, 0.15),
+    "kinfit_pn":  (100, -0.005, 0.005),
+    "kinfit_pl":  (100, -0.002, 0.002),
+    "kinfit_deltaP": (100, 0.0, 0.1),
 }
 
 def _auto_range(vals):
@@ -445,7 +441,6 @@ def plot_chi2_slices(ecm, raw_arrays, json_results):
     """Per fit_vs_reco_gen branch: 3 panels (reco | gen | fit), each showing
     3 overlaid equal-N NLL slices (NLL = chi2/2)."""
     chi2  = raw_arrays.get("kinfit_chi2")
-    valid = raw_arrays.get("kinfit_valid")
     if chi2 is None:
         return
 
@@ -469,8 +464,6 @@ def plot_chi2_slices(ecm, raw_arrays, json_results):
 
         mask = (np.isfinite(fit_arr) & np.isfinite(reco_arr) &
                 np.isfinite(gen_arr) & np.isfinite(nll_arr))
-        if valid is not None:
-            mask &= (np.asarray(valid, dtype=float) > 0)
 
         fit_arr  = fit_arr[mask]
         reco_arr = reco_arr[mask]

@@ -30,9 +30,9 @@ struct KinFitParamSet {
     DcbParams              met_phi_resol;
     DcbParams              met_theta_resol;
     DcbExpRightGaussParams m_gen_lnuqq_minus_ecm;
-    DcbParams              px_tot_gen;
-    DcbParams              py_tot_gen;
-    DcbParams              pz_tot_gen;
+    DcbGaussParams         px_tot_gen;            // dcb2g
+    DcbGaussParams         py_tot_gen;            // dcb2g
+    DcbGaussParams         pz_tot_gen;            // dcb2g
 };
 
 static const KinFitParamSet KF_PARAMS_157 = {
@@ -43,7 +43,7 @@ static const KinFitParamSet KF_PARAMS_157 = {
     DCBG_LEP_PHI_RESOL_157,  DCBG_LEP_THETA_RESOL_157,
     DCB_MET_PHI_RESOL_157,   DCB_MET_THETA_RESOL_157,
     DCBERG_M_GEN_LNUQQ_MINUS_ECM_157,
-    DCB_PX_TOT_GEN_157, DCB_PY_TOT_GEN_157, DCB_PZ_TOT_GEN_157,
+    DCBG_PX_TOT_GEN_157, DCBG_PY_TOT_GEN_157, DCBG_PZ_TOT_GEN_157,
 };
 static const KinFitParamSet KF_PARAMS_160 = {
     DCBG_JET1_P_RESP_160, DCBG_JET2_P_RESP_160,
@@ -53,7 +53,7 @@ static const KinFitParamSet KF_PARAMS_160 = {
     DCBG_LEP_PHI_RESOL_160,  DCBG_LEP_THETA_RESOL_160,
     DCB_MET_PHI_RESOL_160,   DCB_MET_THETA_RESOL_160,
     DCBERG_M_GEN_LNUQQ_MINUS_ECM_160,
-    DCB_PX_TOT_GEN_160, DCB_PY_TOT_GEN_160, DCB_PZ_TOT_GEN_160,
+    DCBG_PX_TOT_GEN_160, DCBG_PY_TOT_GEN_160, DCBG_PZ_TOT_GEN_160,
 };
 static const KinFitParamSet KF_PARAMS_163 = {
     DCBG_JET1_P_RESP_163, DCBG_JET2_P_RESP_163,
@@ -63,7 +63,7 @@ static const KinFitParamSet KF_PARAMS_163 = {
     DCBG_LEP_PHI_RESOL_163,  DCBG_LEP_THETA_RESOL_163,
     DCB_MET_PHI_RESOL_163,   DCB_MET_THETA_RESOL_163,
     DCBERG_M_GEN_LNUQQ_MINUS_ECM_163,
-    DCB_PX_TOT_GEN_163, DCB_PY_TOT_GEN_163, DCB_PZ_TOT_GEN_163,
+    DCBG_PX_TOT_GEN_163, DCBG_PY_TOT_GEN_163, DCBG_PZ_TOT_GEN_163,
 };
 
 // ── Active kinfit parameters (set per-dataset via setKinFitParams) ─────────
@@ -80,9 +80,9 @@ inline DcbGaussParams         kf_lep_theta_resol       = DCBG_LEP_THETA_RESOL_16
 inline DcbParams              kf_met_phi_resol         = DCB_MET_PHI_RESOL_160;
 inline DcbParams              kf_met_theta_resol       = DCB_MET_THETA_RESOL_160;
 inline DcbExpRightGaussParams kf_m_gen_lnuqq_minus_ecm = DCBERG_M_GEN_LNUQQ_MINUS_ECM_160;
-inline DcbParams              kf_px_tot_gen            = DCB_PX_TOT_GEN_160;
-inline DcbParams              kf_py_tot_gen            = DCB_PY_TOT_GEN_160;
-inline DcbParams              kf_pz_tot_gen            = DCB_PZ_TOT_GEN_160;
+inline DcbGaussParams         kf_px_tot_gen            = DCBG_PX_TOT_GEN_160;
+inline DcbGaussParams         kf_py_tot_gen            = DCBG_PY_TOT_GEN_160;
+inline DcbGaussParams         kf_pz_tot_gen            = DCBG_PZ_TOT_GEN_160;
 
 inline void setKinFitParams(int ecm) {
     ECM = static_cast<float>(ecm);
@@ -119,6 +119,10 @@ inline void setKinFitParams(int ecm) {
 static constexpr double KF_MW_INIT = 80.419;
 static constexpr double KF_GW_FIXED = 2.049;
 static constexpr int    KF_NDIM    = 13;   // free parameters when gW is fixed (added tl, pl)
+// Number of constraint terms in chi2: 4 momentum-response + 8 angular-resolution
+// + 4 WW-system (Px,Py,Pz,M-ECM) + 2 BW. The phase-space factor is part of the
+// joint BW/PS density and is not counted separately.
+static constexpr int    KF_N_CONSTR = 18;
 
 struct KinFitResult {
     float mW, gW;
@@ -126,6 +130,7 @@ struct KinFitResult {
     float t1, t2, tn, tl;   // theta shifts: jet1, jet2, MET, lepton
     float p1, p2, pn, pl;   // phi shifts:   jet1, jet2, MET, lepton
     float chi2;
+    float chi2_ndof;        // chi2 / (KF_N_CONSTR - n_free_params)
     int   valid;
     float mWlep_postfit, mWhad_postfit, mWW_postfit;
     float pt_j1_postfit, pt_j2_postfit, pt_lep_postfit, pt_nu_postfit;
@@ -260,6 +265,7 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.gW    = KF_GW_FIXED;
     result.valid = 0;
     result.chi2  = 999.0f;
+    result.chi2_ndof = 999.0f;
 
     if (Isolep_p < 0 || jet1_p <= 0 || jet2_p <= 0 || missing_p <= 0)
         return result;
@@ -293,12 +299,18 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
             double bw_l = mwgw / (dl*dl + mwgw*mwgw);
             double s_ww = WW.M2();
             double lam  = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
-            if (lam <= 0.0) return 1e10;
-            double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l)) - std::log(lam);
+            // Floor lam at 1e-12 instead of bailing — keeps the gradient continuous
+            // at the kinematic boundary (lam = 0 corresponds to W masses summing to √s_WW).
+            lam = std::max(lam, 1e-12);
+            // Joint BW × phase-space PDF (each BW normalised: ∫ BW dm² = π,
+            // so BW_norm = BW/π → -2log adds 2log(π) per W). Phase space ∝ √λ/s_WW.
+            double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l))
+                           + 4.0 * std::log(M_PI)
+                           - std::log(lam) + 2.0 * std::log(s_ww);
 
-            double cons = dcb_neg2logpdf(WW.Px(), kf_px_tot_gen)
-                        + dcb_neg2logpdf(WW.Py(), kf_py_tot_gen)
-                        + dcb_neg2logpdf(WW.Pz(), kf_pz_tot_gen)
+            double cons = dcb_gauss_neg2logpdf(WW.Px(), kf_px_tot_gen)
+                        + dcb_gauss_neg2logpdf(WW.Py(), kf_py_tot_gen)
+                        + dcb_gauss_neg2logpdf(WW.Pz(), kf_pz_tot_gen)
                         + dcb_expright_gauss_neg2logpdf(WW.M() - ECM, kf_m_gen_lnuqq_minus_ecm);
 
             double scale_pen = dcb_gauss_neg2logpdf(s1, kf_jet1_p_resp)
@@ -315,9 +327,7 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
                            + dcb_neg2logpdf(pn, kf_met_phi_resol)
                            + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
 
-            double ecm_over = WW.M() - static_cast<double>(ECM);
-            double ecm_veto = (ecm_over > 0.0) ? 100.0 * ecm_over * ecm_over : 0.0;
-            return bw_term + cons + scale_pen + angular + ecm_veto;
+            return bw_term + cons + scale_pen + angular;
         };
 
         // s-params init at DCB mode (jet resp ≈ 0.97, lep/MET resp ≈ 1.0)
@@ -325,6 +335,7 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
         int status = _bfgs_minimize<decltype(chi2fn), 14>(chi2fn, x0, fmin);
         result.valid = (status == 0) ? 1 : 0;
         result.chi2  = fmin;
+        result.chi2_ndof = (KF_N_CONSTR > 14) ? fmin / float(KF_N_CONSTR - 14) : -1.0f;
         result.mW = x0[0]; result.gW = x0[1];
         result.s1 = x0[2]; result.s2 = x0[3]; result.sl = x0[4]; result.sn = x0[5];
         result.t1 = x0[6]; result.t2 = x0[7]; result.tn = x0[8];
@@ -356,12 +367,16 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
             double bw_l = mwgw / (dl*dl + mwgw*mwgw);
             double s_ww = WW.M2();
             double lam  = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
-            if (lam <= 0.0) return 1e10;
-            double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l)) - std::log(lam);
+            // Floor lam to keep -log(lam) finite and gradient smooth across the boundary.
+            lam = std::max(lam, 1e-12);
+            // Joint BW × phase-space PDF (BW_norm = BW/π; phase space ∝ √λ/s_WW).
+            double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l))
+                           + 4.0 * std::log(M_PI)
+                           - std::log(lam) + 2.0 * std::log(s_ww);
 
-            double cons = dcb_neg2logpdf(WW.Px(), kf_px_tot_gen)
-                        + dcb_neg2logpdf(WW.Py(), kf_py_tot_gen)
-                        + dcb_neg2logpdf(WW.Pz(), kf_pz_tot_gen)
+            double cons = dcb_gauss_neg2logpdf(WW.Px(), kf_px_tot_gen)
+                        + dcb_gauss_neg2logpdf(WW.Py(), kf_py_tot_gen)
+                        + dcb_gauss_neg2logpdf(WW.Pz(), kf_pz_tot_gen)
                         + dcb_expright_gauss_neg2logpdf(WW.M() - ECM, kf_m_gen_lnuqq_minus_ecm);
 
             double scale_pen = dcb_gauss_neg2logpdf(s1, kf_jet1_p_resp)
@@ -378,15 +393,14 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
                            + dcb_neg2logpdf(pn, kf_met_phi_resol)
                            + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
 
-            double ecm_over = WW.M() - static_cast<double>(ECM);
-            double ecm_veto = (ecm_over > 0.0) ? 100.0 * ecm_over * ecm_over : 0.0;
-            return bw_term + cons + scale_pen + angular + ecm_veto;
+            return bw_term + cons + scale_pen + angular;
         };
 
         double x0[KF_NDIM] = {KF_MW_INIT, 0.97, 0.97, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
         int status = _bfgs_minimize<decltype(chi2fn), KF_NDIM>(chi2fn, x0, fmin);
         result.valid = (status == 0) ? 1 : 0;
         result.chi2  = fmin;
+        result.chi2_ndof = (KF_N_CONSTR > KF_NDIM) ? fmin / float(KF_N_CONSTR - KF_NDIM) : -1.0f;
         result.mW = x0[0];
         result.s1 = x0[1]; result.s2 = x0[2]; result.sl = x0[3]; result.sn = x0[4];
         result.t1 = x0[5]; result.t2 = x0[6]; result.tn = x0[7];
@@ -428,6 +442,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.gW    = KF_GW_FIXED;
     result.valid = 0;
     result.chi2  = 999.0f;
+    result.chi2_ndof = 999.0f;
 
     if (Isolep_p < 0 || jet1_p <= 0 || jet2_p <= 0 || missing_p <= 0)
         return result;
@@ -435,8 +450,9 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     // 14 parameters: x[0]=mW, x[1]=gW, x[2..5]=scales, x[6..8]=jet/MET theta, x[9..11]=jet/MET phi, x[12..13]=lep angles.
     // When fit_gW=false, gW is pinned to KF_GW_FIXED via FixVariable(1).
     auto chi2fn = [=](const double* x) -> double {
+        // gW has limits (0.01, 10.0) and s_i guard against accidental negative regions
+        // during line search (s_i are unbounded in this Minuit setup).
         const double mW = x[0], gW = x[1];
-        if (gW <= 0.0) return 1e10;
         const double s1 = x[2], s2 = x[3], sl = x[4], sn = x[5];
         const double t1 = x[6], t2 = x[7], tn = x[8];
         const double p1 = x[9], p2 = x[10], pn = x[11];
@@ -457,11 +473,18 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         double dh   = mh*mh - mW*mW,  dl = ml*ml - mW*mW;
         double bw_h = mwgw / (dh*dh + mwgw*mwgw);
         double bw_l = mwgw / (dl*dl + mwgw*mwgw);
-        double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l));
+        double s_ww = WW.M2();
+        double lam  = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
+        // Floor lam to keep -log(lam) finite and gradient smooth across the boundary.
+        lam = std::max(lam, 1e-12);
+        // Joint BW × phase-space PDF (BW_norm = BW/π; phase space ∝ √λ/s_WW).
+        double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l))
+                       + 4.0 * std::log(M_PI)
+                       - std::log(lam) + 2.0 * std::log(s_ww);
 
-        double cons = dcb_neg2logpdf(WW.Px(), kf_px_tot_gen)
-                    + dcb_neg2logpdf(WW.Py(), kf_py_tot_gen)
-                    + dcb_neg2logpdf(WW.Pz(), kf_pz_tot_gen)
+        double cons = dcb_gauss_neg2logpdf(WW.Px(), kf_px_tot_gen)
+                    + dcb_gauss_neg2logpdf(WW.Py(), kf_py_tot_gen)
+                    + dcb_gauss_neg2logpdf(WW.Pz(), kf_pz_tot_gen)
                     + dcb_expright_gauss_neg2logpdf(WW.M() - ECM, kf_m_gen_lnuqq_minus_ecm);
 
         double scale_pen = dcb_gauss_neg2logpdf(s1, kf_jet1_p_resp)
@@ -478,9 +501,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                        + dcb_neg2logpdf(pn, kf_met_phi_resol)
                        + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
 
-        double ecm_over = WW.M() - static_cast<double>(ECM);
-        double ecm_veto = (ecm_over > 0.0) ? 100.0 * ecm_over * ecm_over : 0.0;
-        return bw_term + cons + scale_pen + angular + ecm_veto;
+        return bw_term + cons + scale_pen + angular;
     };
 
     std::function<double(const double*)> fObj = chi2fn;
@@ -495,29 +516,37 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     minimizer->SetStrategy(2);
     minimizer->SetPrintLevel(-1);
 
-    // s-params: response = p_reco/p_gen; t/p-params: absolute shift in radians
-    minimizer->SetVariable(0,  "mW", KF_MW_INIT,  0.1);   minimizer->SetVariableLimits(0,  0.0, 200.0);
-    minimizer->SetVariable(1,  "gW", KF_GW_FIXED, 0.01);  minimizer->SetVariableLimits(1,  0.01, 10.0);
-    minimizer->SetVariable(2,  "s1", 0.97,  0.01);   // jet1 p-response, DCB mu ≈ 0.974
-    minimizer->SetVariable(3,  "s2", 0.97,  0.01);   // jet2 p-response, DCB mu ≈ 0.970
-    minimizer->SetVariable(4,  "sl", 1.0,   0.001);  // lep  p-response, DCB mu ≈ 1.000
-    minimizer->SetVariable(5,  "sn", 1.0,   0.005);  // MET  p-response, DCB mu ≈ 1.000
-    minimizer->SetVariable(6,  "t1", 0.0,   0.01);   // jet1 dtheta [rad], sigma ≈ 0.014
-    minimizer->SetVariable(7,  "t2", 0.0,   0.01);   // jet2 dtheta [rad], sigma ≈ 0.017
-    minimizer->SetVariable(8,  "tn", 0.0,   0.005);  // MET  dtheta [rad], sigma ≈ 0.008
-    minimizer->SetVariable(9,  "p1", 0.0,   0.01);   // jet1 dphi   [rad], sigma ≈ 0.016
-    minimizer->SetVariable(10, "p2", 0.0,   0.01);   // jet2 dphi   [rad], sigma ≈ 0.020
-    minimizer->SetVariable(11, "pn", 0.0,   0.003);  // MET  dphi   [rad], sigma ≈ 0.004
-    minimizer->SetVariable(12, "tl", 0.0,   0.001);  // lep  dtheta [rad]
-    minimizer->SetVariable(13, "pl", 0.0,   0.001);  // lep  dphi   [rad]
+    // Step sizes matched to ECM-160 PDF sigmas so Migrad's finite-difference probes
+    // see chi2 changes of O(1) per step — critical for the lepton angular shifts
+    // whose σ ~ 1e-4 rad (was 1e-3, ~30× too coarse).
+    minimizer->SetVariable(0,  "mW", KF_MW_INIT,  0.1);     minimizer->SetVariableLimits(0,  0.0, 200.0);
+    minimizer->SetVariable(1,  "gW", KF_GW_FIXED, 0.01);    minimizer->SetVariableLimits(1,  0.01, 10.0);
+    minimizer->SetVariable(2,  "s1", 0.97,  0.014);    // jet1 p-resp, σ ≈ 0.014
+    minimizer->SetVariable(3,  "s2", 0.97,  0.014);    // jet2 p-resp, σ ≈ 0.018
+    minimizer->SetVariable(4,  "sl", 1.0,   0.004);    // lep  p-resp, σ ≈ 0.004
+    minimizer->SetVariable(5,  "sn", 1.0,   0.012);    // MET  p-resp, σ ≈ 0.012
+    minimizer->SetVariable(6,  "t1", 0.0,   0.014);    // jet1 dtheta, σ ≈ 0.013
+    minimizer->SetVariable(7,  "t2", 0.0,   0.017);    // jet2 dtheta, σ ≈ 0.016
+    minimizer->SetVariable(8,  "tn", 0.0,   0.007);    // MET  dtheta, σ ≈ 0.007
+    minimizer->SetVariable(9,  "p1", 0.0,   0.016);    // jet1 dphi,   σ ≈ 0.015
+    minimizer->SetVariable(10, "p2", 0.0,   0.020);    // jet2 dphi,   σ ≈ 0.018
+    minimizer->SetVariable(11, "pn", 0.0,   0.004);    // MET  dphi,   σ ≈ 0.004
+    minimizer->SetVariable(12, "tl", 0.0,   0.0001);   // lep  dtheta, σ ≈ 2e-5
+    minimizer->SetVariable(13, "pl", 0.0,   0.0003);   // lep  dphi,   σ ≈ 3e-4
 
     if (!fit_gW) minimizer->FixVariable(1);
 
     minimizer->Minimize();
     minimizer->Minimize();
 
-    result.valid = (minimizer->Status() == 0) ? 1 : 0;
+    // Accept status 0 ("minimum found") and 1 ("covariance forced positive-definite").
+    // The latter is common with non-Gaussian PDFs where the local Hessian estimate
+    // needs PD adjustment — the postfit values are still valid.
+    int status = minimizer->Status();
+    result.valid = (status == 0 || status == 1) ? 1 : 0;
     result.chi2  = minimizer->MinValue();
+    int n_par = fit_gW ? 14 : KF_NDIM;
+    result.chi2_ndof = (KF_N_CONSTR > n_par) ? result.chi2 / float(KF_N_CONSTR - n_par) : -1.0f;
     const double* x = minimizer->X();
     result.mW = x[0]; result.gW = x[1];
     result.s1 = x[2]; result.s2 = x[3]; result.sl = x[4]; result.sn = x[5];
