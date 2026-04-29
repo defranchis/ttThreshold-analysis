@@ -174,3 +174,4 @@ condor/scripts
 *.sub
 condor/std
 response
+misc_*
