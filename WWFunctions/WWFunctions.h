@@ -7,10 +7,65 @@
 #include "TLorentzVector.h"
 #include "ROOT/RVec.hxx"
 #include "Math/Vector4D.h"
+#include "edm4hep/MCParticleData.h"
 
 namespace FCCAnalyses { namespace WWFunctions {
 
 inline float ECM = 160.0f;
+
+// ── selectors keeping particles whose mother is e± (proxy for "from W decay"
+//    in samples where the W is not stored in the MC history). Walk the proper
+//    parents_begin/parents_end relation range — robust against the flat
+//    Particle0[i] indexing assumption used in FCCAnalyses::MCParticle::sel_*.
+
+namespace _selectors_detail {
+inline bool _has_electron_parent(const edm4hep::MCParticleData& p,
+                                  const ROOT::VecOps::RVec<edm4hep::MCParticleData>& in,
+                                  const ROOT::VecOps::RVec<int>& parents_relation) {
+    for (unsigned j = p.parents_begin; j < p.parents_end; ++j) {
+        if (j >= parents_relation.size()) break;
+        int parent_idx = parents_relation[j];
+        if (parent_idx < 0 || parent_idx >= (int)in.size()) continue;
+        if (std::abs(in[parent_idx].PDG) == 11) return true;
+    }
+    return false;
+}
+}
+
+struct sel_genleps_fromele {
+    int m_pdg;
+    sel_genleps_fromele(int pdg) : m_pdg(pdg) {}
+    ROOT::VecOps::RVec<edm4hep::MCParticleData> operator()(
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> in,
+        const ROOT::VecOps::RVec<int>& parents_relation) const {
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> result;
+        result.reserve(in.size());
+        for (size_t i = 0; i < in.size(); ++i) {
+            const auto& p = in[i];
+            if (std::abs(p.PDG) != m_pdg) continue;
+            if (_selectors_detail::_has_electron_parent(p, in, parents_relation)) result.emplace_back(p);
+        }
+        return result;
+    }
+};
+
+// Light quarks (|PDG|<=5) with e± parent — like FCCAnalyses::MCParticle::sel_lightQuarks_fromele
+// but using the robust parents-relation walk.
+struct sel_lightQuarks_fromele {
+    sel_lightQuarks_fromele() {}
+    ROOT::VecOps::RVec<edm4hep::MCParticleData> operator()(
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> in,
+        const ROOT::VecOps::RVec<int>& parents_relation) const {
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> result;
+        result.reserve(in.size());
+        for (size_t i = 0; i < in.size(); ++i) {
+            const auto& p = in[i];
+            if (std::abs(p.PDG) > 5 || std::abs(p.PDG) == 0) continue;
+            if (_selectors_detail::_has_electron_parent(p, in, parents_relation)) result.emplace_back(p);
+        }
+        return result;
+    }
+};
 
 // ── angle helpers ──────────────────────────────────────────────────────────
 

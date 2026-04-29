@@ -15,7 +15,7 @@ Outputs (per ECM)
   response/functions/dcb_results_ecm<N>.json  full numerical fit results
 """
 
-import os, json, math, warnings, argparse
+import os, json, math, warnings
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import uproot
@@ -31,14 +31,6 @@ _SQRT2   = math.sqrt(2.0)
 _LOG_MAX = math.log(np.finfo(np.float64).max)   # max safe float64 exponent ≈ 709.78
 _LOG_MIN = -_LOG_MAX
 
-_ap = argparse.ArgumentParser(description=__doc__, add_help=True)
-_ap.add_argument("--kinfit-only", action="store_true", default=True,
-                 help="Fit only the branches used in the kinematic fit (default)")
-_ap.add_argument("--all-branches", dest="kinfit_only", action="store_false",
-                 help="Fit all _resol/_resp branches in the tree")
-_args, _ = _ap.parse_known_args()
-KINFIT_ONLY = _args.kinfit_only
-
 os.makedirs("response/functions", exist_ok=True)
 
 ECM_LIST    = [157, 160, 163]
@@ -47,74 +39,47 @@ NBINS_DEF   = 100
 CLIP_DEF  = (0.5, 99.5)
 
 # ── Per-branch configuration overrides ─────────────────────────────────────
-# Motivation for tight left-clip on the diff_RG_* variables:
-#   these distributions have a narrow gaussian-like core but a very long,
-#   flat left tail (ISR / neutrino mis-reco). Using std overestimates sigma
-#   and shifts the fitted peak; clipping the extreme left tail + using MAD
-#   focuses the fit on the physically relevant core region while the fitted
-#   power-law extrapolates the tail.
-#
-# Motivation for "dcb2g" model on jet resolutions:
-#   these show a sharp core peak (well-measured jets) plus a secondary
-#   shoulder component (partially measured / split jets).  A single DCB
-#   cannot describe both simultaneously.
-
 BRANCH_CONFIG = {
-    # Mass/momentum resolutions (absolute reco-gen differences)
-    "m_lnu_resol":          {"clip": (0.5, 99.5), "nbins": 150},
-    "p_lnu_resol":          {"clip": (3.0, 99.5), "nbins": 150},
-    "pf_qq_m_resol":        {"clip": (2.0, 99.5), "nbins": 150},
-    "m_qq_resol":           {"clip": (2.0, 99.5), "nbins": 150},
-    "pf_qq_p_resol":        {"clip": (2.0, 99.5), "nbins": 150},
-    "p_qq_resol":           {"clip": (2.0, 99.5), "nbins": 150},
-    "m_lnuqq_resol":        {"clip": (1.0, 99.5), "nbins": 150},
-    # Jet momentum responses (reco/gen ratios); two-component structure → DCB+G
-    "jet1_p_resp":          {"clip": (0.2, 99.8), "nbins": 150, "model": "dcb2g"},
-    "jet1_p_fromele_resp":  {"clip": (0.2, 99.8), "nbins": 150, "model": "dcb2g"},
-    # Jet2: sharp core — single DCB describes it better than DCB+G
-    "jet2_p_resp":          {"clip": (0.2, 99.8), "nbins": 150, "model": "dcb2g"},
-    "jet2_p_fromele_resp":  {"clip": (1.0, 99.0), "nbins": 150, "model": "dcb2g"},
-    # Lepton and MET momentum responses (narrow, well-measured) → single DCB
-    "lep_p_resp":           {"clip": (0.2, 99.8), "nbins": 150},
-    "met_p_resp":           {"clip": (0.5, 99.5), "nbins": 150},
-    # Combined (jet1+jet2) pooled responses
-    "jet_p_resp":           {"clip": (0.2, 99.8), "nbins": 150, "model": "dcb2g"},
-    "jet_p_fromele_resp":   {"clip": (0.2, 99.8), "nbins": 150, "model": "dcb2g"},
-    # costheta resolutions need two-component model (DCB alone chi2/ndf ~5)
-    "jet1_costheta_resol":  {"clip": (0.5, 99.5), "nbins": 150, "model": "dcb2g"},
-    "jet2_costheta_resol":  {"clip": (0.5, 99.5), "nbins": 150, "model": "dcb2g"},
-    "jet_costheta_resol":   {"clip": (0.5, 99.5), "nbins": 150, "model": "dcb2g"},
+    # Jet p response: detector core + wide-radiation tail → DCB+G.
+    "jet1_p_resp":          {"clip": (0.2, 99.8),  "nbins": 150, "model": "dcb2g"},
+    "jet2_p_resp":          {"clip": (0.2, 99.8),  "nbins": 150, "model": "dcb2g"},
+    "jet_p_resp":           {"clip": (0.2, 99.8),  "nbins": 150, "model": "dcb2g"},
+    # Jet angular resolutions: detector core + wide-radiation tails.
+    "jet1_theta_resol":     {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
+    "jet2_theta_resol":     {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
+    "jet_theta_resol":      {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
+    "jet1_phi_resol":       {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
+    "jet2_phi_resol":       {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
+    "jet_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
+    # Lepton p response: narrow detector core + exponential FSR left tail +
+    # sharp right cliff just past 1. expleft2g (exp-left + Gaussian core +
+    # power-right + wide Gauss). Right-side clip extended to 99.95%.
+    "lep_p_resp":           {"clip": (0.2, 99.95), "nbins": 150, "model": "expleft2g"},
+    # Lepton angular resolutions: tight detector core + wide-angle FSR tails → DCB+G.
+    "lep_theta_resol":      {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
+    "lep_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
+    # MET (well-measured) → single DCB.
+    "met_p_resp":           {"clip": (0.5, 99.5),  "nbins": 150},
+    "met_theta_resol":      {"clip": (0.5, 99.5),  "nbins": 150},
+    "met_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150},
     # Gen-level total momenta: narrow ISR-free spike + flat plateau with hard kinematic edge.
-    # dcbgb = DCB narrow core + Gaussian-smeared box (flat plateau, erf-shaped edges).
-    # Faster tail falloff than DCB+Gaussian; clip extended to 0.1/99.9 to see real edge.
-    "px_tot_gen":           {"clip": (0.1, 99.9), "nbins": 150, "model": "dcbgb"},
-    "py_tot_gen":           {"clip": (0.1, 99.9), "nbins": 150, "model": "dcbgb"},
-    "pz_tot_gen":           {"clip": (0.1, 99.9), "nbins": 150, "model": "dcbgb"},
-    # Gen WW invariant mass minus ECM. Peak just below 0 (ISR shifts mass down); hard boundary at 0.
-    # dcber2g: power-law left tail + exponential right cutoff + Gaussian.
+    # dcbgb = DCB narrow core + Gaussian-smeared box (erf-shaped edges).
+    "px_tot_gen":           {"clip": (0.1, 99.9),  "nbins": 150, "model": "dcbgb"},
+    "py_tot_gen":           {"clip": (0.1, 99.9),  "nbins": 150, "model": "dcbgb"},
+    "pz_tot_gen":           {"clip": (0.1, 99.9),  "nbins": 150, "model": "dcbgb"},
+    # Gen WW invariant mass minus ECM. Peak just below 0 (ISR), hard boundary at 0.
     "m_gen_lnuqq_minus_ecm": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber2g"},
 }
 
-# ── Virtual combined branches (concatenation of two tree branches) ──────────
+# Virtual combined branches: concatenate jet1 + jet2 into a single distribution
+# for "pooled" jet fits and the jet1-vs-jet2 comparison plot.
 COMBINED_BRANCHES = {
-    "jet_p_resp":           ("jet1_p_resp",          "jet2_p_resp"),
-    "jet_p_fromele_resp":   ("jet1_p_fromele_resp",   "jet2_p_fromele_resp"),
-    "jet_costheta_resol":   ("jet1_costheta_resol",   "jet2_costheta_resol"),
-    "jet_eta_resol":        ("jet1_eta_resol",         "jet2_eta_resol"),
-    "jet_phi_resol":        ("jet1_phi_resol",         "jet2_phi_resol"),
-    "jet_theta_resol":      ("jet1_theta_resol",       "jet2_theta_resol"),
+    "jet_p_resp":      ("jet1_p_resp",     "jet2_p_resp"),
+    "jet_theta_resol": ("jet1_theta_resol", "jet2_theta_resol"),
+    "jet_phi_resol":   ("jet1_phi_resol",   "jet2_phi_resol"),
 }
 
-# Standard vs fromele pairs (per-jet and combined)
-FROMELE_PAIRS = {
-    "jet1_p_resp": ("jet1_p_resp", "jet1_p_fromele_resp"),
-    "jet2_p_resp": ("jet2_p_resp", "jet2_p_fromele_resp"),
-    "jet_p_resp":  ("jet_p_resp",  "jet_p_fromele_resp"),
-}
-
-# Branches used by the kinematic fit — fitted in --kinfit-only mode.
-# BRANCH_CONFIG provides model/clip/nbins overrides for named entries;
-# angular resolutions below use default (dcb, clip 0.5–99.5, 100 bins).
+# Branches used by the kinematic fit (also the full set of step1 outputs we fit).
 KINFIT_BRANCHES = [
     "jet1_p_resp", "jet2_p_resp", "lep_p_resp", "met_p_resp",
     "jet1_theta_resol", "jet2_theta_resol", "jet1_phi_resol", "jet2_phi_resol",
@@ -207,32 +172,6 @@ def _dcb_expright_core(t, aL, nL, aR, kR):
 def dcb_expright_gauss(x, N, mu_c, sigma_c, aL, nL, aR, kR, f_wide, mu_w, sigma_w):
     """Power-law-left DCB core + broad Gaussian. kR: exponential right-tail decay rate."""
     core = _dcb_expright_core((x - mu_c) / sigma_c, aL, nL, aR, kR)
-    wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
-    return N * ((1.0 - f_wide) * core + f_wide * wide)
-
-
-def exp_right_gauss(x, N, x_cut, kL, f_wide, mu_w, sigma_w):
-    """Right-bounded exponential (peaks at x_cut) + Gaussian wide component.
-    Physically: ISR distribution bounded above at x_cut (= ECM for m_gen_lnuqq).
-    kL > 0: exponential decay rate for x < x_cut.
-    """
-    core = np.where(x <= x_cut, np.exp(kL * (x - x_cut)), np.float64(0.0))
-    wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
-    return N * ((1.0 - f_wide) * core + f_wide * wide)
-
-
-def gamma_right_gauss(x, N, x_cut, alpha, beta, f_wide, mu_w, sigma_w):
-    """Reflected Gamma distribution (right-bounded at x_cut) + Gaussian wide component.
-    Core: (x_cut-x)^(alpha-1) * exp(-beta*(x_cut-x)) for x <= x_cut, 0 otherwise.
-    Peak at x_cut - (alpha-1)/beta for alpha > 1; reduces to pure exponential at alpha=1.
-    """
-    y = x_cut - x
-    log_core = np.where(
-        (x <= x_cut) & (y > 0),
-        (alpha - 1.0) * np.log(np.maximum(y, 1e-30)) - beta * y,
-        np.float64(_LOG_MIN)
-    )
-    core = np.exp(np.minimum(np.maximum(log_core, _LOG_MIN), _LOG_MAX))
     wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
     return N * ((1.0 - f_wide) * core + f_wide * wide)
 
@@ -616,161 +555,6 @@ def fit_dcb_expleft2g(centers, counts, mu0, sig0, constrain_mu0=False):
     return _best_fit(dcb_expleft_gauss, centers, counts, starts, lo, hi)
 
 
-def fit_exp_right_gauss(centers, counts, mu0, sig0):
-    """Right-bounded exponential + Gaussian. Params: N, x_cut, kL, f_wide, mu_w, sigma_w.
-    Two roles for the Gaussian:
-      (a) narrow component at mu0 — captures the soft-ISR peak away from x_cut
-      (b) broad component far from x_cut — secondary smooth shoulder
-    """
-    N0   = float(counts.max())
-    x_max = float(centers[-1])
-    # narrow sigma: physically motivated width of the soft-ISR peak (~0.5–2 GeV)
-    sw_narrow = max(abs(x_max - mu0) * 0.5, 0.5)
-    lo = [0,  x_max - 2.0, 0.005, 0.0, -np.inf, 1e-4]
-    hi = [np.inf, x_max + 0.5, 5.0, 0.95,  np.inf, np.inf]
-    starts = [
-        # Gaussian at the data mode (soft-ISR peak): these are the key starts
-        [N0, x_max, 0.10, 0.40, mu0, sw_narrow],
-        [N0, x_max, 0.08, 0.50, mu0, sw_narrow * 1.2],
-        [N0, x_max, 0.12, 0.35, mu0, sw_narrow * 0.8],
-        [N0, x_max, 0.07, 0.60, mu0, sw_narrow * 1.5],
-        [N0, x_max, 0.15, 0.30, mu0, sw_narrow * 1.0],
-        [N0, x_max, 0.05, 0.70, mu0, sw_narrow * 1.3],
-        # Gaussian away from mode (broad background component)
-        [N0, x_max, 0.12, 0.10, mu0 - 2*sig0, 5*sig0],
-        [N0, x_max, 0.10, 0.15, mu0 - 1*sig0, 4*sig0],
-        [N0, x_max, 0.15, 0.20, mu0 - 2*sig0, 4*sig0],
-        [N0, x_max, 0.08, 0.25, mu0 - 2*sig0, 6*sig0],
-    ]
-    return _best_fit(exp_right_gauss, centers, counts, starts, lo, hi)
-
-
-def fit_exp_right_gauss_iminuit(centers, counts, mu0, sig0):
-    """Poisson NLL with iminuit for right-bounded exponential + Gaussian."""
-    from iminuit import Minuit
-    N0   = float(counts.max())
-    errs = np.maximum(np.sqrt(counts), 1.0)
-    x_max = float(centers[-1])
-
-    def nll(N, x_cut, kL, fw, mu_w, sw):
-        if kL <= 0 or sw <= 0:
-            return 1e15
-        pred = exp_right_gauss(centers, abs(N), x_cut, abs(kL), abs(fw), mu_w, abs(sw))
-        pred = np.maximum(pred, 1e-300)
-        return 2.0 * float(np.sum(pred - counts * np.log(pred)))
-
-    sw_narrow = max(abs(x_max - mu0) * 0.5, 0.5)
-    starts = [
-        [N0, x_max, 0.10, 0.40, mu0, sw_narrow],
-        [N0, x_max, 0.08, 0.50, mu0, sw_narrow * 1.2],
-        [N0, x_max, 0.12, 0.35, mu0, sw_narrow * 0.8],
-        [N0, x_max, 0.07, 0.60, mu0, sw_narrow * 1.5],
-        [N0, x_max, 0.15, 0.30, mu0, sw_narrow * 1.0],
-        [N0, x_max, 0.12, 0.10, mu0 - 2*sig0, 5*sig0],
-    ]
-    limits = [(1e-3,None),(x_max-2., x_max+0.5),(0.005,5.),(0.,0.95),(None,None),(1e-4,None)]
-    names  = ['N','x_cut','kL','fw','mu_w','sw']
-
-    best_popt, best_chi2 = None, np.inf
-    for p0 in starts:
-        try:
-            m = Minuit(nll, *p0, name=names)
-            for i, (lo_i, hi_i) in enumerate(limits):
-                m.limits[i] = (lo_i, hi_i)
-            m.migrad()
-            if not m.valid:
-                m.migrad()
-            if m.valid:
-                popt = list(m.values)
-                pred = exp_right_gauss(centers, *[abs(v) if j not in (1, 4) else v
-                                                   for j, v in enumerate(popt)])
-                chi2 = float(np.sum(((counts - pred) / errs) ** 2))
-                if chi2 < best_chi2:
-                    best_chi2, best_popt = chi2, popt
-        except Exception:
-            pass
-
-    if best_popt is None:
-        return None, None, False, np.inf
-    return best_popt, None, True, best_chi2
-
-
-def fit_gamma_right_gauss(centers, counts, mu0, sig0):
-    """Reflected Gamma + Gaussian. Params: N, x_cut, alpha, beta, f_wide, mu_w, sigma_w."""
-    N0    = float(counts.max())
-    x_max = float(centers[-1])
-    # delta0: expected distance from x_cut to peak; anchored from data mode
-    delta0 = max(x_max - mu0, 1.0)
-    lo = [0, x_max - 0.01, 1.0, 1e-4, 0.0, -np.inf, 1e-4]
-    hi = [np.inf, x_max + 1.0, 50., 5.0, 0.95, np.inf, np.inf]
-    starts = [
-        # alpha, beta anchored to observed peak offset delta0 = x_cut - mu0
-        [N0, x_max, 2.0, 1.0/delta0,        0.05, mu0 - 2*sig0, 3*sig0],
-        [N0, x_max, 3.0, 2.0/delta0,        0.05, mu0 - 2*sig0, 4*sig0],
-        [N0, x_max, 1.5, 0.5/delta0,        0.10, mu0 - 1*sig0, 3*sig0],
-        [N0, x_max, 4.0, 3.0/delta0,        0.05, mu0 - 3*sig0, 5*sig0],
-        [N0, x_max, 2.0, 1.0/delta0,        0.20, mu0 - 2*sig0, 4*sig0],
-        [N0, x_max, 3.0, 2.0/delta0,        0.20, mu0 - 3*sig0, 5*sig0],
-        # wider spread of alpha/beta
-        [N0, x_max, 2.0, 0.5/max(delta0,1), 0.05, mu0 - 1*sig0, 3*sig0],
-        [N0, x_max, 5.0, 4.0/delta0,        0.05, mu0 - 3*sig0, 6*sig0],
-        [N0, x_max, 1.5, 1.0/delta0,        0.30, mu0 - 2*sig0, 4*sig0],
-        [N0, x_max, 2.0, 2.0/delta0,        0.00, mu0 - 1*sig0, 3*sig0],
-    ]
-    return _best_fit(gamma_right_gauss, centers, counts, starts, lo, hi)
-
-
-def fit_gamma_right_gauss_iminuit(centers, counts, mu0, sig0):
-    """Poisson NLL with iminuit for reflected Gamma + Gaussian."""
-    from iminuit import Minuit
-    N0    = float(counts.max())
-    errs  = np.maximum(np.sqrt(counts), 1.0)
-    x_max = float(centers[-1])
-    delta0 = max(x_max - mu0, 1.0)
-
-    def nll(N, x_cut, alpha, beta, fw, mu_w, sw):
-        if alpha < 1.0 or beta <= 0 or sw <= 0:
-            return 1e15
-        pred = gamma_right_gauss(centers, abs(N), x_cut, alpha, abs(beta),
-                                 abs(fw), mu_w, abs(sw))
-        pred = np.maximum(pred, 1e-300)
-        return 2.0 * float(np.sum(pred - counts * np.log(pred)))
-
-    starts = [
-        [N0, x_max, 2.0, 1.0/delta0,        0.05, mu0 - 2*sig0, 3*sig0],
-        [N0, x_max, 3.0, 2.0/delta0,        0.05, mu0 - 2*sig0, 4*sig0],
-        [N0, x_max, 1.5, 0.5/delta0,        0.10, mu0 - 1*sig0, 3*sig0],
-        [N0, x_max, 4.0, 3.0/delta0,        0.05, mu0 - 3*sig0, 5*sig0],
-        [N0, x_max, 2.0, 1.0/delta0,        0.20, mu0 - 2*sig0, 4*sig0],
-        [N0, x_max, 3.0, 2.0/delta0,        0.20, mu0 - 3*sig0, 5*sig0],
-    ]
-    limits = [(1e-3,None),(x_max-0.01, x_max+1.0),(1.0,50.),(1e-4,5.),(0.,0.95),(None,None),(1e-4,None)]
-    names  = ['N','x_cut','alpha','beta','fw','mu_w','sw']
-
-    best_popt, best_chi2 = None, np.inf
-    for p0 in starts:
-        try:
-            m = Minuit(nll, *p0, name=names)
-            for i, (lo_i, hi_i) in enumerate(limits):
-                m.limits[i] = (lo_i, hi_i)
-            m.migrad()
-            if not m.valid:
-                m.migrad()
-            if m.valid:
-                popt = list(m.values)
-                pred = gamma_right_gauss(centers, abs(popt[0]), popt[1], popt[2],
-                                         abs(popt[3]), abs(popt[4]), popt[5], abs(popt[6]))
-                chi2 = float(np.sum(((counts - pred) / errs) ** 2))
-                if chi2 < best_chi2:
-                    best_chi2, best_popt = chi2, popt
-        except Exception:
-            pass
-
-    if best_popt is None:
-        return None, None, False, np.inf
-    return best_popt, None, True, best_chi2
-
-
 def fit_dcb_expright2g(centers, counts, mu0, sig0):
     """Scipy fit: power-law left DCB + exponential right tail + Gaussian wide component."""
     N0 = float(counts.max())
@@ -907,42 +691,26 @@ def process_ecm(ecm):
     os.makedirs(plot_dir, exist_ok=True)
     print(f"\n{'='*60}\nECM {ecm} GeV  —  {INFILE}\n{'='*60}")
 
-    # ── Read tree ────────────────────────────────────────────────────────────
+    # ── Read tree (kinfit branches + virtual jet1+jet2 combined) ─────────────
     with uproot.open(INFILE) as f:
         tree = f["events"]
         available = set(tree.keys())
 
-        if KINFIT_ONLY:
-            branches = [b for b in KINFIT_BRANCHES if b in available]
-            missing  = [b for b in KINFIT_BRANCHES if b not in available]
-            if missing:
-                print(f"WARNING: {len(missing)} kinfit branch(es) not in tree: {missing}")
-            data_all = tree.arrays(branches, library="np")
-        else:
-            EXTRA_BRANCHES   = {"px_tot_gen", "py_tot_gen", "pz_tot_gen", "m_gen_lnuqq_minus_ecm"}
-            EXCLUDE_BRANCHES = {"px_tot_resol", "py_tot_resol", "pz_tot_resol"}
-            branches = sorted([b for b in available
-                               if ((b.endswith("_resol") or b.endswith("_resp"))
-                                   and b not in EXCLUDE_BRANCHES)
-                               or b in EXTRA_BRANCHES])
-            data_all = tree.arrays(branches, library="np")
-            for cname, (b1, b2) in COMBINED_BRANCHES.items():
-                if b1 in data_all and b2 in data_all:
-                    data_all[cname] = np.concatenate([_flatten_raw(data_all[b1]),
-                                                      _flatten_raw(data_all[b2])])
-                    if cname not in branches:
-                        branches = sorted(branches + [cname])
+        branches = [b for b in KINFIT_BRANCHES if b in available]
+        missing  = [b for b in KINFIT_BRANCHES if b not in available]
+        if missing:
+            print(f"WARNING: {len(missing)} kinfit branch(es) not in tree: {missing}")
+        data_all = tree.arrays(branches, library="np")
 
-    if not KINFIT_ONLY:
-        missing_cfg = [b for b in BRANCH_CONFIG
-                       if b not in available and b not in COMBINED_BRANCHES]
-        if missing_cfg:
-            print(f"WARNING: {len(missing_cfg)} configured branch(es) not found in {INFILE}:")
-            for b in missing_cfg:
-                print(f"  MISSING  {b}")
+        # Build virtual jet1+jet2 combined branches for the comparison plot.
+        for cname, (b1, b2) in COMBINED_BRANCHES.items():
+            if b1 in data_all and b2 in data_all:
+                data_all[cname] = np.concatenate([_flatten_raw(data_all[b1]),
+                                                  _flatten_raw(data_all[b2])])
+                if cname not in branches:
+                    branches.append(cname)
 
-    mode_tag = "kinfit-only" if KINFIT_ONLY else "all"
-    print(f"Fitting {len(branches)} branches from {INFILE}  [{mode_tag}]\n")
+    print(f"Fitting {len(branches)} branches from {INFILE}\n")
     results = {}
     _fitted = {}   # bname → (yfn, edges, norm) for comparison plots
 
@@ -976,24 +744,6 @@ def process_ecm(ecm):
                 if popt2 is not None and (popt is None or chi2_2 < chi2):
                     popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
             nparams = 10
-        elif model == "gamright2g":
-            popt, pcov, fit_ok, chi2 = fit_gamma_right_gauss(centers[mask], counts[mask], mu0, sig0)
-            _ndof_est = max(int(mask.sum()) - 7, 1)
-            if popt is None or chi2 / _ndof_est > 5.0:
-                popt2, _, fit_ok2, chi2_2 = fit_gamma_right_gauss_iminuit(
-                    centers[mask], counts[mask], mu0, sig0)
-                if popt2 is not None and (popt is None or chi2_2 < chi2):
-                    popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
-            nparams = 7
-        elif model == "exprcut2g":
-            popt, pcov, fit_ok, chi2 = fit_exp_right_gauss(centers[mask], counts[mask], mu0, sig0)
-            _ndof_est = max(int(mask.sum()) - 6, 1)
-            if popt is None or chi2 / _ndof_est > 5.0:
-                popt2, _, fit_ok2, chi2_2 = fit_exp_right_gauss_iminuit(
-                    centers[mask], counts[mask], mu0, sig0)
-                if popt2 is not None and (popt is None or chi2_2 < chi2):
-                    popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
-            nparams = 6
         elif model == "dcbgb":
             # Poisson NLL primary: correctly weights spike peak vs flat plateau.
             # chi² over-weights plateau bins (small sigma), forcing N down and undershooting peak.
@@ -1043,12 +793,6 @@ def process_ecm(ecm):
                 _s = max((float(centers[-1]) - mu0) * 0.4, 0.15)
                 popt = [float(counts.max()), mu0, _s, 0.5, 2.0, 1.5, 5.0, 0.05,
                         mu0 - 4*_s, 6*_s]
-            elif model == "gamright2g":
-                _xm = float(centers[-1])
-                popt = [float(counts.max()), _xm, 2.0, 1.0/max(_xm - mu0, 1.), 0.05,
-                        mu0 - 2*sig0, 3*sig0]
-            elif model == "exprcut2g":
-                popt = [float(counts.max()), float(centers[-1]), 0.12, 0.10, mu0 - 2*sig0, 5*sig0]
             elif model == "dcbgb":
                 x_span = 0.5 * (centers[-1] - centers[0])
                 popt += [0.01, x_span * 0.8, sig0 * 0.2]
@@ -1079,40 +823,6 @@ def process_ecm(ecm):
             lbl = (rf"DCBExpRight+G: $x_{{peak}}$={_x_peak:+.3g}, $\mu_c$={mu_c:+.3g}"
                    "\n"
                    rf"$\sigma_c$={sc:.3g}, $\alpha_L$={aL:.2f}, $n_L$={nL:.2f}, $k_R$={kR:.3g}"
-                   "\n"
-                   rf"$f_w$={fw:.3f}, $\mu_w$={muw:.3g}, $\sigma_w$={sw:.3g}"
-                   rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
-        elif model == "gamright2g":
-            N_f, x_cut, alpha_r, beta_r, fw, muw, sw = popt
-            N_f    = abs(float(N_f));  x_cut  = float(x_cut)
-            alpha_r = abs(float(alpha_r)); beta_r = abs(float(beta_r))
-            fw     = abs(float(fw));   muw    = float(muw); sw = abs(float(sw))
-            x_peak_r = x_cut - (alpha_r - 1.0) / max(beta_r, 1e-10) if alpha_r > 1 else x_cut
-            results[bname] = dict(
-                model="gamright2g",
-                x_cut=x_cut, alpha=alpha_r, beta=beta_r,
-                f_wide=fw, mu_wide=muw, sigma_wide=sw,
-                chi2_ndof=round(float(chi2_ndof), 3), fit_ok=bool(fit_ok),
-            )
-            def yfn(x, _N=N_f, _xc=x_cut, _a=alpha_r, _b=beta_r, _fw=fw, _mw=muw, _sw=sw):
-                return gamma_right_gauss(x, _N, _xc, _a, _b, _fw, _mw, _sw)
-            lbl = (rf"GammaRight+G: $x_{{cut}}$={x_cut:+.3g}, $\alpha$={alpha_r:.3g}, $\beta$={beta_r:.3g}"
-                   "\n"
-                   rf"$x_{{peak}}$={x_peak_r:+.3g}, $f_w$={fw:.3f}"
-                   rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
-        elif model == "exprcut2g":
-            N_f, x_cut, kL_r, fw, muw, sw = popt
-            N_f   = abs(float(N_f));  x_cut = float(x_cut)
-            kL_r  = abs(float(kL_r)); fw   = abs(float(fw))
-            muw   = float(muw);       sw   = abs(float(sw))
-            results[bname] = dict(
-                model="exprcut2g",
-                x_cut=x_cut, kL=kL_r, f_wide=fw, mu_wide=muw, sigma_wide=sw,
-                chi2_ndof=round(float(chi2_ndof), 3), fit_ok=bool(fit_ok),
-            )
-            def yfn(x, _N=N_f, _xc=x_cut, _kL=kL_r, _fw=fw, _mw=muw, _sw=sw):
-                return exp_right_gauss(x, _N, _xc, _kL, _fw, _mw, _sw)
-            lbl = (rf"ExpRight+G: $x_{{cut}}$={x_cut:+.3g}, $k_L$={kL_r:.3g}"
                    "\n"
                    rf"$f_w$={fw:.3f}, $\mu_w$={muw:.3g}, $\sigma_w$={sw:.3g}"
                    rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
@@ -1250,20 +960,6 @@ def process_ecm(ecm):
                     label="DCBExpRight core")
             ax.plot(xfine, y_wide * fw,       color="tab:green",  lw=1.2, ls=":",
                     label="Gaussian component")
-        elif model == "gamright2g":
-            y_core = gamma_right_gauss(xfine, N_f, x_cut, alpha_r, beta_r, 0., muw, sw)
-            y_wide = gamma_right_gauss(xfine, N_f, x_cut, alpha_r, beta_r, 1., muw, sw)
-            ax.plot(xfine, y_core * (1 - fw), color="tab:orange", lw=1.2, ls="--",
-                    label="Gamma core")
-            ax.plot(xfine, y_wide * fw,       color="tab:green",  lw=1.2, ls=":",
-                    label="Gaussian component")
-        elif model == "exprcut2g":
-            y_core = exp_right_gauss(xfine, N_f, x_cut, kL_r, 0., muw, sw)
-            y_wide = exp_right_gauss(xfine, N_f, x_cut, kL_r, 1., muw, sw)
-            ax.plot(xfine, y_core * (1 - fw), color="tab:orange", lw=1.2, ls="--",
-                    label="Exp core")
-            ax.plot(xfine, y_wide * fw,       color="tab:green",  lw=1.2, ls=":",
-                    label="Gaussian component")
         elif model == "dcbgb":
             y_core = dcb_gaussbox(xfine, N_f, mu_c, sc, aL, nL, aR, nR, 0., p_max, sb)
             y_wide = dcb_gaussbox(xfine, N_f, mu_c, sc, aL, nL, aR, nR, 1., p_max, sb)
@@ -1302,24 +998,14 @@ def process_ecm(ecm):
             fig.savefig(f"{plot_dir}/{bname}.{fmt}", dpi=150)
         plt.close(fig)
 
-    # ── Comparison plots (skipped in --kinfit-only mode) ─────────────────────
-    if not KINFIT_ONLY:
-        # ── Jet1 vs jet2 comparison plots ────────────────────────────────────
-        comp_dir = f"{plot_dir}/jet_comparisons"
-        _comparison_plot(
-            ecm, _fitted, COMBINED_BRANCHES, "jet1 vs jet2", comp_dir,
-            label_a="{0}", label_b="{0}",
-            combined_label="{0} (combined fit)",
-        )
-        print(f"  Jet comparison plots → {comp_dir}/")
-
-        # ── Standard vs fromele comparison plots ─────────────────────────────
-        fromele_dir = f"{plot_dir}/fromele_comparisons"
-        _comparison_plot(
-            ecm, _fitted, FROMELE_PAIRS, "standard vs fromele", fromele_dir,
-            label_a="{0} (standard)", label_b="{0} (fromele)",
-        )
-        print(f"  Fromele comparison plots → {fromele_dir}/")
+    # ── Jet1 vs jet2 comparison plots ────────────────────────────────────────
+    comp_dir = f"{plot_dir}/jet_comparisons"
+    _comparison_plot(
+        ecm, _fitted, COMBINED_BRANCHES, "jet1 vs jet2", comp_dir,
+        label_a="{0}", label_b="{0}",
+        combined_label="{0} (combined fit)",
+    )
+    print(f"  Jet comparison plots → {comp_dir}/")
 
     # ── JSON ──────────────────────────────────────────────────────────────────
     os.makedirs("response/functions", exist_ok=True)
@@ -1347,20 +1033,6 @@ def _cpp_param_line(bname, p, ecm):
             f"constexpr DcbExpLeftGaussParams DCBELG_{tag}_{ecm} = "
             f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
             f"{p['aL']:.6f}, {p['kL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
-            f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
-            f"{p['norm']:.10e} }};  {note}"
-        )
-    elif p["model"] == "exprcut2g":
-        return (
-            f"constexpr ExpRightGaussParams ERG_{tag}_{ecm} = "
-            f"{{ {p['x_cut']:+.6f}, {p['kL']:.6f}, "
-            f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
-            f"{p['norm']:.10e} }};  {note}"
-        )
-    elif p["model"] == "gamright2g":
-        return (
-            f"constexpr GammaRightGaussParams GRG_{tag}_{ecm} = "
-            f"{{ {p['x_cut']:+.6f}, {p['alpha']:.6f}, {p['beta']:.6f}, "
             f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
             f"{p['norm']:.10e} }};  {note}"
         )
@@ -1418,18 +1090,6 @@ def write_combined_header(all_results):
         "    double norm;                           // 1/integral, shape integrates to 1",
         "};",
         "",
-        "struct ExpRightGaussParams {",
-        "    double x_cut, kL;                     // right-bounded exp, peaks at x_cut",
-        "    double f_wide, mu_wide, sigma_wide;    // broad Gaussian component",
-        "    double norm;                           // 1/integral, shape integrates to 1",
-        "};",
-        "",
-        "struct GammaRightGaussParams {",
-        "    double x_cut, alpha, beta;             // reflected Gamma: peak at x_cut-(alpha-1)/beta",
-        "    double f_wide, mu_wide, sigma_wide;    // broad Gaussian component",
-        "    double norm;                           // 1/integral, shape integrates to 1",
-        "};",
-        "",
         "struct DcbExpRightGaussParams {",
         "    double mu, sigma, aL, nL;              // power-law left tail (ISR heavy tail)",
         "    double aR, kR;                         // exponential right tail: exp(-kR*(t-aR))",
@@ -1482,24 +1142,6 @@ def write_combined_header(all_results):
         "",
         "inline double dcb_expleft_gauss_neg2logpdf(double x, const DcbExpLeftGaussParams& p) {",
         "    double core = detail::dcb_expleft_unnorm((x - p.mu)/p.sigma, p.aL, p.kL, p.aR, p.nR);",
-        "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
-        "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
-        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
-        "}",
-        "",
-        "inline double exp_right_gauss_neg2logpdf(double x, const ExpRightGaussParams& p) {",
-        "    double core = (x <= p.x_cut) ? std::exp(p.kL * (x - p.x_cut)) : 0.0;",
-        "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
-        "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
-        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
-        "}",
-        "",
-        "inline double gamma_right_gauss_neg2logpdf(double x, const GammaRightGaussParams& p) {",
-        "    double y    = p.x_cut - x;",
-        "    double lcore = (x <= p.x_cut && y > 0)",
-        "                 ? (p.alpha - 1.0) * std::log(y) - p.beta * y",
-        "                 : -1e300;",
-        "    double core = std::exp(std::max(lcore, -745.0));",
         "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
         "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
         "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",

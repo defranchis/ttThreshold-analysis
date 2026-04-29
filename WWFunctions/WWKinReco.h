@@ -19,14 +19,14 @@ using namespace ::WWFunctions;
 struct KinFitParamSet {
     DcbGaussParams         jet1_p_resp;
     DcbGaussParams         jet2_p_resp;
-    DcbParams              lep_p_resp;
+    DcbExpLeftGaussParams  lep_p_resp;            // expleft2g
     DcbParams              met_p_resp;
-    DcbParams              jet1_phi_resol;
-    DcbParams              jet1_theta_resol;
-    DcbParams              jet2_phi_resol;
-    DcbParams              jet2_theta_resol;
-    DcbParams              lep_phi_resol;
-    DcbParams              lep_theta_resol;
+    DcbGaussParams         jet1_phi_resol;        // dcb2g
+    DcbGaussParams         jet1_theta_resol;      // dcb2g
+    DcbGaussParams         jet2_phi_resol;        // dcb2g
+    DcbGaussParams         jet2_theta_resol;      // dcb2g
+    DcbGaussParams         lep_phi_resol;         // dcb2g
+    DcbGaussParams         lep_theta_resol;       // dcb2g
     DcbParams              met_phi_resol;
     DcbParams              met_theta_resol;
     DcbExpRightGaussParams m_gen_lnuqq_minus_ecm;
@@ -37,31 +37,31 @@ struct KinFitParamSet {
 
 static const KinFitParamSet KF_PARAMS_157 = {
     DCBG_JET1_P_RESP_157, DCBG_JET2_P_RESP_157,
-    DCB_LEP_P_RESP_157, DCB_MET_P_RESP_157,
-    DCB_JET1_PHI_RESOL_157, DCB_JET1_THETA_RESOL_157,
-    DCB_JET2_PHI_RESOL_157, DCB_JET2_THETA_RESOL_157,
-    DCB_LEP_PHI_RESOL_157, DCB_LEP_THETA_RESOL_157,
-    DCB_MET_PHI_RESOL_157, DCB_MET_THETA_RESOL_157,
+    DCBELG_LEP_P_RESP_157, DCB_MET_P_RESP_157,
+    DCBG_JET1_PHI_RESOL_157, DCBG_JET1_THETA_RESOL_157,
+    DCBG_JET2_PHI_RESOL_157, DCBG_JET2_THETA_RESOL_157,
+    DCBG_LEP_PHI_RESOL_157,  DCBG_LEP_THETA_RESOL_157,
+    DCB_MET_PHI_RESOL_157,   DCB_MET_THETA_RESOL_157,
     DCBERG_M_GEN_LNUQQ_MINUS_ECM_157,
     DCB_PX_TOT_GEN_157, DCB_PY_TOT_GEN_157, DCB_PZ_TOT_GEN_157,
 };
 static const KinFitParamSet KF_PARAMS_160 = {
     DCBG_JET1_P_RESP_160, DCBG_JET2_P_RESP_160,
-    DCB_LEP_P_RESP_160, DCB_MET_P_RESP_160,
-    DCB_JET1_PHI_RESOL_160, DCB_JET1_THETA_RESOL_160,
-    DCB_JET2_PHI_RESOL_160, DCB_JET2_THETA_RESOL_160,
-    DCB_LEP_PHI_RESOL_160, DCB_LEP_THETA_RESOL_160,
-    DCB_MET_PHI_RESOL_160, DCB_MET_THETA_RESOL_160,
+    DCBELG_LEP_P_RESP_160, DCB_MET_P_RESP_160,
+    DCBG_JET1_PHI_RESOL_160, DCBG_JET1_THETA_RESOL_160,
+    DCBG_JET2_PHI_RESOL_160, DCBG_JET2_THETA_RESOL_160,
+    DCBG_LEP_PHI_RESOL_160,  DCBG_LEP_THETA_RESOL_160,
+    DCB_MET_PHI_RESOL_160,   DCB_MET_THETA_RESOL_160,
     DCBERG_M_GEN_LNUQQ_MINUS_ECM_160,
     DCB_PX_TOT_GEN_160, DCB_PY_TOT_GEN_160, DCB_PZ_TOT_GEN_160,
 };
 static const KinFitParamSet KF_PARAMS_163 = {
     DCBG_JET1_P_RESP_163, DCBG_JET2_P_RESP_163,
-    DCB_LEP_P_RESP_163, DCB_MET_P_RESP_163,
-    DCB_JET1_PHI_RESOL_163, DCB_JET1_THETA_RESOL_163,
-    DCB_JET2_PHI_RESOL_163, DCB_JET2_THETA_RESOL_163,
-    DCB_LEP_PHI_RESOL_163, DCB_LEP_THETA_RESOL_163,
-    DCB_MET_PHI_RESOL_163, DCB_MET_THETA_RESOL_163,
+    DCBELG_LEP_P_RESP_163, DCB_MET_P_RESP_163,
+    DCBG_JET1_PHI_RESOL_163, DCBG_JET1_THETA_RESOL_163,
+    DCBG_JET2_PHI_RESOL_163, DCBG_JET2_THETA_RESOL_163,
+    DCBG_LEP_PHI_RESOL_163,  DCBG_LEP_THETA_RESOL_163,
+    DCB_MET_PHI_RESOL_163,   DCB_MET_THETA_RESOL_163,
     DCBERG_M_GEN_LNUQQ_MINUS_ECM_163,
     DCB_PX_TOT_GEN_163, DCB_PY_TOT_GEN_163, DCB_PZ_TOT_GEN_163,
 };
@@ -69,14 +69,14 @@ static const KinFitParamSet KF_PARAMS_163 = {
 // ── Active kinfit parameters (set per-dataset via setKinFitParams) ─────────
 inline DcbGaussParams         kf_jet1_p_resp           = DCBG_JET1_P_RESP_160;
 inline DcbGaussParams         kf_jet2_p_resp           = DCBG_JET2_P_RESP_160;
-inline DcbParams              kf_lep_p_resp            = DCB_LEP_P_RESP_160;
+inline DcbExpLeftGaussParams  kf_lep_p_resp            = DCBELG_LEP_P_RESP_160;
 inline DcbParams              kf_met_p_resp            = DCB_MET_P_RESP_160;
-inline DcbParams              kf_jet1_phi_resol        = DCB_JET1_PHI_RESOL_160;
-inline DcbParams              kf_jet1_theta_resol      = DCB_JET1_THETA_RESOL_160;
-inline DcbParams              kf_jet2_phi_resol        = DCB_JET2_PHI_RESOL_160;
-inline DcbParams              kf_jet2_theta_resol      = DCB_JET2_THETA_RESOL_160;
-inline DcbParams              kf_lep_phi_resol         = DCB_LEP_PHI_RESOL_160;
-inline DcbParams              kf_lep_theta_resol       = DCB_LEP_THETA_RESOL_160;
+inline DcbGaussParams         kf_jet1_phi_resol        = DCBG_JET1_PHI_RESOL_160;
+inline DcbGaussParams         kf_jet1_theta_resol      = DCBG_JET1_THETA_RESOL_160;
+inline DcbGaussParams         kf_jet2_phi_resol        = DCBG_JET2_PHI_RESOL_160;
+inline DcbGaussParams         kf_jet2_theta_resol      = DCBG_JET2_THETA_RESOL_160;
+inline DcbGaussParams         kf_lep_phi_resol         = DCBG_LEP_PHI_RESOL_160;
+inline DcbGaussParams         kf_lep_theta_resol       = DCBG_LEP_THETA_RESOL_160;
 inline DcbParams              kf_met_phi_resol         = DCB_MET_PHI_RESOL_160;
 inline DcbParams              kf_met_theta_resol       = DCB_MET_THETA_RESOL_160;
 inline DcbExpRightGaussParams kf_m_gen_lnuqq_minus_ecm = DCBERG_M_GEN_LNUQQ_MINUS_ECM_160;
@@ -303,17 +303,17 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
 
             double scale_pen = dcb_gauss_neg2logpdf(s1, kf_jet1_p_resp)
                              + dcb_gauss_neg2logpdf(s2, kf_jet2_p_resp)
-                             + dcb_neg2logpdf(sl, kf_lep_p_resp)
+                             + dcb_expleft_gauss_neg2logpdf(sl, kf_lep_p_resp)
                              + dcb_neg2logpdf(sn, kf_met_p_resp);
 
-            double angular = dcb_neg2logpdf(t1, kf_jet1_theta_resol)
-                           + dcb_neg2logpdf(t2, kf_jet2_theta_resol)
+            double angular = dcb_gauss_neg2logpdf(t1, kf_jet1_theta_resol)
+                           + dcb_gauss_neg2logpdf(t2, kf_jet2_theta_resol)
                            + dcb_neg2logpdf(tn, kf_met_theta_resol)
-                           + dcb_neg2logpdf(tl, kf_lep_theta_resol)
-                           + dcb_neg2logpdf(p1, kf_jet1_phi_resol)
-                           + dcb_neg2logpdf(p2, kf_jet2_phi_resol)
+                           + dcb_gauss_neg2logpdf(tl, kf_lep_theta_resol)
+                           + dcb_gauss_neg2logpdf(p1, kf_jet1_phi_resol)
+                           + dcb_gauss_neg2logpdf(p2, kf_jet2_phi_resol)
                            + dcb_neg2logpdf(pn, kf_met_phi_resol)
-                           + dcb_neg2logpdf(pl, kf_lep_phi_resol);
+                           + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
 
             double ecm_over = WW.M() - static_cast<double>(ECM);
             double ecm_veto = (ecm_over > 0.0) ? 100.0 * ecm_over * ecm_over : 0.0;
@@ -366,17 +366,17 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
 
             double scale_pen = dcb_gauss_neg2logpdf(s1, kf_jet1_p_resp)
                              + dcb_gauss_neg2logpdf(s2, kf_jet2_p_resp)
-                             + dcb_neg2logpdf(sl, kf_lep_p_resp)
+                             + dcb_expleft_gauss_neg2logpdf(sl, kf_lep_p_resp)
                              + dcb_neg2logpdf(sn, kf_met_p_resp);
 
-            double angular = dcb_neg2logpdf(t1, kf_jet1_theta_resol)
-                           + dcb_neg2logpdf(t2, kf_jet2_theta_resol)
+            double angular = dcb_gauss_neg2logpdf(t1, kf_jet1_theta_resol)
+                           + dcb_gauss_neg2logpdf(t2, kf_jet2_theta_resol)
                            + dcb_neg2logpdf(tn, kf_met_theta_resol)
-                           + dcb_neg2logpdf(tl, kf_lep_theta_resol)
-                           + dcb_neg2logpdf(p1, kf_jet1_phi_resol)
-                           + dcb_neg2logpdf(p2, kf_jet2_phi_resol)
+                           + dcb_gauss_neg2logpdf(tl, kf_lep_theta_resol)
+                           + dcb_gauss_neg2logpdf(p1, kf_jet1_phi_resol)
+                           + dcb_gauss_neg2logpdf(p2, kf_jet2_phi_resol)
                            + dcb_neg2logpdf(pn, kf_met_phi_resol)
-                           + dcb_neg2logpdf(pl, kf_lep_phi_resol);
+                           + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
 
             double ecm_over = WW.M() - static_cast<double>(ECM);
             double ecm_veto = (ecm_over > 0.0) ? 100.0 * ecm_over * ecm_over : 0.0;
@@ -466,17 +466,17 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
 
         double scale_pen = dcb_gauss_neg2logpdf(s1, kf_jet1_p_resp)
                          + dcb_gauss_neg2logpdf(s2, kf_jet2_p_resp)
-                         + dcb_neg2logpdf(sl, kf_lep_p_resp)
+                         + dcb_expleft_gauss_neg2logpdf(sl, kf_lep_p_resp)
                          + dcb_neg2logpdf(sn, kf_met_p_resp);
 
-        double angular = dcb_neg2logpdf(t1, kf_jet1_theta_resol)
-                       + dcb_neg2logpdf(t2, kf_jet2_theta_resol)
+        double angular = dcb_gauss_neg2logpdf(t1, kf_jet1_theta_resol)
+                       + dcb_gauss_neg2logpdf(t2, kf_jet2_theta_resol)
                        + dcb_neg2logpdf(tn, kf_met_theta_resol)
-                       + dcb_neg2logpdf(tl, kf_lep_theta_resol)
-                       + dcb_neg2logpdf(p1, kf_jet1_phi_resol)
-                       + dcb_neg2logpdf(p2, kf_jet2_phi_resol)
+                       + dcb_gauss_neg2logpdf(tl, kf_lep_theta_resol)
+                       + dcb_gauss_neg2logpdf(p1, kf_jet1_phi_resol)
+                       + dcb_gauss_neg2logpdf(p2, kf_jet2_phi_resol)
                        + dcb_neg2logpdf(pn, kf_met_phi_resol)
-                       + dcb_neg2logpdf(pl, kf_lep_phi_resol);
+                       + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
 
         double ecm_over = WW.M() - static_cast<double>(ECM);
         double ecm_veto = (ecm_over > 0.0) ? 100.0 * ecm_over * ecm_over : 0.0;
