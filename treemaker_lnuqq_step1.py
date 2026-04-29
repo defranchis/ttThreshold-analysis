@@ -1,6 +1,7 @@
 # Step 1 of 2 — produce only the branches needed by fit_dcb_resolutions.py.
 # Run fit_dcb_resolutions.py on the output before running treemaker_lnuqq_step2.py.
 import re, ROOT
+from ww_cuts import D32_MAX
 processList = {
     "wzp6_ee_munumuqq_noCut_ecm160": {"fraction": 1, "crossSection": 1},
     "wzp6_ee_munumuqq_noCut_ecm157": {"fraction": 1, "crossSection": 1},
@@ -128,6 +129,9 @@ class RDFanalysis:
         df = df.Define("jet1_phi", "recoJet_phi[0]")
         df = df.Define("jet2_phi", "recoJet_phi[1]")
         df = df.Filter("jets_p4.size() == 2")
+        df = df.Define("d_12", "JetClusteringUtils::get_exclusive_dmerge(_jet, 1)")
+        df = df.Define("d_32", "JetClusteringUtils::get_exclusive_dmerge(_jet, 2)")
+        #df = df.Filter(f"d_32 < {D32_MAX}")
 
         # ── MC aliases & early gen filter ──────────────────────────────────────
         df = df.Alias("Particle0", "Particle#0.index")

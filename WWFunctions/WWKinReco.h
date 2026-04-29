@@ -15,6 +15,57 @@ namespace FCCAnalyses { namespace WWFunctions {
 // Pull in DCB evaluators and fitted params from the generated headers.
 using namespace ::WWFunctions;
 
+// ── Per-ECM parameter bundles ───────────────────────────────────────────────
+struct KinFitParamSet {
+    DcbGaussParams         jet1_p_resp;
+    DcbGaussParams         jet2_p_resp;
+    DcbParams              lep_p_resp;
+    DcbParams              met_p_resp;
+    DcbParams              jet1_phi_resol;
+    DcbParams              jet1_theta_resol;
+    DcbParams              jet2_phi_resol;
+    DcbParams              jet2_theta_resol;
+    DcbParams              lep_phi_resol;
+    DcbParams              lep_theta_resol;
+    DcbParams              met_phi_resol;
+    DcbParams              met_theta_resol;
+    DcbExpRightGaussParams m_gen_lnuqq_minus_ecm;
+    DcbParams              px_tot_gen;
+    DcbParams              py_tot_gen;
+    DcbParams              pz_tot_gen;
+};
+
+static const KinFitParamSet KF_PARAMS_157 = {
+    DCBG_JET1_P_RESP_157, DCBG_JET2_P_RESP_157,
+    DCB_LEP_P_RESP_157, DCB_MET_P_RESP_157,
+    DCB_JET1_PHI_RESOL_157, DCB_JET1_THETA_RESOL_157,
+    DCB_JET2_PHI_RESOL_157, DCB_JET2_THETA_RESOL_157,
+    DCB_LEP_PHI_RESOL_157, DCB_LEP_THETA_RESOL_157,
+    DCB_MET_PHI_RESOL_157, DCB_MET_THETA_RESOL_157,
+    DCBERG_M_GEN_LNUQQ_MINUS_ECM_157,
+    DCB_PX_TOT_GEN_157, DCB_PY_TOT_GEN_157, DCB_PZ_TOT_GEN_157,
+};
+static const KinFitParamSet KF_PARAMS_160 = {
+    DCBG_JET1_P_RESP_160, DCBG_JET2_P_RESP_160,
+    DCB_LEP_P_RESP_160, DCB_MET_P_RESP_160,
+    DCB_JET1_PHI_RESOL_160, DCB_JET1_THETA_RESOL_160,
+    DCB_JET2_PHI_RESOL_160, DCB_JET2_THETA_RESOL_160,
+    DCB_LEP_PHI_RESOL_160, DCB_LEP_THETA_RESOL_160,
+    DCB_MET_PHI_RESOL_160, DCB_MET_THETA_RESOL_160,
+    DCBERG_M_GEN_LNUQQ_MINUS_ECM_160,
+    DCB_PX_TOT_GEN_160, DCB_PY_TOT_GEN_160, DCB_PZ_TOT_GEN_160,
+};
+static const KinFitParamSet KF_PARAMS_163 = {
+    DCBG_JET1_P_RESP_163, DCBG_JET2_P_RESP_163,
+    DCB_LEP_P_RESP_163, DCB_MET_P_RESP_163,
+    DCB_JET1_PHI_RESOL_163, DCB_JET1_THETA_RESOL_163,
+    DCB_JET2_PHI_RESOL_163, DCB_JET2_THETA_RESOL_163,
+    DCB_LEP_PHI_RESOL_163, DCB_LEP_THETA_RESOL_163,
+    DCB_MET_PHI_RESOL_163, DCB_MET_THETA_RESOL_163,
+    DCBERG_M_GEN_LNUQQ_MINUS_ECM_163,
+    DCB_PX_TOT_GEN_163, DCB_PY_TOT_GEN_163, DCB_PZ_TOT_GEN_163,
+};
+
 // ── Active kinfit parameters (set per-dataset via setKinFitParams) ─────────
 inline DcbGaussParams         kf_jet1_p_resp           = DCBG_JET1_P_RESP_160;
 inline DcbGaussParams         kf_jet2_p_resp           = DCBG_JET2_P_RESP_160;
@@ -35,58 +86,27 @@ inline DcbParams              kf_pz_tot_gen            = DCB_PZ_TOT_GEN_160;
 
 inline void setKinFitParams(int ecm) {
     ECM = static_cast<float>(ecm);
-    if (ecm == 157) {
-        kf_jet1_p_resp           = DCBG_JET1_P_RESP_157;
-        kf_jet2_p_resp           = DCBG_JET2_P_RESP_157;
-        kf_lep_p_resp            = DCB_LEP_P_RESP_157;
-        kf_met_p_resp            = DCB_MET_P_RESP_157;
-        kf_jet1_phi_resol        = DCB_JET1_PHI_RESOL_157;
-        kf_jet1_theta_resol      = DCB_JET1_THETA_RESOL_157;
-        kf_jet2_phi_resol        = DCB_JET2_PHI_RESOL_157;
-        kf_jet2_theta_resol      = DCB_JET2_THETA_RESOL_157;
-        kf_lep_phi_resol         = DCB_LEP_PHI_RESOL_157;
-        kf_lep_theta_resol       = DCB_LEP_THETA_RESOL_157;
-        kf_met_phi_resol         = DCB_MET_PHI_RESOL_157;
-        kf_met_theta_resol       = DCB_MET_THETA_RESOL_157;
-        kf_m_gen_lnuqq_minus_ecm = DCBERG_M_GEN_LNUQQ_MINUS_ECM_157;
-        kf_px_tot_gen            = DCB_PX_TOT_GEN_157;
-        kf_py_tot_gen            = DCB_PY_TOT_GEN_157;
-        kf_pz_tot_gen            = DCB_PZ_TOT_GEN_157;
-    } else if (ecm == 160) {
-        kf_jet1_p_resp           = DCBG_JET1_P_RESP_160;
-        kf_jet2_p_resp           = DCBG_JET2_P_RESP_160;
-        kf_lep_p_resp            = DCB_LEP_P_RESP_160;
-        kf_met_p_resp            = DCB_MET_P_RESP_160;
-        kf_jet1_phi_resol        = DCB_JET1_PHI_RESOL_160;
-        kf_jet1_theta_resol      = DCB_JET1_THETA_RESOL_160;
-        kf_jet2_phi_resol        = DCB_JET2_PHI_RESOL_160;
-        kf_jet2_theta_resol      = DCB_JET2_THETA_RESOL_160;
-        kf_lep_phi_resol         = DCB_LEP_PHI_RESOL_160;
-        kf_lep_theta_resol       = DCB_LEP_THETA_RESOL_160;
-        kf_met_phi_resol         = DCB_MET_PHI_RESOL_160;
-        kf_met_theta_resol       = DCB_MET_THETA_RESOL_160;
-        kf_m_gen_lnuqq_minus_ecm = DCBERG_M_GEN_LNUQQ_MINUS_ECM_160;
-        kf_px_tot_gen            = DCB_PX_TOT_GEN_160;
-        kf_py_tot_gen            = DCB_PY_TOT_GEN_160;
-        kf_pz_tot_gen            = DCB_PZ_TOT_GEN_160;
-    } else if (ecm == 163) {
-        kf_jet1_p_resp           = DCBG_JET1_P_RESP_163;
-        kf_jet2_p_resp           = DCBG_JET2_P_RESP_163;
-        kf_lep_p_resp            = DCB_LEP_P_RESP_163;
-        kf_met_p_resp            = DCB_MET_P_RESP_163;
-        kf_jet1_phi_resol        = DCB_JET1_PHI_RESOL_163;
-        kf_jet1_theta_resol      = DCB_JET1_THETA_RESOL_163;
-        kf_jet2_phi_resol        = DCB_JET2_PHI_RESOL_163;
-        kf_jet2_theta_resol      = DCB_JET2_THETA_RESOL_163;
-        kf_lep_phi_resol         = DCB_LEP_PHI_RESOL_163;
-        kf_lep_theta_resol       = DCB_LEP_THETA_RESOL_163;
-        kf_met_phi_resol         = DCB_MET_PHI_RESOL_163;
-        kf_met_theta_resol       = DCB_MET_THETA_RESOL_163;
-        kf_m_gen_lnuqq_minus_ecm = DCBERG_M_GEN_LNUQQ_MINUS_ECM_163;
-        kf_px_tot_gen            = DCB_PX_TOT_GEN_163;
-        kf_py_tot_gen            = DCB_PY_TOT_GEN_163;
-        kf_pz_tot_gen            = DCB_PZ_TOT_GEN_163;
-    }
+    const KinFitParamSet* p =
+        ecm == 157 ? &KF_PARAMS_157 :
+        ecm == 160 ? &KF_PARAMS_160 :
+        ecm == 163 ? &KF_PARAMS_163 : nullptr;
+    if (!p) return;
+    kf_jet1_p_resp           = p->jet1_p_resp;
+    kf_jet2_p_resp           = p->jet2_p_resp;
+    kf_lep_p_resp            = p->lep_p_resp;
+    kf_met_p_resp            = p->met_p_resp;
+    kf_jet1_phi_resol        = p->jet1_phi_resol;
+    kf_jet1_theta_resol      = p->jet1_theta_resol;
+    kf_jet2_phi_resol        = p->jet2_phi_resol;
+    kf_jet2_theta_resol      = p->jet2_theta_resol;
+    kf_lep_phi_resol         = p->lep_phi_resol;
+    kf_lep_theta_resol       = p->lep_theta_resol;
+    kf_met_phi_resol         = p->met_phi_resol;
+    kf_met_theta_resol       = p->met_theta_resol;
+    kf_m_gen_lnuqq_minus_ecm = p->m_gen_lnuqq_minus_ecm;
+    kf_px_tot_gen            = p->px_tot_gen;
+    kf_py_tot_gen            = p->py_tot_gen;
+    kf_pz_tot_gen            = p->pz_tot_gen;
 }
 
 // ── kinematic fit ──────────────────────────────────────────────────────────
@@ -109,6 +129,7 @@ struct KinFitResult {
     int   valid;
     float mWlep_postfit, mWhad_postfit, mWW_postfit;
     float pt_j1_postfit, pt_j2_postfit, pt_lep_postfit, pt_nu_postfit;
+    float p_j1_postfit,  p_j2_postfit,  p_lep_postfit,  p_nu_postfit;
     float Wlep_px_postfit, Wlep_py_postfit, Wlep_pz_postfit;
     float Whad_px_postfit, Whad_py_postfit, Whad_pz_postfit;
     float theta_j1_postfit, theta_j2_postfit, theta_nu_postfit;
@@ -385,6 +406,8 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.mWlep_postfit    = Wl.M();       result.mWhad_postfit    = Wh.M();  result.mWW_postfit = (Wl+Wh).M();
     result.pt_j1_postfit    = j1f.Pt();     result.pt_j2_postfit    = j2f.Pt();
     result.pt_lep_postfit   = lf.Pt();      result.pt_nu_postfit    = nf.Pt();
+    result.p_j1_postfit     = j1f.P();      result.p_j2_postfit     = j2f.P();
+    result.p_lep_postfit    = lf.P();       result.p_nu_postfit     = nf.P();
     result.Wlep_px_postfit  = Wl.Px();      result.Wlep_py_postfit  = Wl.Py();  result.Wlep_pz_postfit = Wl.Pz();
     result.Whad_px_postfit  = Wh.Px();      result.Whad_py_postfit  = Wh.Py();  result.Whad_pz_postfit = Wh.Pz();
     result.theta_j1_postfit = j1f.Theta();  result.theta_j2_postfit = j2f.Theta(); result.theta_nu_postfit = nf.Theta();
@@ -514,6 +537,8 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.mWlep_postfit    = Wl.M();       result.mWhad_postfit    = Wh.M();  result.mWW_postfit = (Wl+Wh).M();
     result.pt_j1_postfit    = j1f.Pt();     result.pt_j2_postfit    = j2f.Pt();
     result.pt_lep_postfit   = lf.Pt();      result.pt_nu_postfit    = nf.Pt();
+    result.p_j1_postfit     = j1f.P();      result.p_j2_postfit     = j2f.P();
+    result.p_lep_postfit    = lf.P();       result.p_nu_postfit     = nf.P();
     result.Wlep_px_postfit  = Wl.Px();      result.Wlep_py_postfit  = Wl.Py();  result.Wlep_pz_postfit = Wl.Pz();
     result.Whad_px_postfit  = Wh.Px();      result.Whad_py_postfit  = Wh.Py();  result.Whad_pz_postfit = Wh.Pz();
     result.theta_j1_postfit = j1f.Theta();  result.theta_j2_postfit = j2f.Theta(); result.theta_nu_postfit = nf.Theta();

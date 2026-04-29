@@ -22,7 +22,7 @@ from scipy.integrate import quad as _quad
 ECM_LIST    = [157, 160, 163]
 INFILE_TMPL = "outputs/treemaker/lnuqq/step2/semihad/wzp6_ee_munumuqq_noCut_ecm{ecm}.root"
 JSON_TMPL   = "response/functions/dcb_results_ecm{ecm}.json"
-OUTDIR_BASE = "response/plots/kinfit_vars"
+OUTDIR_BASE = "outputs/plots/kinfit_vars"
 
 ECM_COLORS  = {157: "tab:purple", 160: "tab:orange", 163: "tab:cyan"}
 
@@ -51,6 +51,69 @@ KINFIT_TO_RESOL = {
     "kinfit_WW_m_minus_ecm": "m_gen_lnuqq_minus_ecm",
 }
 
+# Mapping: kinfit post-fit branch → pre-fit reco counterpart
+KINFIT_TO_RECO = {
+    "kinfit_p_j1":           "jet1_p",
+    "kinfit_p_j2":           "jet2_p",
+    "kinfit_p_lep":          "Isolep_p",
+    "kinfit_p_nu":           "missing_p",
+    "kinfit_theta_j1":       "jet1_theta",
+    "kinfit_theta_j2":       "jet2_theta",
+    "kinfit_theta_nu":       "missing_p_theta",
+    "kinfit_phi_j1":         "jet1_phi",
+    "kinfit_phi_j2":         "jet2_phi",
+    "kinfit_phi_nu":         "missing_p_phi",
+    "kinfit_mWlep":          "Wlep_reco_mass",
+    "kinfit_mWhad":          "Whad_reco_mass",
+    "kinfit_WW_px":          "px_tot_reco",
+    "kinfit_WW_py":          "py_tot_reco",
+    "kinfit_WW_pz":          "pz_tot_reco",
+    "kinfit_WW_m":           "m_iso_lnuexcljj",
+    "kinfit_WW_m_minus_ecm": "m_reco_WW_minus_ecm",
+}
+
+# Mapping: kinfit post-fit branch → gen truth counterpart
+KINFIT_TO_GEN = {
+    "kinfit_p_j1":           "jet1_gen_p",
+    "kinfit_p_j2":           "jet2_gen_p",
+    "kinfit_p_lep":          "lep_gen_p",
+    "kinfit_p_nu":           "nu_gen_p",
+    "kinfit_theta_j1":       "jet1_gen_theta",
+    "kinfit_theta_j2":       "jet2_gen_theta",
+    "kinfit_theta_nu":       "nu_gen_theta",
+    "kinfit_phi_j1":         "jet1_gen_phi",
+    "kinfit_phi_j2":         "jet2_gen_phi",
+    "kinfit_phi_nu":         "nu_gen_phi",
+    "kinfit_mWlep":          "m_lnu_status1",
+    "kinfit_mWhad":          "Whad_gen_mass",
+    "kinfit_WW_px":          "px_tot_gen",
+    "kinfit_WW_py":          "py_tot_gen",
+    "kinfit_WW_pz":          "pz_tot_gen",
+    "kinfit_WW_m":           "m_gen_lnuqq",
+    "kinfit_WW_m_minus_ecm": "m_gen_lnuqq_minus_ecm",
+}
+
+EXTRA_BRANCHES = sorted(set(KINFIT_TO_RECO.values()) | set(KINFIT_TO_GEN.values()))
+
+# Subdirectory assignment for per-ECM plots
+# pull/scale params → "pulls"; reco/gen comparisons → dedicated subdirs
+_PULL_BRANCHES = {
+    "kinfit_s1","kinfit_s2","kinfit_sl","kinfit_sn",
+    "kinfit_t1","kinfit_t2","kinfit_tn","kinfit_tl",
+    "kinfit_p1","kinfit_p2","kinfit_pn","kinfit_pl",
+    "kinfit_deltaP",
+}
+
+def _subdir(bname):
+    """Return subdirectory name for a kinfit branch."""
+    if bname in _PULL_BRANCHES:
+        return "pulls"
+    if bname in KINFIT_TO_RECO and bname in KINFIT_TO_GEN:
+        return "fit_vs_reco_gen"
+    if bname in KINFIT_TO_GEN:
+        return "fit_vs_gen"
+    return "misc"
+
 # All kinfit branches from treemaker_lnuqq_step2.py
 KINFIT_BRANCHES = [
     "kinfit_mW", "kinfit_gW",
@@ -59,7 +122,7 @@ KINFIT_BRANCHES = [
     "kinfit_p1", "kinfit_p2", "kinfit_pn", "kinfit_pl",
     "kinfit_chi2", "kinfit_valid",
     "kinfit_mWlep", "kinfit_mWhad",
-    "kinfit_pt_j1", "kinfit_pt_j2", "kinfit_pt_lep", "kinfit_pt_nu",
+    "kinfit_p_j1", "kinfit_p_j2", "kinfit_p_lep", "kinfit_p_nu",
     "kinfit_Wlep_px", "kinfit_Wlep_py", "kinfit_Wlep_pz",
     "kinfit_Whad_px", "kinfit_Whad_py", "kinfit_Whad_pz",
     "kinfit_theta_j1", "kinfit_theta_j2", "kinfit_theta_nu",
@@ -221,10 +284,10 @@ _FIXED_RANGE = {
     "kinfit_mWhad": (100, 50,   110),
     "kinfit_gW":    (100,  0,     5),
     "kinfit_valid": (  3, -0.5,  2.5),
-    "kinfit_pt_j1": (100,  0,   100),
-    "kinfit_pt_j2": (100,  0,   100),
-    "kinfit_pt_lep":(100,  0,   100),
-    "kinfit_pt_nu": (100,  0,   100),
+    "kinfit_p_j1":  (100,  0,   100),
+    "kinfit_p_j2":  (100,  0,   100),
+    "kinfit_p_lep": (100,  0,   100),
+    "kinfit_p_nu":  (100,  0,   100),
     "kinfit_Wlep_px": (100, -100, 100),
     "kinfit_Wlep_py": (100, -100, 100),
     "kinfit_Wlep_pz": (100, -100, 100),
@@ -299,15 +362,31 @@ def _pdf_integ_full(pdf_fn, pdf_params, nsigma=10):
     return float(np.trapz(pdf_fn(xnorm), xnorm))
 
 
-def _plot_branch(ax, bname, vals, ecm, pdf_fn=None, pdf_params=None, color="steelblue"):
-    nbins, xlo, xhi = _binning(bname, vals, pdf_params=pdf_params)
-    vals_c = vals[(vals >= xlo) & (vals <= xhi)]
-    counts, edges = np.histogram(vals_c, bins=nbins, range=(xlo, xhi))
-    centers = 0.5 * (edges[:-1] + edges[1:])
-    bw = np.diff(edges)[0]
+def _plot_branch(ax, bname, vals, ecm, pdf_fn=None, pdf_params=None,
+                 reco_vals=None, gen_vals=None, color="steelblue", xlim=None):
+    # Range spanning all provided distributions
+    all_combined = np.concatenate([v for v in [vals, reco_vals, gen_vals]
+                                   if v is not None and len(v)])
+    nbins, xlo, xhi = _binning(bname, all_combined, pdf_params=pdf_params)
+    if xlim is not None:
+        xlo, xhi = xlim
 
-    density = counts / max(counts.sum() * bw, 1e-300)
-    ax.bar(centers, density, width=bw, color=color, alpha=0.55, label=f"ecm{ecm} data")
+    def _draw_hist(v, label, clr, as_bar=False):
+        v_c = v[(v >= xlo) & (v <= xhi)]
+        counts, edges = np.histogram(v_c, bins=nbins, range=(xlo, xhi))
+        bw = np.diff(edges)[0]
+        density = counts / max(counts.sum() * bw, 1e-300)
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        if as_bar:
+            ax.bar(centers, density, width=bw, color=clr, alpha=0.55, label=label)
+        else:
+            ax.step(centers, density, where="mid", color=clr, lw=2, label=label)
+
+    if reco_vals is not None and len(reco_vals):
+        _draw_hist(reco_vals, "reco", "lightskyblue", as_bar=True)
+    if gen_vals is not None and len(gen_vals):
+        _draw_hist(gen_vals, "gen", "tab:orange")
+    _draw_hist(vals, "fitted", "tab:green")
 
     if pdf_fn is not None and pdf_params is not None:
         xfine = np.linspace(xlo, xhi, 600)
@@ -324,10 +403,10 @@ def _plot_branch(ax, bname, vals, ecm, pdf_fn=None, pdf_params=None, color="stee
 
 
 def plot_per_ecm(ecm, branches_data, json_results):
-    out_dir = f"{OUTDIR_BASE}/ecm{ecm}"
-    os.makedirs(out_dir, exist_ok=True)
+    base = f"{OUTDIR_BASE}/ecm{ecm}"
 
-    for bname, vals in branches_data.items():
+    for bname in [b for b in KINFIT_BRANCHES if b in branches_data]:
+        vals = branches_data[bname]
         resol_name = KINFIT_TO_RESOL.get(bname)
         pdf_fn = None
         pdf_params = None
@@ -335,8 +414,17 @@ def plot_per_ecm(ecm, branches_data, json_results):
             pdf_params = json_results[resol_name]
             pdf_fn = _make_pdf(pdf_params)
 
+        reco_bname = KINFIT_TO_RECO.get(bname)
+        gen_bname  = KINFIT_TO_GEN.get(bname)
+        reco_vals  = branches_data.get(reco_bname) if reco_bname else None
+        gen_vals   = branches_data.get(gen_bname)  if gen_bname  else None
+
+        out_dir = f"{base}/{_subdir(bname)}"
+        os.makedirs(out_dir, exist_ok=True)
+
         fig, ax = plt.subplots(figsize=(7, 5), layout="constrained")
-        _plot_branch(ax, bname, vals, ecm, pdf_fn=pdf_fn, pdf_params=pdf_params)
+        _plot_branch(ax, bname, vals, ecm, pdf_fn=pdf_fn, pdf_params=pdf_params,
+                     reco_vals=reco_vals, gen_vals=gen_vals)
         title = f"{bname}  [ecm{ecm}]"
         if resol_name:
             title += f"\ninput PDF: {resol_name}"
@@ -348,19 +436,107 @@ def plot_per_ecm(ecm, branches_data, json_results):
             fig.savefig(f"{out_dir}/{bname}.{fmt}", dpi=150)
         plt.close(fig)
 
-    print(f"  [ecm{ecm}]  per-ECM plots → {out_dir}/")
+    print(f"  [ecm{ecm}]  per-ECM plots → {base}/")
+
+
+# ── Chi2-slice comparison plots ───────────────────────────────────────────────
+
+def plot_chi2_slices(ecm, raw_arrays, json_results):
+    """Per fit_vs_reco_gen branch: 3 panels (reco | gen | fit), each showing
+    3 overlaid equal-N NLL slices (NLL = chi2/2)."""
+    chi2  = raw_arrays.get("kinfit_chi2")
+    valid = raw_arrays.get("kinfit_valid")
+    if chi2 is None:
+        return
+
+    out_dir = f"{OUTDIR_BASE}/ecm{ecm}/nll_slices"
+    os.makedirs(out_dir, exist_ok=True)
+
+    SLICE_COLORS = ["tab:blue", "tab:orange", "tab:red"]
+
+    for bname in KINFIT_BRANCHES:
+        reco_bname = KINFIT_TO_RECO.get(bname)
+        gen_bname  = KINFIT_TO_GEN.get(bname)
+        if not (reco_bname and gen_bname):
+            continue
+        if bname not in raw_arrays or reco_bname not in raw_arrays or gen_bname not in raw_arrays:
+            continue
+
+        fit_arr  = np.asarray(raw_arrays[bname],      dtype=float)
+        reco_arr = np.asarray(raw_arrays[reco_bname], dtype=float)
+        gen_arr  = np.asarray(raw_arrays[gen_bname],  dtype=float)
+        nll_arr  = np.asarray(chi2,                   dtype=float)
+
+        mask = (np.isfinite(fit_arr) & np.isfinite(reco_arr) &
+                np.isfinite(gen_arr) & np.isfinite(nll_arr))
+        if valid is not None:
+            mask &= (np.asarray(valid, dtype=float) > 0)
+
+        fit_arr  = fit_arr[mask]
+        reco_arr = reco_arr[mask]
+        gen_arr  = gen_arr[mask]
+        nll_arr  = nll_arr[mask]
+
+        if len(nll_arr) < 30:
+            continue
+
+        q33, q67 = np.percentile(nll_arr, [100.0 / 3, 200.0 / 3])
+        slice_masks = [
+            nll_arr < q33,
+            (nll_arr >= q33) & (nll_arr < q67),
+            nll_arr >= q67,
+        ]
+        slice_labels = [
+            f"NLL < {q33:.1f}",
+            f"{q33:.1f} ≤ NLL < {q67:.1f}",
+            f"NLL ≥ {q67:.1f}",
+        ]
+
+        # Shared x-range from all events across all three distributions
+        nbins, xlo, xhi = _binning(bname, np.concatenate([fit_arr, reco_arr, gen_arr]))
+
+        fig, axes = plt.subplots(1, 3, figsize=(18, 5), layout="constrained")
+        fig.suptitle(f"{bname}  [ecm{ecm}]  — equal-N NLL slices", fontsize=11)
+
+        for ax, (arr, panel_label) in zip(axes, [
+            (reco_arr, "reco"),
+            (gen_arr,  "gen"),
+            (fit_arr,  "fitted"),
+        ]):
+            for sl_mask, sl_label, clr in zip(slice_masks, slice_labels, SLICE_COLORS):
+                v_c = arr[sl_mask]
+                v_c = v_c[(v_c >= xlo) & (v_c <= xhi)]
+                counts, edges = np.histogram(v_c, bins=nbins, range=(xlo, xhi))
+                bw = np.diff(edges)[0]
+                density = counts / max(counts.sum() * bw, 1e-300)
+                centers = 0.5 * (edges[:-1] + edges[1:])
+                ax.step(centers, density, where="mid", color=clr, lw=2,
+                        label=f"{sl_label}  (N={int(sl_mask.sum())})")
+            ax.set_title(panel_label, fontsize=11)
+            ax.set_xlabel(bname, fontsize=10)
+            ax.set_ylabel("Probability density", fontsize=10)
+            ax.set_xlim(xlo, xhi)
+            ax.set_ylim(bottom=0)
+            ax.legend(fontsize=8, frameon=False)
+
+        for fmt in ("png", "pdf"):
+            fig.savefig(f"{out_dir}/{bname}.{fmt}", dpi=150)
+        plt.close(fig)
+
+    print(f"  [ecm{ecm}]  NLL slice plots → {out_dir}/")
 
 
 # ── ECM comparison plots ──────────────────────────────────────────────────────
 
 def plot_ecm_comparison(all_data, all_json):
-    """One plot per branch showing all ECMs overlaid (normalized)."""
-    out_dir = f"{OUTDIR_BASE}/ecm_comparison"
-    os.makedirs(out_dir, exist_ok=True)
-
-    branch_names = sorted({b for data in all_data.values() for b in data})
+    """One plot per kinfit branch showing all ECMs overlaid (normalized)."""
+    branch_names = [b for b in KINFIT_BRANCHES
+                    if any(b in all_data[e] for e in ECM_LIST if e in all_data)]
 
     for bname in branch_names:
+        out_dir = f"{OUTDIR_BASE}/ecm_comparison/{_subdir(bname)}"
+        os.makedirs(out_dir, exist_ok=True)
+
         fig, ax = plt.subplots(figsize=(8, 5), layout="constrained")
 
         resol_name = KINFIT_TO_RESOL.get(bname)
@@ -421,7 +597,7 @@ def plot_ecm_comparison(all_data, all_json):
             fig.savefig(f"{out_dir}/{bname}.{fmt}", dpi=150)
         plt.close(fig)
 
-    print(f"  ECM comparison plots → {out_dir}/")
+    print(f"  ECM comparison plots → {OUTDIR_BASE}/ecm_comparison/")
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -429,7 +605,8 @@ def plot_ecm_comparison(all_data, all_json):
 def main():
     os.makedirs(OUTDIR_BASE, exist_ok=True)
 
-    all_data = {}   # ecm → {bname: array}
+    all_data = {}   # ecm → {bname: finite-filtered array}
+    all_raw  = {}   # ecm → {bname: raw aligned array} (for chi2 slicing)
     all_json = {}   # ecm → {resol_bname: params_dict}
 
     for ecm in ECM_LIST:
@@ -443,18 +620,25 @@ def main():
         with uproot.open(infile) as f:
             tree = f["events"]
             available = set(tree.keys())
-            to_load = [b for b in KINFIT_BRANCHES if b in available]
-            missing  = [b for b in KINFIT_BRANCHES if b not in available]
+            to_load    = [b for b in KINFIT_BRANCHES if b in available]
+            missing    = [b for b in KINFIT_BRANCHES if b not in available]
+            extra_load = [b for b in EXTRA_BRANCHES  if b in available and b not in set(to_load)]
+            extra_miss = [b for b in EXTRA_BRANCHES  if b not in available]
             if missing:
-                print(f"  WARNING: branches not in tree: {missing}")
-            raw = tree.arrays(to_load, library="np")
+                print(f"  WARNING: kinfit branches not in tree: {missing}")
+            if extra_miss:
+                print(f"  WARNING: comparison branches not in tree (re-run treemaker?): {extra_miss}")
+            raw = tree.arrays(to_load + extra_load, library="np")
 
+        raw_data = {}
         branches_data = {}
-        for bname in to_load:
+        for bname in to_load + extra_load:
             arr = np.asarray(raw[bname], dtype=float).ravel()
+            raw_data[bname] = arr
             branches_data[bname] = arr[np.isfinite(arr)]
 
         all_data[ecm] = branches_data
+        all_raw[ecm]  = raw_data
 
         json_path = JSON_TMPL.format(ecm=ecm)
         if os.path.exists(json_path):
@@ -466,6 +650,7 @@ def main():
             all_json[ecm] = {}
 
         plot_per_ecm(ecm, branches_data, all_json[ecm])
+        plot_chi2_slices(ecm, raw_data, all_json[ecm])
 
     plot_ecm_comparison(all_data, all_json)
     print(f"\nDone. All plots in {OUTDIR_BASE}/")

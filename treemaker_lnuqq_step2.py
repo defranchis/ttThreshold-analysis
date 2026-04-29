@@ -2,6 +2,7 @@
 # Requires response/functions/dcb_params_ecm<N>.h headers to be present before compiling.
 import os, re, ROOT
 import urllib
+from ww_cuts import D32_MAX
 processList = {
     "wzp6_ee_munumuqq_noCut_ecm160": {
         "fraction": 1,
@@ -99,13 +100,14 @@ all_branches = ["lep_p_resp","reco_moff","reco_mon","truth_lnuqq_mon","truth_lnu
                 "jet1_gen_costheta","jet1_costheta", "jet2_gen_costheta","jet2_costheta", "met_costheta_resol","lep_costheta_resol","jet1_gen_theta","jet2_gen_theta","jet2_costheta_resol","jet1_costheta_resol"
 ]
 all_branches+=["gen_leps_status1_p","ngen_leps_status2","gen_leps_status2_p","m_lnu_status1","m_qq_status2","m_qq_fromele","m_lnu_status2","ngen_leps_status1", "gen_lightquarks_p","jet2_p_fromele_resp","jet1_p_fromele_resp","jet2_p_resp","jet1_p_resp","truth_lnuqq_qqfromele_mon","truth_lnuqq_qqfromele_moff","mlnu_plus_mjj_reco","mlnu_plus_mqq_status2_truth","mlnu_plus_mqq_fromele_truth","p_qq_status2"]
-all_branches+=[ "nRecoJets", "jet1_p", "jet2_p", "d_12","m_iso_lnuexcljj","jet1_pt","jet2_pt","jet1_eta","jet2_eta","jet1_phi","jet2_phi","jet1_mass","jet2_mass"]
+all_branches+=[ "nRecoJets", "jet1_p", "jet2_p", "d_12","d_32","m_iso_lnuexcljj","jet1_pt","jet2_pt","jet1_eta","jet2_eta","jet1_phi","jet2_phi","jet1_mass","jet2_mass"]
 all_branches+=["kinfit_mW","kinfit_gW","kinfit_s1","kinfit_s2","kinfit_sl","kinfit_sn",
                "kinfit_t1","kinfit_t2","kinfit_tn","kinfit_tl",
                "kinfit_p1","kinfit_p2","kinfit_pn","kinfit_pl",
                "kinfit_chi2","kinfit_valid",
                "kinfit_mWlep","kinfit_mWhad",
                "kinfit_pt_j1","kinfit_pt_j2","kinfit_pt_lep","kinfit_pt_nu",
+               "kinfit_p_j1","kinfit_p_j2","kinfit_p_lep","kinfit_p_nu",
                "kinfit_Wlep_px","kinfit_Wlep_py","kinfit_Wlep_pz",
                "kinfit_Whad_px","kinfit_Whad_py","kinfit_Whad_pz",
                "kinfit_theta_j1","kinfit_theta_j2","kinfit_theta_nu",
@@ -119,6 +121,11 @@ all_branches+=["pf_qq_mass","pf_qq_p","pf_qq_costheta","pf_qq_phi",
 all_branches+=["px_tot_gen","py_tot_gen","pz_tot_gen",
                "px_tot_reco","py_tot_reco","pz_tot_reco",
                "px_tot_resol","py_tot_resol","pz_tot_resol","m_gen_lnuqq_minus_ecm"]
+all_branches+=["jet1_theta","jet2_theta",
+               "jet1_gen_pt","jet2_gen_pt","jet1_gen_p","jet2_gen_p","jet1_gen_phi","jet2_gen_phi",
+               "lep_gen_pt","lep_gen_p","lep_gen_theta","lep_gen_phi",
+               "nu_gen_pt","nu_gen_p","nu_gen_theta","nu_gen_phi",
+               "m_reco_WW_minus_ecm"]
 
 _dataset_iter = iter(processList.keys())
 
@@ -514,6 +521,8 @@ class RDFanalysis:
         df = df.Define("nRecoJets", "jets_p4.size()")
         df = df.Filter("nRecoJets == 2")
         df = df.Define("d_12", "JetClusteringUtils::get_exclusive_dmerge(_jet, 1)")
+        df = df.Define("d_32", "JetClusteringUtils::get_exclusive_dmerge(_jet, 2)")
+        #df = df.Filter(f"d_32 < {D32_MAX}")
         df = df.Define("m_excl_jj",  "JetConstituentsUtils::InvariantMass(jets_p4[0],  jets_p4[1])")
         df = df.Define("Whad_reco",
                        "FCCAnalyses::WWFunctions::Whad_reco(jets_p4)"
@@ -523,6 +532,7 @@ class RDFanalysis:
         df = df.Define("m_iso_lnuexcljj","WW_iso_lnuexcljj.M()")
         df = df.Define("p_iso_lnuexcljj","WW_iso_lnuexcljj.P()")
         df = df.Define("e_iso_lnuexcljj","WW_iso_lnuexcljj.E()")
+        df = df.Define("m_reco_WW_minus_ecm", "m_iso_lnuexcljj - FCCAnalyses::WWFunctions::ECM")
 
         df = df.Define("sumP_gen_new",
                        "FCCAnalyses::WWFunctions::sumP_gen_new(Wlep_gen, Whad_gen)"
@@ -574,6 +584,12 @@ class RDFanalysis:
         df = df.Define("matched_genjets","FCCAnalyses::WWFunctions::matchJets2(jet1, jet2, gen_lightquarks_fromele_p4[0], gen_lightquarks_fromele_p4[1])");
         df = df.Define("jet1_matched_p4", "matched_genjets.first")
         df = df.Define("jet2_matched_p4", "matched_genjets.second");
+        df = df.Define("jet1_gen_pt",  "jet1_matched_p4.Pt()")
+        df = df.Define("jet2_gen_pt",  "jet2_matched_p4.Pt()")
+        df = df.Define("jet1_gen_p",   "jet1_matched_p4.P()")
+        df = df.Define("jet2_gen_p",   "jet2_matched_p4.P()")
+        df = df.Define("jet1_gen_phi", "jet1_matched_p4.Phi()")
+        df = df.Define("jet2_gen_phi", "jet2_matched_p4.Phi()")
         df = df.Define("jet1_p_fromele_resp", "jet1_p / jet1_matched_p4.P()")
         df = df.Define("jet2_p_fromele_resp", "jet2_p / jet2_matched_p4.P()")
         df = df.Define("jet1_costheta", "jet1.Pz()/jet1.P()")
@@ -591,7 +607,15 @@ class RDFanalysis:
         df = df.Define("jet1_phi_resol", "TVector2::Phi_mpi_pi(jet1.Phi()-jet1_matched_p4.Phi())")
         df = df.Define("jet2_phi_resol", "TVector2::Phi_mpi_pi(jet2.Phi()-jet2_matched_p4.Phi())")
 
-        df = df.Define("lep_p_resp", "Isolep_p / gen_leps_status1_p[0]")
+        df = df.Define("lep_p_resp",    "Isolep_p / gen_leps_status1_p[0]")
+        df = df.Define("lep_gen_pt",    "gen_leps_status1_pt[0]")
+        df = df.Define("lep_gen_p",     "gen_leps_status1_p[0]")
+        df = df.Define("lep_gen_theta", "gen_leps_status1_theta[0]")
+        df = df.Define("lep_gen_phi",   "gen_leps_status1_phi[0]")
+        df = df.Define("nu_gen_pt",     "gen_neutrinos_status1_pt[0]")
+        df = df.Define("nu_gen_p",      "gen_neutrinos_status1_p[0]")
+        df = df.Define("nu_gen_theta",  "gen_neutrinos_status1_theta[0]")
+        df = df.Define("nu_gen_phi",    "gen_neutrinos_status1_phi[0]")
         df = (df
                   .Define("truth_mlnu", "m_lnu_status2")
                   .Define("truth_mqq",  "m_qq_status2")
@@ -649,6 +673,10 @@ class RDFanalysis:
         df = df.Define("kinfit_pt_j2",    "kinfit.pt_j2_postfit")
         df = df.Define("kinfit_pt_lep",   "kinfit.pt_lep_postfit")
         df = df.Define("kinfit_pt_nu",    "kinfit.pt_nu_postfit")
+        df = df.Define("kinfit_p_j1",     "kinfit.p_j1_postfit")
+        df = df.Define("kinfit_p_j2",     "kinfit.p_j2_postfit")
+        df = df.Define("kinfit_p_lep",    "kinfit.p_lep_postfit")
+        df = df.Define("kinfit_p_nu",     "kinfit.p_nu_postfit")
         df = df.Define("kinfit_Wlep_px",  "kinfit.Wlep_px_postfit")
         df = df.Define("kinfit_Wlep_py",  "kinfit.Wlep_py_postfit")
         df = df.Define("kinfit_Wlep_pz",  "kinfit.Wlep_pz_postfit")

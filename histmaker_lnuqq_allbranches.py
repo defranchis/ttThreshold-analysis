@@ -1,4 +1,4 @@
-from treemaker_lnuqq import all_branches
+from treemaker_lnuqq_step2 import all_branches
 
 processList = {
     "wzp6_ee_munumuqq_noCut_ecm160": {},
@@ -39,7 +39,9 @@ def _binning(var):
     if var in ("kinfit_t1", "kinfit_t2", "kinfit_tn",
                "kinfit_p1", "kinfit_p2", "kinfit_pn"):
         return (100, -5, 5)
-    if "d_12" == var:
+    if var == "d_32":
+        return (100, 0, 500)
+    if var == "d_12":
         return (100, 0, 5000)
     if var.endswith("_dcostheta") or "dcostheta" in var:
         return (100, -1, 1)

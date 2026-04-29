@@ -1,5 +1,5 @@
 import ROOT
-from treemaker_lnuqq import all_branches
+from treemaker_lnuqq_step2 import all_branches
 
 intLumi      = 1
 intLumiLabel = "L = 10 ab^{-1}"
@@ -8,8 +8,8 @@ energy       = 160.0
 collider     = "FCC-ee"
 formats      = ["png", "pdf"]
 
-inputDir  = "outputs/histmaker/lnuqq/"
-outdir    = "outputs/plots/lnuqq/allbranches/"
+inputDir  = "outputs/histmaker/lnuqq/step2/semihad/"
+outdir    = "outputs/plots/lnuqq/step2/semihad/allbranches/"
 
 plotStatUnc = True
 
