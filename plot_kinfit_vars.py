@@ -16,6 +16,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from scipy.integrate import quad as _quad
+from concurrent.futures import ProcessPoolExecutor
 from eos_publish import publish
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -586,55 +587,66 @@ def plot_ecm_comparison(all_data, all_json):
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+def _process_ecm(ecm):
+    """Worker: load, slice, write per-ECM and NLL-slice plots. Returns
+    (ecm, branches_data, json_dict, log_lines) for the comparison stage."""
+    log = []
+    infile = INFILE_TMPL.format(ecm=ecm)
+    if not os.path.exists(infile):
+        log.append(f"WARNING: {infile} not found — skipping ecm{ecm}")
+        return ecm, None, None, log
+
+    log.append(f"\n{'='*55}\nECM {ecm} GeV  —  {infile}\n{'='*55}")
+
+    with uproot.open(infile) as f:
+        tree = f["events"]
+        available = set(tree.keys())
+        to_load    = [b for b in KINFIT_BRANCHES if b in available]
+        missing    = [b for b in KINFIT_BRANCHES if b not in available]
+        extra_load = [b for b in EXTRA_BRANCHES  if b in available and b not in set(to_load)]
+        extra_miss = [b for b in EXTRA_BRANCHES  if b not in available]
+        if missing:
+            log.append(f"  WARNING: kinfit branches not in tree: {missing}")
+        if extra_miss:
+            log.append(f"  WARNING: comparison branches not in tree (re-run treemaker?): {extra_miss}")
+        raw = tree.arrays(to_load + extra_load, library="np")
+
+    raw_data = {}
+    branches_data = {}
+    for bname in to_load + extra_load:
+        arr = np.asarray(raw[bname], dtype=float).ravel()
+        raw_data[bname] = arr
+        branches_data[bname] = arr[np.isfinite(arr)]
+
+    json_path = JSON_TMPL.format(ecm=ecm)
+    if os.path.exists(json_path):
+        with open(json_path) as fj:
+            json_dict = json.load(fj)
+        log.append(f"  Loaded JSON: {json_path}")
+    else:
+        log.append(f"  WARNING: JSON not found ({json_path}) — no PDF overlay for ecm{ecm}")
+        json_dict = {}
+
+    plot_per_ecm(ecm, branches_data, json_dict)
+    plot_chi2_slices(ecm, raw_data, json_dict)
+
+    return ecm, branches_data, json_dict, log
+
+
 def main():
     os.makedirs(OUTDIR_BASE, exist_ok=True)
 
     all_data = {}   # ecm → {bname: finite-filtered array}
-    all_raw  = {}   # ecm → {bname: raw aligned array} (for chi2 slicing)
     all_json = {}   # ecm → {resol_bname: params_dict}
 
-    for ecm in ECM_LIST:
-        infile = INFILE_TMPL.format(ecm=ecm)
-        if not os.path.exists(infile):
-            print(f"WARNING: {infile} not found — skipping ecm{ecm}")
-            continue
-
-        print(f"\n{'='*55}\nECM {ecm} GeV  —  {infile}\n{'='*55}")
-
-        with uproot.open(infile) as f:
-            tree = f["events"]
-            available = set(tree.keys())
-            to_load    = [b for b in KINFIT_BRANCHES if b in available]
-            missing    = [b for b in KINFIT_BRANCHES if b not in available]
-            extra_load = [b for b in EXTRA_BRANCHES  if b in available and b not in set(to_load)]
-            extra_miss = [b for b in EXTRA_BRANCHES  if b not in available]
-            if missing:
-                print(f"  WARNING: kinfit branches not in tree: {missing}")
-            if extra_miss:
-                print(f"  WARNING: comparison branches not in tree (re-run treemaker?): {extra_miss}")
-            raw = tree.arrays(to_load + extra_load, library="np")
-
-        raw_data = {}
-        branches_data = {}
-        for bname in to_load + extra_load:
-            arr = np.asarray(raw[bname], dtype=float).ravel()
-            raw_data[bname] = arr
-            branches_data[bname] = arr[np.isfinite(arr)]
-
-        all_data[ecm] = branches_data
-        all_raw[ecm]  = raw_data
-
-        json_path = JSON_TMPL.format(ecm=ecm)
-        if os.path.exists(json_path):
-            with open(json_path) as fj:
-                all_json[ecm] = json.load(fj)
-            print(f"  Loaded JSON: {json_path}")
-        else:
-            print(f"  WARNING: JSON not found ({json_path}) — no PDF overlay for ecm{ecm}")
-            all_json[ecm] = {}
-
-        plot_per_ecm(ecm, branches_data, all_json[ecm])
-        plot_chi2_slices(ecm, raw_data, all_json[ecm])
+    with ProcessPoolExecutor(max_workers=len(ECM_LIST)) as pool:
+        for ecm, branches_data, json_dict, log in pool.map(_process_ecm, ECM_LIST):
+            for line in log:
+                print(line)
+            if branches_data is None:
+                continue
+            all_data[ecm] = branches_data
+            all_json[ecm] = json_dict
 
     plot_ecm_comparison(all_data, all_json)
     print(f"\nDone. All plots in {OUTDIR_BASE}/")
