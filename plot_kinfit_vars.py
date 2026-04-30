@@ -5,8 +5,8 @@ For branches with a fitted resolution PDF, overlay the input functional form
 from the JSON produced by fit_resolutions.py.
 
 Outputs:
-  response/plots/kinfit_vars/ecm{N}/{branch}.{png,pdf}
-  response/plots/kinfit_vars/ecm_comparison/{branch}.{png,pdf}
+  outputs/plots/kinfit_vars/ecm{N}/{branch}.{png,pdf}
+  outputs/plots/kinfit_vars/ecm_comparison/{branch}.{png,pdf}
 """
 
 import os, json, math
@@ -16,12 +16,13 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from scipy.integrate import quad as _quad
+from eos_publish import publish
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
 ECM_LIST    = [157, 160, 163]
 INFILE_TMPL = "outputs/treemaker/lnuqq/step2/semihad/wzp6_ee_munumuqq_noCut_ecm{ecm}.root"
-JSON_TMPL   = "response/functions/dcb_results_ecm{ecm}.json"
+JSON_TMPL   = "outputs/response/functions/dcb_results_ecm{ecm}.json"
 OUTDIR_BASE = "outputs/plots/kinfit_vars"
 
 ECM_COLORS  = {157: "tab:purple", 160: "tab:orange", 163: "tab:cyan"}
@@ -45,53 +46,40 @@ KINFIT_TO_RESOL = {
     "kinfit_pl":  "lep_phi_resol",
     "kinfit_pn":  "met_phi_resol",
     # WW system constraints
-    "kinfit_WW_px":          "px_tot_gen",
-    "kinfit_WW_py":          "py_tot_gen",
-    "kinfit_WW_pz":          "pz_tot_gen",
-    "kinfit_WW_m_minus_ecm": "m_gen_lnuqq_minus_ecm",
+    "kinfit_WW_px":          "gen_WW_px",
+    "kinfit_WW_py":          "gen_WW_py",
+    "kinfit_WW_pz":          "gen_WW_pz",
+    "kinfit_WW_m_minus_ecm": "gen_WW_m_minus_ecm",
 }
 
-# Mapping: kinfit post-fit branch → pre-fit reco counterpart
-KINFIT_TO_RECO = {
-    "kinfit_p_j1":           "jet1_p",
-    "kinfit_p_j2":           "jet2_p",
-    "kinfit_p_lep":          "Isolep_p",
-    "kinfit_p_nu":           "missing_p",
-    "kinfit_theta_j1":       "jet1_theta",
-    "kinfit_theta_j2":       "jet2_theta",
-    "kinfit_theta_nu":       "missing_p_theta",
-    "kinfit_phi_j1":         "jet1_phi",
-    "kinfit_phi_j2":         "jet2_phi",
-    "kinfit_phi_nu":         "missing_p_phi",
-    "kinfit_mWlep":          "Wlep_reco_mass",
-    "kinfit_mWhad":          "Whad_reco_mass",
-    "kinfit_WW_px":          "px_tot_reco",
-    "kinfit_WW_py":          "py_tot_reco",
-    "kinfit_WW_pz":          "pz_tot_reco",
-    "kinfit_WW_m":           "m_iso_lnuexcljj",
-    "kinfit_WW_m_minus_ecm": "m_reco_WW_minus_ecm",
-}
+# Mapping: kinfit post-fit branch → reco / gen counterpart, derived from the
+# convention <level>_<object>_<quantity>. Objects with all three levels:
+#   constituents (jet1, jet2, lep, nu): p, pt, theta, phi
+#   Ws (Wlep, Whad):                    m, p, pt, px, py, pz
+#   WW system:                          m, m_minus_ecm, px, py, pz, p_imbalance_tot
+def _build_kinfit_maps():
+    reco, gen = {}, {}
+    # reco-level neutrino is the detector MET (no real nu reco); gen-level uses
+    # "quark" naming for the matched parton (jets at gen level would be misleading).
+    _reco_obj = {"jet1": "jet1", "jet2": "jet2", "lep": "lep", "nu": "met"}
+    _gen_obj  = {"jet1": "quark1", "jet2": "quark2", "lep": "lep", "nu": "nu"}
+    for obj in ("jet1", "jet2", "lep", "nu"):
+        for q in ("p", "pt", "theta", "phi"):
+            kf = f"kinfit_{obj}_{q}"
+            reco[kf] = f"reco_{_reco_obj[obj]}_{q}"
+            gen[kf]  = f"gen_{_gen_obj[obj]}_{q}"
+    for obj in ("Wlep", "Whad"):
+        for q in ("m", "p", "pt", "px", "py", "pz"):
+            kf = f"kinfit_{obj}_{q}"
+            reco[kf] = f"reco_{obj}_{q}"
+            gen[kf]  = f"gen_{obj}_{q}"
+    for q in ("m", "m_minus_ecm", "px", "py", "pz", "p_imbalance_tot"):
+        kf = f"kinfit_WW_{q}"
+        reco[kf] = f"reco_WW_{q}"
+        gen[kf]  = f"gen_WW_{q}"
+    return reco, gen
 
-# Mapping: kinfit post-fit branch → gen truth counterpart
-KINFIT_TO_GEN = {
-    "kinfit_p_j1":           "jet1_gen_p",
-    "kinfit_p_j2":           "jet2_gen_p",
-    "kinfit_p_lep":          "lep_gen_p",
-    "kinfit_p_nu":           "nu_gen_p",
-    "kinfit_theta_j1":       "jet1_gen_theta",
-    "kinfit_theta_j2":       "jet2_gen_theta",
-    "kinfit_theta_nu":       "nu_gen_theta",
-    "kinfit_phi_j1":         "jet1_gen_phi",
-    "kinfit_phi_j2":         "jet2_gen_phi",
-    "kinfit_phi_nu":         "nu_gen_phi",
-    "kinfit_mWlep":          "m_lnu_fromele",
-    "kinfit_mWhad":          "Whad_gen_mass",
-    "kinfit_WW_px":          "px_tot_gen",
-    "kinfit_WW_py":          "py_tot_gen",
-    "kinfit_WW_pz":          "pz_tot_gen",
-    "kinfit_WW_m":           "m_gen_lnuqq",
-    "kinfit_WW_m_minus_ecm": "m_gen_lnuqq_minus_ecm",
-}
+KINFIT_TO_RECO, KINFIT_TO_GEN = _build_kinfit_maps()
 
 EXTRA_BRANCHES = sorted(set(KINFIT_TO_RECO.values()) | set(KINFIT_TO_GEN.values()))
 
@@ -101,7 +89,6 @@ _PULL_BRANCHES = {
     "kinfit_s1","kinfit_s2","kinfit_sl","kinfit_sn",
     "kinfit_t1","kinfit_t2","kinfit_tn","kinfit_tl",
     "kinfit_p1","kinfit_p2","kinfit_pn","kinfit_pl",
-    "kinfit_deltaP",
 }
 
 def _subdir(bname):
@@ -121,15 +108,19 @@ KINFIT_BRANCHES = [
     "kinfit_t1", "kinfit_t2", "kinfit_tn", "kinfit_tl",
     "kinfit_p1", "kinfit_p2", "kinfit_pn", "kinfit_pl",
     "kinfit_chi2", "kinfit_chi2_ndof", "kinfit_valid",
-    "kinfit_mWlep", "kinfit_mWhad",
-    "kinfit_p_j1", "kinfit_p_j2", "kinfit_p_lep", "kinfit_p_nu",
+    # constituent kinematics
+    "kinfit_jet1_p",  "kinfit_jet2_p",  "kinfit_lep_p",  "kinfit_nu_p",
+    "kinfit_jet1_pt", "kinfit_jet2_pt", "kinfit_lep_pt", "kinfit_nu_pt",
+    "kinfit_jet1_theta", "kinfit_jet2_theta", "kinfit_lep_theta", "kinfit_nu_theta",
+    "kinfit_jet1_phi",   "kinfit_jet2_phi",   "kinfit_lep_phi",   "kinfit_nu_phi",
+    # W bosons
+    "kinfit_Wlep_m", "kinfit_Wlep_p", "kinfit_Wlep_pt",
     "kinfit_Wlep_px", "kinfit_Wlep_py", "kinfit_Wlep_pz",
+    "kinfit_Whad_m", "kinfit_Whad_p", "kinfit_Whad_pt",
     "kinfit_Whad_px", "kinfit_Whad_py", "kinfit_Whad_pz",
-    "kinfit_theta_j1", "kinfit_theta_j2", "kinfit_theta_nu",
-    "kinfit_phi_j1", "kinfit_phi_j2", "kinfit_phi_nu",
-    "kinfit_deltaP",
+    # WW system
     "kinfit_WW_px", "kinfit_WW_py", "kinfit_WW_pz",
-    "kinfit_WW_m", "kinfit_WW_m_minus_ecm",
+    "kinfit_WW_m", "kinfit_WW_m_minus_ecm", "kinfit_WW_p_imbalance_tot",
 ]
 
 # ── Model functions (copied from fit_resolutions.py — pure math) ─────────────
@@ -256,32 +247,32 @@ def _make_pdf(p):
 # (red) often has heavier tails which would leave the fitted peak crammed.
 _FIXED_RANGE = {
     "kinfit_mW":    (100, 50,   100),
-    "kinfit_mWlep": (100, 50,   100),
-    "kinfit_mWhad": (100, 50,   100),
+    "kinfit_Wlep_m": (100, 50,   100),
+    "kinfit_Whad_m": (100, 50,   100),
     "kinfit_gW":    (100,  1.9,  2.2),
     "kinfit_valid": (  3, -0.5,  2.5),
     "kinfit_chi2_ndof": (100, 0, 50),
-    "kinfit_p_j1":  (100,  0,   80),
-    "kinfit_p_j2":  (100,  0,   80),
-    "kinfit_p_lep": (100,  0,   80),
-    "kinfit_p_nu":  (100,  0,   80),
+    "kinfit_jet1_p":  (100,  0,   80),
+    "kinfit_jet2_p":  (100,  0,   80),
+    "kinfit_lep_p": (100,  0,   80),
+    "kinfit_nu_p":  (100,  0,   80),
     "kinfit_Wlep_px": (100, -50, 50),
     "kinfit_Wlep_py": (100, -50, 50),
     "kinfit_Wlep_pz": (100, -50, 50),
     "kinfit_Whad_px": (100, -50, 50),
     "kinfit_Whad_py": (100, -50, 50),
     "kinfit_Whad_pz": (100, -50, 50),
-    # Total WW system momentum: constrained near 0 by px/py/pz_tot_gen PDF
+    # Total WW system momentum: constrained near 0 by px/py/gen_WW_pz PDF
     # (gen has a sub-bin spike at 0 from collinear ISR; fit follows it tightly)
     "kinfit_WW_px": (100, -0.05, 0.05),
     "kinfit_WW_py": (100, -0.05, 0.05),
     "kinfit_WW_pz": (100, -0.3, 0.3),
-    "kinfit_theta_j1":  (100, 0,   3.2),
-    "kinfit_theta_j2":  (100, 0,   3.2),
-    "kinfit_theta_nu":  (100, 0,   3.2),
-    "kinfit_phi_j1":    (100, -3.2, 3.2),
-    "kinfit_phi_j2":    (100, -3.2, 3.2),
-    "kinfit_phi_nu":    (100, -3.2, 3.2),
+    "kinfit_jet1_theta":  (100, 0,   3.2),
+    "kinfit_jet2_theta":  (100, 0,   3.2),
+    "kinfit_nu_theta":  (100, 0,   3.2),
+    "kinfit_jet1_phi":    (100, -3.2, 3.2),
+    "kinfit_jet2_phi":    (100, -3.2, 3.2),
+    "kinfit_nu_phi":    (100, -3.2, 3.2),
     # WW system post-fit: mass near ECM, mass-minus-ECM near 0 (slightly below, ISR)
     "kinfit_WW_m":           (100, 150, 170),
     "kinfit_WW_m_minus_ecm": (100,  -8,   1),
@@ -298,7 +289,7 @@ _FIXED_RANGE = {
     "kinfit_p2":  (100, -0.15, 0.15),
     "kinfit_pn":  (100, -0.005, 0.005),
     "kinfit_pl":  (100, -0.002, 0.002),
-    "kinfit_deltaP": (100, 0.0, 0.1),
+    "kinfit_WW_p_imbalance_tot": (100, 0.0, 0.1),
 }
 
 def _auto_range(vals):
@@ -647,6 +638,8 @@ def main():
 
     plot_ecm_comparison(all_data, all_json)
     print(f"\nDone. All plots in {OUTDIR_BASE}/")
+
+    publish(OUTDIR_BASE, "kinfit_vars")
 
 
 if __name__ == "__main__":

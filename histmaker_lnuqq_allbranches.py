@@ -22,15 +22,10 @@ def _binning(var):
         return (3, -0.5, 2.5)
     if "kinfit_chi2" == var:
         return (100, 0, 50)
-    if var in ("kinfit_mW", "kinfit_mWlep", "kinfit_mWhad",
-               "reco_moff", "reco_mon",
-               "truth_lnuqq_mon", "truth_lnuqq_moff",
-               "truth_lnuqq_qqfromele_mon", "truth_lnuqq_qqfromele_moff",
-               "m_gen_lnuqq", "m_lnu_status1", "m_lnu_status2",
-               "m_qq_status2", "m_qq_fromele", "m_iso_lnu",
-               "m_iso_lnuexcljj", "mlnu_plus_mjj_reco",
-               "mlnu_plus_mqq_status2_truth", "mlnu_plus_mqq_fromele_truth",
-               "jet1_mass", "jet2_mass", "lep_res", "Wlep_reco_mass", "Whad_reco_mass"):
+    if var in ("kinfit_mW", "kinfit_Wlep_m", "kinfit_Whad_m",
+               "gen_WW_m", "gen_Wlep_m", "gen_Whad_m",
+               "reco_Wlep_m", "reco_Whad_m", "reco_WW_m",
+               "reco_jet1_mass", "reco_jet2_mass"):
         return (400, 0, 200)
     if var == "kinfit_gW":
         return (100, 0, 5)
@@ -59,14 +54,11 @@ def _binning(var):
         return (100, -5, 5)
     if "res_jet" in var or var.startswith("res_"):
         return (100, -0.5, 0.5)
-    if var.startswith("diff_") or var.startswith("deltaM") or var.startswith("sumP"):
+    if var.startswith("deltaM"):
         return (100, -50, 50)
-    if "sumP" in var or var in ("sumPx", "sumPy", "sumPz", "sumPx_gen", "sumPy_gen", "sumPz_gen"):
+    if var.endswith("_resol") and ("_p" in var or "_m" in var):
         return (100, -50, 50)
-    if var.endswith("_pt") or "_pt_" in var or var in ("sumPt", "sumPt_gen", "missing_pt",
-                                                         "Whad_gen_pt", "Wlep_gen_pt",
-                                                         "Whad_reco_pt", "Wlep_reco_pt",
-                                                         "Isolep_pt"):
+    if var.endswith("_pt") or "_pt_" in var:
         return (100, 0, 100)
     # momenta (p)
     return (100, 0, 200)

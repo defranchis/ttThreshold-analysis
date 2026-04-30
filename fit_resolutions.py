@@ -10,9 +10,9 @@ v2 improvements over v1:
     that show a narrow core + secondary shoulder
 
 Outputs (per ECM)
-  response/plots/ecm<N>/<branch>.{png,pdf}    one plot per branch with data + fit
-  response/functions/dcb_params_ecm<N>.h      C++ header with evaluators + constexpr params
-  response/functions/dcb_results_ecm<N>.json  full numerical fit results
+  outputs/response/plots/ecm<N>/<branch>.{png,pdf}    one plot per branch with data + fit
+  outputs/response/functions/dcb_params_ecm<N>.h      C++ header with evaluators + constexpr params
+  outputs/response/functions/dcb_results_ecm<N>.json  full numerical fit results
 """
 
 import os, json, math, warnings
@@ -26,12 +26,13 @@ from scipy.optimize import curve_fit
 from scipy.stats import median_abs_deviation
 from scipy.integrate import quad as _quad
 from scipy.special import erf as _sp_erf
+from eos_publish import publish
 
 _SQRT2   = math.sqrt(2.0)
 _LOG_MAX = math.log(np.finfo(np.float64).max)   # max safe float64 exponent ≈ 709.78
 _LOG_MIN = -_LOG_MAX
 
-os.makedirs("response/functions", exist_ok=True)
+os.makedirs("outputs/response/functions", exist_ok=True)
 
 ECM_LIST    = [157, 160, 163]
 INFILE_TMPL = "outputs/treemaker/lnuqq/step1/semihad/wzp6_ee_munumuqq_noCut_ecm{ecm}.root"
@@ -67,14 +68,14 @@ BRANCH_CONFIG = {
     # dcb2g (narrow DCB core + wide Gaussian) handles the unresolved spike + smooth
     # tail; dcbgb's box plateau does not match the data and gives chi²/ndf in the
     # hundreds for px/py.
-    "px_tot_gen":           {"clip": (0.1, 99.9),  "nbins": 1500, "model": "dcb2g",
+    "gen_WW_px":           {"clip": (0.1, 99.9),  "nbins": 1500, "model": "dcb2g",
                              "zoom_xlim": (-0.5, 0.5)},
-    "py_tot_gen":           {"clip": (0.1, 99.9),  "nbins": 1500, "model": "dcb2g",
+    "gen_WW_py":           {"clip": (0.1, 99.9),  "nbins": 1500, "model": "dcb2g",
                              "zoom_xlim": (-0.5, 0.5)},
-    "pz_tot_gen":           {"clip": (0.1, 99.9),  "nbins": 1500, "model": "dcb2g",
+    "gen_WW_pz":           {"clip": (0.1, 99.9),  "nbins": 1500, "model": "dcb2g",
                              "zoom_xlim": (-3.0, 3.0)},
     # Gen WW invariant mass minus ECM. Peak just below 0 (ISR), hard boundary at 0.
-    "m_gen_lnuqq_minus_ecm": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber2g"},
+    "gen_WW_m_minus_ecm": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber2g"},
 }
 
 # Virtual combined branches: concatenate jet1 + jet2 into a single distribution
@@ -91,8 +92,8 @@ KINFIT_BRANCHES = [
     "jet1_theta_resol", "jet2_theta_resol", "jet1_phi_resol", "jet2_phi_resol",
     "lep_theta_resol",  "lep_phi_resol",
     "met_theta_resol",  "met_phi_resol",
-    "px_tot_gen", "py_tot_gen", "pz_tot_gen",
-    "m_gen_lnuqq_minus_ecm",
+    "gen_WW_px", "gen_WW_py", "gen_WW_pz",
+    "gen_WW_m_minus_ecm",
 ]
 
 # ── Model functions ──────────────────────────────────────────────────────────
@@ -693,7 +694,7 @@ class _NpEncoder(json.JSONEncoder):
 
 def process_ecm(ecm):
     INFILE   = INFILE_TMPL.format(ecm=ecm)
-    plot_dir = f"response/plots/ecm{ecm}"
+    plot_dir = f"outputs/response/plots/ecm{ecm}"
     os.makedirs(plot_dir, exist_ok=True)
     print(f"\n{'='*60}\nECM {ecm} GeV  —  {INFILE}\n{'='*60}")
 
@@ -948,7 +949,7 @@ def process_ecm(ecm):
 
         # ── plot ─────────────────────────────────────────────────────────────
         # Build xfine with a uniform global grid plus a dense sub-grid around
-        # mu_c so very narrow cores (e.g. σ_c sub-mGeV for px/py_tot_gen) are
+        # mu_c so very narrow cores (e.g. σ_c sub-mGeV for px/gen_WW_py) are
         # actually resolved by the displayed curve, not skipped between samples.
         xfine_uniform = np.linspace(edges[0], edges[-1], 600)
         _w = max(20.0 * sc, 5.0 * (edges[1] - edges[0]))
@@ -1036,8 +1037,8 @@ def process_ecm(ecm):
     print(f"  Jet comparison plots → {comp_dir}/")
 
     # ── JSON ──────────────────────────────────────────────────────────────────
-    os.makedirs("response/functions", exist_ok=True)
-    json_path = f"response/functions/dcb_results_ecm{ecm}.json"
+    os.makedirs("outputs/response/functions", exist_ok=True)
+    json_path = f"outputs/response/functions/dcb_results_ecm{ecm}.json"
     with open(json_path, "w") as fj:
         json.dump(results, fj, indent=2, cls=_NpEncoder)
 
@@ -1083,7 +1084,7 @@ def _cpp_param_line(bname, p, ecm):
 
 def write_combined_header(all_results):
     """
-    Generate response/functions/dcb_params.h — a single self-contained header
+    Generate outputs/response/functions/dcb_params.h — a single self-contained header
     with structs, evaluators, and fitted parameters for all ECMs.
     all_results: dict  ecm -> {bname: params_dict}
     """
@@ -1204,7 +1205,7 @@ def write_combined_header(all_results):
 
     lines += ["", "} // namespace WWFunctions", ""]
 
-    out_path = "response/functions/dcb_params.h"
+    out_path = "outputs/response/functions/dcb_params.h"
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as fh:
         fh.write("\n".join(lines))
@@ -1215,3 +1216,4 @@ if __name__ == '__main__':
     with ProcessPoolExecutor(max_workers=len(ECM_LIST)) as pool:
         all_results = dict(pool.map(process_ecm, ECM_LIST))
     write_combined_header(all_results)
+    publish("outputs/response/plots", "resolutions")

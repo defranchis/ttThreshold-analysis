@@ -96,6 +96,11 @@ TLorentzVector sum_p4(std::initializer_list<TLorentzVector> ps) {
     return total;
 }
 
+inline TLorentzVector tlv_setmass(const TLorentzVector& p, double m) {
+    double e = std::sqrt(p.P()*p.P() + m*m);
+    return TLorentzVector(p.Px(), p.Py(), p.Pz(), e);
+}
+
 float deltaM(int nIsolep, int nRecoJets,
              const TLorentzVector& Wlep, const TLorentzVector& Whad) {
     if (nIsolep < 1 || nRecoJets < 2) return -1.0;

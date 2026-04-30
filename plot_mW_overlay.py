@@ -2,6 +2,7 @@ import os
 import uproot
 import numpy as np
 import matplotlib.pyplot as plt
+from eos_publish import publish
 
 ECM_LIST  = [157, 160, 163]
 INDIR     = "outputs/treemaker/lnuqq/step2/semihad"
@@ -10,10 +11,10 @@ OUTDIR    = "outputs/plots/lnuqq/allbranches"
 os.makedirs(OUTDIR, exist_ok=True)
 
 HISTS_CFG = [
-    ("Wlep_reco_mass", "Wlep reco (pre-fit)",  "tab:blue",  ":",  False),
-    ("Whad_reco_mass", "Whad reco (pre-fit)",  "tab:green", ":",  False),
-    ("kinfit_mWlep",   "Wlep (kinfit)",         "tab:blue",  "--", False),
-    ("kinfit_mWhad",   "Whad (kinfit)",         "tab:green", "--", False),
+    ("reco_Wlep_m",    "Wlep reco (pre-fit)",  "tab:blue",  ":",  False),
+    ("reco_Whad_m",    "Whad reco (pre-fit)",  "tab:green", ":",  False),
+    ("kinfit_Wlep_m",   "Wlep (kinfit)",         "tab:blue",  "--", False),
+    ("kinfit_Whad_m",   "Whad (kinfit)",         "tab:green", "--", False),
     ("kinfit_mW",      "W (kinfit combined)",   "tab:red",   "-",  False),
 ]
 
@@ -114,3 +115,5 @@ for ecm, t in trees.items():
 
 plot_ecm_comparison(trees)
 print(f"Saved ecm_comparison_*.[png|pdf]  →  {OUTDIR}/")
+
+publish(OUTDIR, "mW_overlay")

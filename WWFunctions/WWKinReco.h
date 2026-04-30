@@ -7,7 +7,7 @@
 #include "Math/Minimizer.h"
 #include "Math/Factory.h"
 #include "Math/Functor.h"
-#include "response/functions/dcb_params.h"
+#include "outputs/response/functions/dcb_params.h"
 #include "WWFunctions/WWFunctions.h"
 
 namespace FCCAnalyses { namespace WWFunctions {
@@ -42,8 +42,8 @@ static const KinFitParamSet KF_PARAMS_157 = {
     DCBG_JET2_PHI_RESOL_157, DCBG_JET2_THETA_RESOL_157,
     DCBG_LEP_PHI_RESOL_157,  DCBG_LEP_THETA_RESOL_157,
     DCB_MET_PHI_RESOL_157,   DCB_MET_THETA_RESOL_157,
-    DCBERG_M_GEN_LNUQQ_MINUS_ECM_157,
-    DCBG_PX_TOT_GEN_157, DCBG_PY_TOT_GEN_157, DCBG_PZ_TOT_GEN_157,
+    DCBERG_GEN_WW_M_MINUS_ECM_157,
+    DCBG_GEN_WW_PX_157, DCBG_GEN_WW_PY_157, DCBG_GEN_WW_PZ_157,
 };
 static const KinFitParamSet KF_PARAMS_160 = {
     DCBG_JET1_P_RESP_160, DCBG_JET2_P_RESP_160,
@@ -52,8 +52,8 @@ static const KinFitParamSet KF_PARAMS_160 = {
     DCBG_JET2_PHI_RESOL_160, DCBG_JET2_THETA_RESOL_160,
     DCBG_LEP_PHI_RESOL_160,  DCBG_LEP_THETA_RESOL_160,
     DCB_MET_PHI_RESOL_160,   DCB_MET_THETA_RESOL_160,
-    DCBERG_M_GEN_LNUQQ_MINUS_ECM_160,
-    DCBG_PX_TOT_GEN_160, DCBG_PY_TOT_GEN_160, DCBG_PZ_TOT_GEN_160,
+    DCBERG_GEN_WW_M_MINUS_ECM_160,
+    DCBG_GEN_WW_PX_160, DCBG_GEN_WW_PY_160, DCBG_GEN_WW_PZ_160,
 };
 static const KinFitParamSet KF_PARAMS_163 = {
     DCBG_JET1_P_RESP_163, DCBG_JET2_P_RESP_163,
@@ -62,8 +62,8 @@ static const KinFitParamSet KF_PARAMS_163 = {
     DCBG_JET2_PHI_RESOL_163, DCBG_JET2_THETA_RESOL_163,
     DCBG_LEP_PHI_RESOL_163,  DCBG_LEP_THETA_RESOL_163,
     DCB_MET_PHI_RESOL_163,   DCB_MET_THETA_RESOL_163,
-    DCBERG_M_GEN_LNUQQ_MINUS_ECM_163,
-    DCBG_PX_TOT_GEN_163, DCBG_PY_TOT_GEN_163, DCBG_PZ_TOT_GEN_163,
+    DCBERG_GEN_WW_M_MINUS_ECM_163,
+    DCBG_GEN_WW_PX_163, DCBG_GEN_WW_PY_163, DCBG_GEN_WW_PZ_163,
 };
 
 // ── Active kinfit parameters (set per-dataset via setKinFitParams) ─────────
@@ -79,10 +79,10 @@ inline DcbGaussParams         kf_lep_phi_resol         = DCBG_LEP_PHI_RESOL_160;
 inline DcbGaussParams         kf_lep_theta_resol       = DCBG_LEP_THETA_RESOL_160;
 inline DcbParams              kf_met_phi_resol         = DCB_MET_PHI_RESOL_160;
 inline DcbParams              kf_met_theta_resol       = DCB_MET_THETA_RESOL_160;
-inline DcbExpRightGaussParams kf_m_gen_lnuqq_minus_ecm = DCBERG_M_GEN_LNUQQ_MINUS_ECM_160;
-inline DcbGaussParams         kf_px_tot_gen            = DCBG_PX_TOT_GEN_160;
-inline DcbGaussParams         kf_py_tot_gen            = DCBG_PY_TOT_GEN_160;
-inline DcbGaussParams         kf_pz_tot_gen            = DCBG_PZ_TOT_GEN_160;
+inline DcbExpRightGaussParams kf_m_gen_lnuqq_minus_ecm = DCBERG_GEN_WW_M_MINUS_ECM_160;
+inline DcbGaussParams         kf_px_tot_gen            = DCBG_GEN_WW_PX_160;
+inline DcbGaussParams         kf_py_tot_gen            = DCBG_GEN_WW_PY_160;
+inline DcbGaussParams         kf_pz_tot_gen            = DCBG_GEN_WW_PZ_160;
 
 inline void setKinFitParams(int ecm) {
     ECM = static_cast<float>(ecm);
@@ -132,14 +132,9 @@ struct KinFitResult {
     float chi2;
     float chi2_ndof;        // chi2 / (KF_N_CONSTR - n_free_params)
     int   valid;
-    float mWlep_postfit, mWhad_postfit, mWW_postfit;
-    float pt_j1_postfit, pt_j2_postfit, pt_lep_postfit, pt_nu_postfit;
-    float p_j1_postfit,  p_j2_postfit,  p_lep_postfit,  p_nu_postfit;
-    float Wlep_px_postfit, Wlep_py_postfit, Wlep_pz_postfit;
-    float Whad_px_postfit, Whad_py_postfit, Whad_pz_postfit;
-    float theta_j1_postfit, theta_j2_postfit, theta_nu_postfit;
-    float phi_j1_postfit,   phi_j2_postfit,   phi_nu_postfit;
-    float deltaP_postfit;
+    // Post-fit 4-vectors. All scalar projections (P, Pt, M, Px, ...) and the
+    // Wlep/Whad/WW sums are derived in the consumer.
+    TLorentzVector j1, j2, lep, nu;
 };
 
 // Massless 4-vector from spherical coordinates.
@@ -414,21 +409,10 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
     TLorentzVector lf  = _vec_spherical(Isolep_p/result.sl,  Isolep_theta - result.tl, Isolep_phi - result.pl);
     TLorentzVector nf  = _vec_spherical(missing_p/result.sn, missing_p_theta - result.tn, missing_p_phi - result.pn);
 
-    TLorentzVector Wh = j1f + j2f;
-    TLorentzVector Wl = lf  + nf;
-
-    result.mWlep_postfit    = Wl.M();       result.mWhad_postfit    = Wh.M();  result.mWW_postfit = (Wl+Wh).M();
-    result.pt_j1_postfit    = j1f.Pt();     result.pt_j2_postfit    = j2f.Pt();
-    result.pt_lep_postfit   = lf.Pt();      result.pt_nu_postfit    = nf.Pt();
-    result.p_j1_postfit     = j1f.P();      result.p_j2_postfit     = j2f.P();
-    result.p_lep_postfit    = lf.P();       result.p_nu_postfit     = nf.P();
-    result.Wlep_px_postfit  = Wl.Px();      result.Wlep_py_postfit  = Wl.Py();  result.Wlep_pz_postfit = Wl.Pz();
-    result.Whad_px_postfit  = Wh.Px();      result.Whad_py_postfit  = Wh.Py();  result.Whad_pz_postfit = Wh.Pz();
-    result.theta_j1_postfit = j1f.Theta();  result.theta_j2_postfit = j2f.Theta(); result.theta_nu_postfit = nf.Theta();
-    result.phi_j1_postfit   = j1f.Phi();    result.phi_j2_postfit   = j2f.Phi();   result.phi_nu_postfit   = nf.Phi();
-    result.deltaP_postfit   = std::sqrt(std::pow(Wl.Px()+Wh.Px(), 2)
-                                      + std::pow(Wl.Py()+Wh.Py(), 2)
-                                      + std::pow(Wl.Pz()+Wh.Pz(), 2));
+    result.j1  = j1f;
+    result.j2  = j2f;
+    result.lep = lf;
+    result.nu  = nf;
     return result;
 }
 
@@ -560,21 +544,10 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     TLorentzVector lf  = _vec_spherical(Isolep_p/result.sl,  Isolep_theta - result.tl, Isolep_phi - result.pl);
     TLorentzVector nf  = _vec_spherical(missing_p/result.sn, missing_p_theta - result.tn, missing_p_phi - result.pn);
 
-    TLorentzVector Wh = j1f + j2f;
-    TLorentzVector Wl = lf  + nf;
-
-    result.mWlep_postfit    = Wl.M();       result.mWhad_postfit    = Wh.M();  result.mWW_postfit = (Wl+Wh).M();
-    result.pt_j1_postfit    = j1f.Pt();     result.pt_j2_postfit    = j2f.Pt();
-    result.pt_lep_postfit   = lf.Pt();      result.pt_nu_postfit    = nf.Pt();
-    result.p_j1_postfit     = j1f.P();      result.p_j2_postfit     = j2f.P();
-    result.p_lep_postfit    = lf.P();       result.p_nu_postfit     = nf.P();
-    result.Wlep_px_postfit  = Wl.Px();      result.Wlep_py_postfit  = Wl.Py();  result.Wlep_pz_postfit = Wl.Pz();
-    result.Whad_px_postfit  = Wh.Px();      result.Whad_py_postfit  = Wh.Py();  result.Whad_pz_postfit = Wh.Pz();
-    result.theta_j1_postfit = j1f.Theta();  result.theta_j2_postfit = j2f.Theta(); result.theta_nu_postfit = nf.Theta();
-    result.phi_j1_postfit   = j1f.Phi();    result.phi_j2_postfit   = j2f.Phi();   result.phi_nu_postfit   = nf.Phi();
-    result.deltaP_postfit   = std::sqrt(std::pow(Wl.Px()+Wh.Px(), 2)
-                                      + std::pow(Wl.Py()+Wh.Py(), 2)
-                                      + std::pow(Wl.Pz()+Wh.Pz(), 2));
+    result.j1  = j1f;
+    result.j2  = j2f;
+    result.lep = lf;
+    result.nu  = nf;
     return result;
 }
 

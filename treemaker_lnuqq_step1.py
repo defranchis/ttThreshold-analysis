@@ -35,8 +35,8 @@ all_branches = [
     "jet1_theta_resol", "jet2_theta_resol", "jet1_phi_resol", "jet2_phi_resol",
     "lep_theta_resol", "lep_phi_resol",
     "met_theta_resol", "met_phi_resol",
-    "px_tot_gen", "py_tot_gen", "pz_tot_gen",
-    "m_gen_lnuqq", "m_gen_lnuqq_minus_ecm",
+    "gen_WW_px", "gen_WW_py", "gen_WW_pz",
+    "gen_WW_m", "gen_WW_m_minus_ecm",
 ]
 
 _dataset_iter = iter(processList.keys())
@@ -129,13 +129,6 @@ class RDFanalysis:
         df = df.Define("nu_p4_gen",  "gen_neutrinos_fromele_tlv[0]")
         df = df.Define("gen_q1_p4",  "gen_lightquarks_fromele_tlv[0]")
         df = df.Define("gen_q2_p4",  "gen_lightquarks_fromele_tlv[1]")
-        # Massless quark TLVs (same 3-momentum, E = |p|) — used for m_gen_lnuqq so the
-        # kinfit constraint PDF is fitted to a mass treatment matching the kinfit's
-        # massless-jet WW.M() postfit.
-        df = df.Define("gen_q1_p4_massless",
-            "TLorentzVector(gen_q1_p4.Px(), gen_q1_p4.Py(), gen_q1_p4.Pz(), gen_q1_p4.P())")
-        df = df.Define("gen_q2_p4_massless",
-            "TLorentzVector(gen_q2_p4.Px(), gen_q2_p4.Py(), gen_q2_p4.Pz(), gen_q2_p4.P())")
 
         # ── kinfit input branches ──────────────────────────────────────────────
         df = df.Define("lep_p_resp",      "Isoleps_p4_reco.P() / lep_p4_gen.P()")
@@ -157,12 +150,12 @@ class RDFanalysis:
         df = df.Define("jet2_phi_resol",   "TVector2::Phi_mpi_pi(jet2.Phi() - jet2_matched_q_p4.Phi())")
 
         df = df.Define("Wlnuqq_gen",
-            "FCCAnalyses::WWFunctions::sum_p4({lep_p4_gen, nu_p4_gen, gen_q1_p4_massless, gen_q2_p4_massless})")
-        df = df.Define("m_gen_lnuqq",           "Wlnuqq_gen.M()")
-        df = df.Define("m_gen_lnuqq_minus_ecm", "m_gen_lnuqq - FCCAnalyses::WWFunctions::ECM")
-        df = df.Define("px_tot_gen", "Wlnuqq_gen.Px()")
-        df = df.Define("py_tot_gen", "Wlnuqq_gen.Py()")
-        df = df.Define("pz_tot_gen", "Wlnuqq_gen.Pz()")
+            "FCCAnalyses::WWFunctions::sum_p4({lep_p4_gen, nu_p4_gen, gen_q1_p4, gen_q2_p4})")
+        df = df.Define("gen_WW_m",           "Wlnuqq_gen.M()")
+        df = df.Define("gen_WW_m_minus_ecm", "gen_WW_m - FCCAnalyses::WWFunctions::ECM")
+        df = df.Define("gen_WW_px", "Wlnuqq_gen.Px()")
+        df = df.Define("gen_WW_py", "Wlnuqq_gen.Py()")
+        df = df.Define("gen_WW_pz", "Wlnuqq_gen.Pz()")
 
         # Cutflow diagnostic — triggers an extra pass over the data, but prints
         # pass/all and efficiency for every named Filter() above.
