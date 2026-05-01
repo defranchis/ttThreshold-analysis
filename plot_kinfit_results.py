@@ -619,15 +619,15 @@ def plot_chi2_slices(ecm, raw_arrays, json_results):
 
 
 # ── Per-status comparison plots ──────────────────────────────────────────────
-# For each kinfit branch, overlay distributions split by Migrad status code
-# (0=OK, 1=PD-forced, 2=EDM>tol, ≥3=other). Shows whether status=2 events have
-# kinematics consistent with status∈{0,1} → input for deciding the valid cut.
+# Migrad status codes (see WWKinReco.h: KinFitResult::status):
+#   0 = OK, 1 = PD-forced cov, 2 = Hesse failed, 3 = EDM>tol,
+#   4 = max calls, 5 = other, −1 = early-return (invalid input).
+# Only status 1 and 3 are plotted: status 0 dominates and crushes the rest;
+# status 3 (EDM>tol) is the dominant residual failure with this fit.
 
 _STATUS_BUCKETS = [
-    # status=0 (OK) intentionally excluded — dominates and crushes the others.
-    (lambda s: s == 1, "status=1 (PD-forced)", "tab:blue"),
-    (lambda s: s == 2, "status=2 (EDM>tol)",   "tab:orange"),
-    (lambda s: s >= 3, "status≥3 (other)",     "tab:red"),
+    (lambda s: s == 1, "status=1 (PD-forced cov)", "tab:blue"),
+    (lambda s: s == 3, "status=3 (EDM>tol)",       "tab:red"),
 ]
 
 

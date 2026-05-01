@@ -316,7 +316,7 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
             double lam  = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
             // Floor lam at 1e-12 instead of bailing — keeps the gradient continuous
             // at the kinematic boundary (lam = 0 corresponds to W masses summing to √s_WW).
-            lam = std::max(lam, 1e-12);
+            lam = std::sqrt(lam*lam + 1e-24);  // smooth |λ| floor — derivative continuous through 0
             // Joint BW × phase-space PDF (each BW normalised: ∫ BW dm² = π,
             // so BW_norm = BW/π → -2log adds 2log(π) per W). Phase space ∝ √λ/s_WW.
             double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l))
@@ -400,7 +400,7 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
             double s_ww = WW.M2();
             double lam  = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
             // Floor lam to keep -log(lam) finite and gradient smooth across the boundary.
-            lam = std::max(lam, 1e-12);
+            lam = std::sqrt(lam*lam + 1e-24);  // smooth |λ| floor — derivative continuous through 0
             // Joint BW × phase-space PDF (BW_norm = BW/π; phase space ∝ √λ/s_WW).
             double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l))
                            + 4.0 * std::log(M_PI)
@@ -517,7 +517,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         double s_ww = WW.M2();
         double lam  = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
         // Floor lam to keep -log(lam) finite and gradient smooth across the boundary.
-        lam = std::max(lam, 1e-12);
+        lam = std::sqrt(lam*lam + 1e-24);  // smooth |λ| floor — derivative continuous through 0
         // Joint BW × phase-space PDF (BW_norm = BW/π; phase space ∝ √λ/s_WW).
         double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l))
                        + 4.0 * std::log(M_PI)
@@ -548,38 +548,54 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     std::function<double(const double*)> fObj = chi2fn;
     ROOT::Math::Functor functor(fObj, 14);
 
+    // Configure a Minuit2 minimizer (Migrad or Simplex) with a 14-D starting point.
+    // Variable layout: 0=mW, 1=gW (physical, optionally fixed); 2..13=y-coords.
+    auto configure = [&](ROOT::Math::Minimizer* m, const double* x0, bool with_strategy) {
+        m->SetFunction(functor);
+        m->SetMaxFunctionCalls(100000);
+        m->SetTolerance(1e-3);
+        if (with_strategy) m->SetStrategy(2);
+        m->SetPrintLevel(-1);
+        m->SetVariable(0,  "mW",   x0[0],  0.1);  m->SetVariableLimits(0, 0.0, 200.0);
+        m->SetVariable(1,  "gW",   x0[1],  0.01); m->SetVariableLimits(1, 0.01, 10.0);
+        m->SetVariable(2,  "y_s1", x0[2],  0.1);
+        m->SetVariable(3,  "y_s2", x0[3],  0.1);
+        m->SetVariable(4,  "y_sl", x0[4],  0.1);
+        m->SetVariable(5,  "y_sn", x0[5],  0.1);
+        m->SetVariable(6,  "y_t1", x0[6],  0.1);
+        m->SetVariable(7,  "y_t2", x0[7],  0.1);
+        m->SetVariable(8,  "y_tn", x0[8],  0.1);
+        m->SetVariable(9,  "y_p1", x0[9],  0.1);
+        m->SetVariable(10, "y_p2", x0[10], 0.1);
+        m->SetVariable(11, "y_pn", x0[11], 0.1);
+        m->SetVariable(12, "y_tl", x0[12], 0.1);
+        m->SetVariable(13, "y_pl", x0[13], 0.1);
+        if (!fit_gW) m->FixVariable(1);
+    };
+
+    // Pass 1: Migrad alone from default starting point (fast path).
+    double x_default[14] = {KF_MW_INIT, KF_GW_FIXED, 0,0,0,0, 0,0,0, 0,0,0, 0,0};
     std::unique_ptr<ROOT::Math::Minimizer> minimizer(
         ROOT::Math::Factory::CreateMinimizer("Minuit2", "Migrad")
     );
-    minimizer->SetFunction(functor);
-    minimizer->SetMaxFunctionCalls(100000);
-    minimizer->SetTolerance(1e-3);
-    minimizer->SetStrategy(2);
-    minimizer->SetPrintLevel(-1);
-
-    // mW & gW physical; nuisance params standardized to y = (x − μ)/σ via _y2x in chi2fn.
-    // y_i start at 0, step 0.1 (10% of unit RMS), no limits — Hessian eigenvalues O(1) so
-    // Migrad's EDM tolerance is uniform across params and doesn't choke on directions
-    // where the prior is very narrow (lep angular σ ~ 1e-4 rad → trivially conditioned in y).
-    minimizer->SetVariable(0,  "mW", KF_MW_INIT,  0.1);   minimizer->SetVariableLimits(0,  0.0, 200.0);
-    minimizer->SetVariable(1,  "gW", KF_GW_FIXED, 0.01);  minimizer->SetVariableLimits(1,  0.01, 10.0);
-    minimizer->SetVariable(2,  "y_s1", 0.0, 0.1);
-    minimizer->SetVariable(3,  "y_s2", 0.0, 0.1);
-    minimizer->SetVariable(4,  "y_sl", 0.0, 0.1);
-    minimizer->SetVariable(5,  "y_sn", 0.0, 0.1);
-    minimizer->SetVariable(6,  "y_t1", 0.0, 0.1);
-    minimizer->SetVariable(7,  "y_t2", 0.0, 0.1);
-    minimizer->SetVariable(8,  "y_tn", 0.0, 0.1);
-    minimizer->SetVariable(9,  "y_p1", 0.0, 0.1);
-    minimizer->SetVariable(10, "y_p2", 0.0, 0.1);
-    minimizer->SetVariable(11, "y_pn", 0.0, 0.1);
-    minimizer->SetVariable(12, "y_tl", 0.0, 0.1);
-    minimizer->SetVariable(13, "y_pl", 0.0, 0.1);
-
-    if (!fit_gW) minimizer->FixVariable(1);
-
+    configure(minimizer.get(), x_default, /*with_strategy=*/true);
     minimizer->Minimize();
     minimizer->Minimize();
+
+    // Fallback: if Migrad didn't certify (status != 0,1), do a Simplex pre-pass to
+    // descend without derivatives, then re-run Migrad from there. ~2× cost paid only
+    // for the events that actually need it (~50% at ecm163, <20% at ecm157/160).
+    int s = minimizer->Status();
+    if (s != 0 && s != 1) {
+        std::unique_ptr<ROOT::Math::Minimizer> simplex(
+            ROOT::Math::Factory::CreateMinimizer("Minuit2", "Simplex")
+        );
+        configure(simplex.get(), x_default, /*with_strategy=*/false);
+        simplex->Minimize();
+        configure(minimizer.get(), simplex->X(), /*with_strategy=*/true);
+        minimizer->Minimize();
+        minimizer->Minimize();
+    }
 
     // Accept status 0 ("minimum found") and 1 ("covariance forced positive-definite").
     // The latter is common with non-Gaussian PDFs where the local Hessian estimate
