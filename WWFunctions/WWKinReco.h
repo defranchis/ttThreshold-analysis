@@ -131,7 +131,11 @@ struct KinFitResult {
     float p1, p2, pn, pl;   // phi shifts:   jet1, jet2, MET, lepton
     float chi2;
     float chi2_ndof;        // chi2 / (KF_N_CONSTR - n_free_params)
-    int   valid;
+    int   status;           // raw minimizer status code (Minuit2: 0=OK, 1=PD-forced cov,
+                            //   2=Hesse failed, 3=EDM>tol, 4=max calls, 5=other;
+                            //   BFGS: 0=converged, 1=max-iter/LS-fail).
+                            //   −1 if early-returned without fitting (invalid input p).
+    int   valid;            // currently (status == 0 || status == 1)
     // Post-fit 4-vectors. All scalar projections (P, Pt, M, Px, ...) and the
     // Wlep/Whad/WW sums are derived in the consumer.
     TLorentzVector j1, j2, lep, nu;
@@ -145,7 +149,14 @@ static TLorentzVector _vec_spherical(double p, double theta, double phi) {
     return v;
 }
 
-
+// Decode standardized y-coord to physical value: x = μ_prior + σ_prior · y.
+// All prior PDFs (DcbParams, DcbGaussParams, DcbExpLeftGaussParams,
+// DcbExpRightGaussParams) expose .mu/.sigma as their first two fields, so this
+// template works for every kf_* struct. Preconditions the Hessian: in y-space
+// all 12 nuisance directions have unit RMS, so Migrad's EDM tolerance is uniform.
+// mW (and gW when free) stay in physical units.
+template<typename PdfT>
+static inline double _y2x(double y, const PdfT& p) { return p.mu + p.sigma * y; }
 
 // ── BFGS minimizer ────────────────────────────────────────────────────────
 // Template avoids std::function overhead (no heap, no virtual dispatch).
@@ -259,6 +270,7 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
     KinFitResult result{};
     result.gW    = KF_GW_FIXED;
     result.valid = 0;
+    result.status = -1;
     result.chi2  = 999.0f;
     result.chi2_ndof = 999.0f;
 
@@ -268,14 +280,22 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
     double fmin = 0;
 
     if (fit_gW) {
-        // 14 free parameters: x[0]=mW, x[1]=gW, x[2..5]=scales, x[6..8]=jet/MET theta, x[9..11]=jet/MET phi, x[12..13]=lep angles
+        // 14 free params: x[0]=mW, x[1]=gW (physical); x[2..13] standardized y-coords.
         auto chi2fn = [=](const double* x) -> double {
             const double mW = x[0], gW = x[1];
             if (gW <= 0.0) return 1e10;
-            const double s1 = x[2], s2 = x[3], sl = x[4], sn = x[5];
-            const double t1 = x[6], t2 = x[7], tn = x[8];
-            const double p1 = x[9], p2 = x[10], pn = x[11];
-            const double tl = x[12], pl = x[13];
+            const double s1 = _y2x(x[2],  kf_jet1_p_resp);
+            const double s2 = _y2x(x[3],  kf_jet2_p_resp);
+            const double sl = _y2x(x[4],  kf_lep_p_resp);
+            const double sn = _y2x(x[5],  kf_met_p_resp);
+            const double t1 = _y2x(x[6],  kf_jet1_theta_resol);
+            const double t2 = _y2x(x[7],  kf_jet2_theta_resol);
+            const double tn = _y2x(x[8],  kf_met_theta_resol);
+            const double p1 = _y2x(x[9],  kf_jet1_phi_resol);
+            const double p2 = _y2x(x[10], kf_jet2_phi_resol);
+            const double pn = _y2x(x[11], kf_met_phi_resol);
+            const double tl = _y2x(x[12], kf_lep_theta_resol);
+            const double pl = _y2x(x[13], kf_lep_phi_resol);
             if (s1 <= 0.0 || s2 <= 0.0 || sl <= 0.0 || sn <= 0.0) return 1e10;
 
             TLorentzVector j1f = _vec_spherical(jet1_p/s1,    jet1_theta    - t1, jet1_phi    - p1);
@@ -325,25 +345,42 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
             return bw_term + cons + scale_pen + angular;
         };
 
-        // s-params init at DCB mode (jet resp ≈ 0.97, lep/MET resp ≈ 1.0)
-        double x0[14] = {KF_MW_INIT, KF_GW_FIXED, 0.97, 0.97, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        // y-coords start at 0 → physical starts at prior μ for each nuisance param.
+        double x0[14] = {KF_MW_INIT, KF_GW_FIXED, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
         int status = _bfgs_minimize<decltype(chi2fn), 14>(chi2fn, x0, fmin);
+        result.status = status;
         result.valid = (status == 0) ? 1 : 0;
         result.chi2  = fmin;
         result.chi2_ndof = (KF_N_CONSTR > 14) ? fmin / float(KF_N_CONSTR - 14) : -1.0f;
         result.mW = x0[0]; result.gW = x0[1];
-        result.s1 = x0[2]; result.s2 = x0[3]; result.sl = x0[4]; result.sn = x0[5];
-        result.t1 = x0[6]; result.t2 = x0[7]; result.tn = x0[8];
-        result.p1 = x0[9]; result.p2 = x0[10]; result.pn = x0[11];
-        result.tl = x0[12]; result.pl = x0[13];
+        result.s1 = _y2x(x0[2],  kf_jet1_p_resp);
+        result.s2 = _y2x(x0[3],  kf_jet2_p_resp);
+        result.sl = _y2x(x0[4],  kf_lep_p_resp);
+        result.sn = _y2x(x0[5],  kf_met_p_resp);
+        result.t1 = _y2x(x0[6],  kf_jet1_theta_resol);
+        result.t2 = _y2x(x0[7],  kf_jet2_theta_resol);
+        result.tn = _y2x(x0[8],  kf_met_theta_resol);
+        result.p1 = _y2x(x0[9],  kf_jet1_phi_resol);
+        result.p2 = _y2x(x0[10], kf_jet2_phi_resol);
+        result.pn = _y2x(x0[11], kf_met_phi_resol);
+        result.tl = _y2x(x0[12], kf_lep_theta_resol);
+        result.pl = _y2x(x0[13], kf_lep_phi_resol);
     } else {
-        // 13 free parameters (KF_NDIM): x[0]=mW, x[1..4]=scales, x[5..7]=jet/MET theta, x[8..10]=jet/MET phi, x[11..12]=lep angles
+        // 13 free params: x[0]=mW (physical); x[1..12] standardized y-coords.
         auto chi2fn = [=](const double* x) -> double {
             const double mW = x[0];
-            const double s1 = x[1], s2 = x[2], sl = x[3], sn = x[4];
-            const double t1 = x[5], t2 = x[6], tn = x[7];
-            const double p1 = x[8], p2 = x[9], pn = x[10];
-            const double tl = x[11], pl = x[12];
+            const double s1 = _y2x(x[1],  kf_jet1_p_resp);
+            const double s2 = _y2x(x[2],  kf_jet2_p_resp);
+            const double sl = _y2x(x[3],  kf_lep_p_resp);
+            const double sn = _y2x(x[4],  kf_met_p_resp);
+            const double t1 = _y2x(x[5],  kf_jet1_theta_resol);
+            const double t2 = _y2x(x[6],  kf_jet2_theta_resol);
+            const double tn = _y2x(x[7],  kf_met_theta_resol);
+            const double p1 = _y2x(x[8],  kf_jet1_phi_resol);
+            const double p2 = _y2x(x[9],  kf_jet2_phi_resol);
+            const double pn = _y2x(x[10], kf_met_phi_resol);
+            const double tl = _y2x(x[11], kf_lep_theta_resol);
+            const double pl = _y2x(x[12], kf_lep_phi_resol);
             if (s1 <= 0.0 || s2 <= 0.0 || sl <= 0.0 || sn <= 0.0) return 1e10;
 
             TLorentzVector j1f = _vec_spherical(jet1_p/s1,    jet1_theta    - t1, jet1_phi    - p1);
@@ -391,16 +428,26 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
             return bw_term + cons + scale_pen + angular;
         };
 
-        double x0[KF_NDIM] = {KF_MW_INIT, 0.97, 0.97, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        // y-coords start at 0 → physical starts at prior μ for each nuisance param.
+        double x0[KF_NDIM] = {KF_MW_INIT, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
         int status = _bfgs_minimize<decltype(chi2fn), KF_NDIM>(chi2fn, x0, fmin);
+        result.status = status;
         result.valid = (status == 0) ? 1 : 0;
         result.chi2  = fmin;
         result.chi2_ndof = (KF_N_CONSTR > KF_NDIM) ? fmin / float(KF_N_CONSTR - KF_NDIM) : -1.0f;
         result.mW = x0[0];
-        result.s1 = x0[1]; result.s2 = x0[2]; result.sl = x0[3]; result.sn = x0[4];
-        result.t1 = x0[5]; result.t2 = x0[6]; result.tn = x0[7];
-        result.p1 = x0[8]; result.p2 = x0[9]; result.pn = x0[10];
-        result.tl = x0[11]; result.pl = x0[12];
+        result.s1 = _y2x(x0[1],  kf_jet1_p_resp);
+        result.s2 = _y2x(x0[2],  kf_jet2_p_resp);
+        result.sl = _y2x(x0[3],  kf_lep_p_resp);
+        result.sn = _y2x(x0[4],  kf_met_p_resp);
+        result.t1 = _y2x(x0[5],  kf_jet1_theta_resol);
+        result.t2 = _y2x(x0[6],  kf_jet2_theta_resol);
+        result.tn = _y2x(x0[7],  kf_met_theta_resol);
+        result.p1 = _y2x(x0[8],  kf_jet1_phi_resol);
+        result.p2 = _y2x(x0[9],  kf_jet2_phi_resol);
+        result.pn = _y2x(x0[10], kf_met_phi_resol);
+        result.tl = _y2x(x0[11], kf_lep_theta_resol);
+        result.pl = _y2x(x0[12], kf_lep_phi_resol);
     }
 
     // Post-fit kinematics (shared — uses result fields filled above)
@@ -425,6 +472,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     KinFitResult result{};
     result.gW    = KF_GW_FIXED;
     result.valid = 0;
+    result.status = -1;
     result.chi2  = 999.0f;
     result.chi2_ndof = 999.0f;
 
@@ -434,13 +482,22 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     // 14 parameters: x[0]=mW, x[1]=gW, x[2..5]=scales, x[6..8]=jet/MET theta, x[9..11]=jet/MET phi, x[12..13]=lep angles.
     // When fit_gW=false, gW is pinned to KF_GW_FIXED via FixVariable(1).
     auto chi2fn = [=](const double* x) -> double {
-        // gW has limits (0.01, 10.0) and s_i guard against accidental negative regions
-        // during line search (s_i are unbounded in this Minuit setup).
+        // x[0]=mW, x[1]=gW kept physical. x[2..13] are standardized y-coords
+        // (y = (x_phys − μ_prior)/σ_prior); decoded back to physical via _y2x.
+        // s_i guard handles transient negative regions during Migrad line search.
         const double mW = x[0], gW = x[1];
-        const double s1 = x[2], s2 = x[3], sl = x[4], sn = x[5];
-        const double t1 = x[6], t2 = x[7], tn = x[8];
-        const double p1 = x[9], p2 = x[10], pn = x[11];
-        const double tl = x[12], pl = x[13];
+        const double s1 = _y2x(x[2],  kf_jet1_p_resp);
+        const double s2 = _y2x(x[3],  kf_jet2_p_resp);
+        const double sl = _y2x(x[4],  kf_lep_p_resp);
+        const double sn = _y2x(x[5],  kf_met_p_resp);
+        const double t1 = _y2x(x[6],  kf_jet1_theta_resol);
+        const double t2 = _y2x(x[7],  kf_jet2_theta_resol);
+        const double tn = _y2x(x[8],  kf_met_theta_resol);
+        const double p1 = _y2x(x[9],  kf_jet1_phi_resol);
+        const double p2 = _y2x(x[10], kf_jet2_phi_resol);
+        const double pn = _y2x(x[11], kf_met_phi_resol);
+        const double tl = _y2x(x[12], kf_lep_theta_resol);
+        const double pl = _y2x(x[13], kf_lep_phi_resol);
         if (s1 <= 0.0 || s2 <= 0.0 || sl <= 0.0 || sn <= 0.0) return 1e10;
 
         TLorentzVector j1f = _vec_spherical(jet1_p/s1,    jet1_theta    - t1, jet1_phi    - p1);
@@ -495,28 +552,29 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         ROOT::Math::Factory::CreateMinimizer("Minuit2", "Migrad")
     );
     minimizer->SetFunction(functor);
-    minimizer->SetMaxFunctionCalls(10000);
-    minimizer->SetTolerance(1e-6);
+    minimizer->SetMaxFunctionCalls(100000);
+    minimizer->SetTolerance(1e-3);
     minimizer->SetStrategy(2);
     minimizer->SetPrintLevel(-1);
 
-    // Step sizes matched to ECM-160 PDF sigmas so Migrad's finite-difference probes
-    // see chi2 changes of O(1) per step — critical for the lepton angular shifts
-    // whose σ ~ 1e-4 rad (was 1e-3, ~30× too coarse).
-    minimizer->SetVariable(0,  "mW", KF_MW_INIT,  0.1);     minimizer->SetVariableLimits(0,  0.0, 200.0);
-    minimizer->SetVariable(1,  "gW", KF_GW_FIXED, 0.01);    minimizer->SetVariableLimits(1,  0.01, 10.0);
-    minimizer->SetVariable(2,  "s1", 0.97,  0.014);    // jet1 p-resp, σ ≈ 0.014
-    minimizer->SetVariable(3,  "s2", 0.97,  0.014);    // jet2 p-resp, σ ≈ 0.018
-    minimizer->SetVariable(4,  "sl", 1.0,   0.004);    // lep  p-resp, σ ≈ 0.004
-    minimizer->SetVariable(5,  "sn", 1.0,   0.012);    // MET  p-resp, σ ≈ 0.012
-    minimizer->SetVariable(6,  "t1", 0.0,   0.014);    // jet1 dtheta, σ ≈ 0.013
-    minimizer->SetVariable(7,  "t2", 0.0,   0.017);    // jet2 dtheta, σ ≈ 0.016
-    minimizer->SetVariable(8,  "tn", 0.0,   0.007);    // MET  dtheta, σ ≈ 0.007
-    minimizer->SetVariable(9,  "p1", 0.0,   0.016);    // jet1 dphi,   σ ≈ 0.015
-    minimizer->SetVariable(10, "p2", 0.0,   0.020);    // jet2 dphi,   σ ≈ 0.018
-    minimizer->SetVariable(11, "pn", 0.0,   0.004);    // MET  dphi,   σ ≈ 0.004
-    minimizer->SetVariable(12, "tl", 0.0,   0.0001);   // lep  dtheta, σ ≈ 2e-5
-    minimizer->SetVariable(13, "pl", 0.0,   0.0003);   // lep  dphi,   σ ≈ 3e-4
+    // mW & gW physical; nuisance params standardized to y = (x − μ)/σ via _y2x in chi2fn.
+    // y_i start at 0, step 0.1 (10% of unit RMS), no limits — Hessian eigenvalues O(1) so
+    // Migrad's EDM tolerance is uniform across params and doesn't choke on directions
+    // where the prior is very narrow (lep angular σ ~ 1e-4 rad → trivially conditioned in y).
+    minimizer->SetVariable(0,  "mW", KF_MW_INIT,  0.1);   minimizer->SetVariableLimits(0,  0.0, 200.0);
+    minimizer->SetVariable(1,  "gW", KF_GW_FIXED, 0.01);  minimizer->SetVariableLimits(1,  0.01, 10.0);
+    minimizer->SetVariable(2,  "y_s1", 0.0, 0.1);
+    minimizer->SetVariable(3,  "y_s2", 0.0, 0.1);
+    minimizer->SetVariable(4,  "y_sl", 0.0, 0.1);
+    minimizer->SetVariable(5,  "y_sn", 0.0, 0.1);
+    minimizer->SetVariable(6,  "y_t1", 0.0, 0.1);
+    minimizer->SetVariable(7,  "y_t2", 0.0, 0.1);
+    minimizer->SetVariable(8,  "y_tn", 0.0, 0.1);
+    minimizer->SetVariable(9,  "y_p1", 0.0, 0.1);
+    minimizer->SetVariable(10, "y_p2", 0.0, 0.1);
+    minimizer->SetVariable(11, "y_pn", 0.0, 0.1);
+    minimizer->SetVariable(12, "y_tl", 0.0, 0.1);
+    minimizer->SetVariable(13, "y_pl", 0.0, 0.1);
 
     if (!fit_gW) minimizer->FixVariable(1);
 
@@ -526,17 +584,29 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     // Accept status 0 ("minimum found") and 1 ("covariance forced positive-definite").
     // The latter is common with non-Gaussian PDFs where the local Hessian estimate
     // needs PD adjustment — the postfit values are still valid.
+    // Status 3 (EDM above tolerance) is the dominant residual failure with this fit;
+    // bumping max calls doesn't help (EDM-bound, not call-bound). Tolerance was
+    // loosened from 1e-6 to 1e-3 (Migrad default) to capture genuinely-converged events.
     int status = minimizer->Status();
+    result.status = status;
     result.valid = (status == 0 || status == 1) ? 1 : 0;
     result.chi2  = minimizer->MinValue();
     int n_par = fit_gW ? 14 : KF_NDIM;
     result.chi2_ndof = (KF_N_CONSTR > n_par) ? result.chi2 / float(KF_N_CONSTR - n_par) : -1.0f;
     const double* x = minimizer->X();
     result.mW = x[0]; result.gW = x[1];
-    result.s1 = x[2]; result.s2 = x[3]; result.sl = x[4]; result.sn = x[5];
-    result.t1 = x[6]; result.t2 = x[7]; result.tn = x[8];
-    result.p1 = x[9]; result.p2 = x[10]; result.pn = x[11];
-    result.tl = x[12]; result.pl = x[13];
+    result.s1 = _y2x(x[2],  kf_jet1_p_resp);
+    result.s2 = _y2x(x[3],  kf_jet2_p_resp);
+    result.sl = _y2x(x[4],  kf_lep_p_resp);
+    result.sn = _y2x(x[5],  kf_met_p_resp);
+    result.t1 = _y2x(x[6],  kf_jet1_theta_resol);
+    result.t2 = _y2x(x[7],  kf_jet2_theta_resol);
+    result.tn = _y2x(x[8],  kf_met_theta_resol);
+    result.p1 = _y2x(x[9],  kf_jet1_phi_resol);
+    result.p2 = _y2x(x[10], kf_jet2_phi_resol);
+    result.pn = _y2x(x[11], kf_met_phi_resol);
+    result.tl = _y2x(x[12], kf_lep_theta_resol);
+    result.pl = _y2x(x[13], kf_lep_phi_resol);
 
     // Post-fit kinematics (shared — uses result fields filled above)
     TLorentzVector j1f = _vec_spherical(jet1_p/result.s1,    jet1_theta    - result.t1, jet1_phi    - result.p1);

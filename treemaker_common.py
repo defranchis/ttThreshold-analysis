@@ -314,7 +314,7 @@ def run_kinfit(df, method="minuit", free_gw=False):
                 "s1","s2","sl","sn",
                 "t1","t2","tn","tl",
                 "p1","p2","pn","pl",
-                "chi2","chi2_ndof","valid"]:
+                "chi2","chi2_ndof","valid","status"]:
         df = df.Define(f"kinfit_{tag}", f"kinfit.{tag}")
 
     # Postfit scalars projected from TLVs in KinFitResult.

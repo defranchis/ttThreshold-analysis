@@ -9,6 +9,15 @@ processList = {
     "wzp6_ee_munumuqq_noCut_ecm163": {"fraction": 1, "crossSection": 1},
 }
 
+# Run a single ECM in parallel mode: WW_ECM={157,160,163} restricts processList
+# to that one dataset so 3 fccanalysis processes can be launched concurrently.
+_ecm_env = os.environ.get("WW_ECM", "").strip()
+if _ecm_env:
+    _key = f"wzp6_ee_munumuqq_noCut_ecm{_ecm_env}"
+    if _key not in processList:
+        raise ValueError(f"WW_ECM={_ecm_env} not in processList ({list(processList)})")
+    processList = {_key: processList[_key]}
+
 # ── kinematic fit method ───────────────────────────────────────────────────
 # "minuit" → ROOT Minuit2 (robust, ~200-500 function evaluations per event)
 # "bfgs"   → custom BFGS, stack-only, no heap, template-inlined chi2
@@ -75,7 +84,7 @@ all_branches = [
     "kinfit_s1", "kinfit_s2", "kinfit_sl", "kinfit_sn",
     "kinfit_t1", "kinfit_t2", "kinfit_tn", "kinfit_tl",
     "kinfit_p1", "kinfit_p2", "kinfit_pn", "kinfit_pl",
-    "kinfit_chi2", "kinfit_chi2_ndof", "kinfit_valid",
+    "kinfit_chi2", "kinfit_chi2_ndof", "kinfit_valid", "kinfit_status",
 
     # ── misc derived ───────────────────────────────────────────────────
     "n_lep_reco", "n_reco_jets", "deltaM",
