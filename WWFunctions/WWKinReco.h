@@ -4,6 +4,7 @@
 #include <cmath>
 #include <memory>
 #include <functional>
+#include <string>
 #include "Math/Minimizer.h"
 #include "Math/Factory.h"
 #include "Math/Functor.h"
@@ -35,7 +36,43 @@ struct KinFitParamSet {
     DcbGaussParams         pz_tot_gen;            // dcb2g
 };
 
-static const KinFitParamSet KF_PARAMS_157 = {
+// Two jet-prior conventions, selected at setKinFitParams() time:
+//  - POOL: jet1 and jet2 share the pooled prior DCBG_JET_*_{ECM}. No pT-ordering
+//          dependence; pass-1 already covers both orderings, swap fallback off.
+//  - SEP : jet1 / jet2 use the separately-fit DCBG_JET{1,2}_*_{ECM} priors. The
+//          per-jet ordering disagrees on some events, so the kinFit() pass-2
+//          swap fallback (jet1↔jet2 priors) is enabled to rescue them.
+static const KinFitParamSet KF_PARAMS_157_POOL = {
+    DCBG_JET_P_RESP_157, DCBG_JET_P_RESP_157,
+    DCBELG_LEP_P_RESP_157, DCB_MET_P_RESP_157,
+    DCBG_JET_PHI_RESOL_157, DCBG_JET_THETA_RESOL_157,
+    DCBG_JET_PHI_RESOL_157, DCBG_JET_THETA_RESOL_157,
+    DCBG_LEP_PHI_RESOL_157,  DCBG_LEP_THETA_RESOL_157,
+    DCB_MET_PHI_RESOL_157,   DCB_MET_THETA_RESOL_157,
+    DCBERG_GEN_WW_M_MINUS_ECM_157,
+    DCBG_GEN_WW_PX_157, DCBG_GEN_WW_PY_157, DCBG_GEN_WW_PZ_157,
+};
+static const KinFitParamSet KF_PARAMS_160_POOL = {
+    DCBG_JET_P_RESP_160, DCBG_JET_P_RESP_160,
+    DCBELG_LEP_P_RESP_160, DCB_MET_P_RESP_160,
+    DCBG_JET_PHI_RESOL_160, DCBG_JET_THETA_RESOL_160,
+    DCBG_JET_PHI_RESOL_160, DCBG_JET_THETA_RESOL_160,
+    DCBG_LEP_PHI_RESOL_160,  DCBG_LEP_THETA_RESOL_160,
+    DCB_MET_PHI_RESOL_160,   DCB_MET_THETA_RESOL_160,
+    DCBERG_GEN_WW_M_MINUS_ECM_160,
+    DCBG_GEN_WW_PX_160, DCBG_GEN_WW_PY_160, DCBG_GEN_WW_PZ_160,
+};
+static const KinFitParamSet KF_PARAMS_163_POOL = {
+    DCBG_JET_P_RESP_163, DCBG_JET_P_RESP_163,
+    DCBELG_LEP_P_RESP_163, DCB_MET_P_RESP_163,
+    DCBG_JET_PHI_RESOL_163, DCBG_JET_THETA_RESOL_163,
+    DCBG_JET_PHI_RESOL_163, DCBG_JET_THETA_RESOL_163,
+    DCBG_LEP_PHI_RESOL_163,  DCBG_LEP_THETA_RESOL_163,
+    DCB_MET_PHI_RESOL_163,   DCB_MET_THETA_RESOL_163,
+    DCBERG_GEN_WW_M_MINUS_ECM_163,
+    DCBG_GEN_WW_PX_163, DCBG_GEN_WW_PY_163, DCBG_GEN_WW_PZ_163,
+};
+static const KinFitParamSet KF_PARAMS_157_SEP = {
     DCBG_JET1_P_RESP_157, DCBG_JET2_P_RESP_157,
     DCBELG_LEP_P_RESP_157, DCB_MET_P_RESP_157,
     DCBG_JET1_PHI_RESOL_157, DCBG_JET1_THETA_RESOL_157,
@@ -45,7 +82,7 @@ static const KinFitParamSet KF_PARAMS_157 = {
     DCBERG_GEN_WW_M_MINUS_ECM_157,
     DCBG_GEN_WW_PX_157, DCBG_GEN_WW_PY_157, DCBG_GEN_WW_PZ_157,
 };
-static const KinFitParamSet KF_PARAMS_160 = {
+static const KinFitParamSet KF_PARAMS_160_SEP = {
     DCBG_JET1_P_RESP_160, DCBG_JET2_P_RESP_160,
     DCBELG_LEP_P_RESP_160, DCB_MET_P_RESP_160,
     DCBG_JET1_PHI_RESOL_160, DCBG_JET1_THETA_RESOL_160,
@@ -55,7 +92,7 @@ static const KinFitParamSet KF_PARAMS_160 = {
     DCBERG_GEN_WW_M_MINUS_ECM_160,
     DCBG_GEN_WW_PX_160, DCBG_GEN_WW_PY_160, DCBG_GEN_WW_PZ_160,
 };
-static const KinFitParamSet KF_PARAMS_163 = {
+static const KinFitParamSet KF_PARAMS_163_SEP = {
     DCBG_JET1_P_RESP_163, DCBG_JET2_P_RESP_163,
     DCBELG_LEP_P_RESP_163, DCB_MET_P_RESP_163,
     DCBG_JET1_PHI_RESOL_163, DCBG_JET1_THETA_RESOL_163,
@@ -84,12 +121,19 @@ inline DcbGaussParams         kf_px_tot_gen            = DCBG_GEN_WW_PX_160;
 inline DcbGaussParams         kf_py_tot_gen            = DCBG_GEN_WW_PY_160;
 inline DcbGaussParams         kf_pz_tot_gen            = DCBG_GEN_WW_PZ_160;
 
-inline void setKinFitParams(int ecm) {
+// True when SEP (per-jet) priors are active → kinFit() runs the jet1↔jet2 swap
+// fallback on non-converged events. False under POOL (priors are jet-symmetric,
+// swap is a no-op so we skip the second Migrad pass).
+inline bool kf_jet_swap_enabled = false;
+
+inline void setKinFitParams(int ecm, const std::string& jet_mode = "pool") {
     ECM = static_cast<float>(ecm);
+    const bool use_pool = (jet_mode == "pool");
+    kf_jet_swap_enabled = !use_pool;
     const KinFitParamSet* p =
-        ecm == 157 ? &KF_PARAMS_157 :
-        ecm == 160 ? &KF_PARAMS_160 :
-        ecm == 163 ? &KF_PARAMS_163 : nullptr;
+        ecm == 157 ? (use_pool ? &KF_PARAMS_157_POOL : &KF_PARAMS_157_SEP) :
+        ecm == 160 ? (use_pool ? &KF_PARAMS_160_POOL : &KF_PARAMS_160_SEP) :
+        ecm == 163 ? (use_pool ? &KF_PARAMS_163_POOL : &KF_PARAMS_163_SEP) : nullptr;
     if (!p) return;
     kf_jet1_p_resp           = p->jet1_p_resp;
     kf_jet2_p_resp           = p->jet2_p_resp;
@@ -496,22 +540,34 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     if (Isolep_p < 0 || jet1_p <= 0 || jet2_p <= 0 || missing_p <= 0)
         return result;
 
+    // Local copies of the jet priors. chi2fn captures these by reference, so the
+    // jet1↔jet2 swap fallback below can repoint them via std::swap without
+    // rebuilding the lambda.
+    DcbGaussParams p_jet1_p_resp      = kf_jet1_p_resp;
+    DcbGaussParams p_jet2_p_resp      = kf_jet2_p_resp;
+    DcbGaussParams p_jet1_theta_resol = kf_jet1_theta_resol;
+    DcbGaussParams p_jet2_theta_resol = kf_jet2_theta_resol;
+    DcbGaussParams p_jet1_phi_resol   = kf_jet1_phi_resol;
+    DcbGaussParams p_jet2_phi_resol   = kf_jet2_phi_resol;
+
     // 14 parameters: x[0]=mW, x[1]=gW, x[2..5]=scales, x[6..8]=jet/MET theta, x[9..11]=jet/MET phi, x[12..13]=lep angles.
     // When fit_gW=false, gW is pinned to KF_GW_FIXED via FixVariable(1).
-    auto chi2fn = [=](const double* x) -> double {
+    auto chi2fn = [=, &p_jet1_p_resp, &p_jet2_p_resp,
+                       &p_jet1_theta_resol, &p_jet2_theta_resol,
+                       &p_jet1_phi_resol,   &p_jet2_phi_resol](const double* x) -> double {
         // x[0]=mW, x[1]=gW kept physical. x[2..13] are standardized y-coords
         // (y = (x_phys − μ_prior)/σ_prior); decoded back to physical via _y2x.
         // s_i guard handles transient negative regions during Migrad line search.
         const double mW = x[0], gW = x[1];
-        const double s1 = _y2x(x[2],  kf_jet1_p_resp);
-        const double s2 = _y2x(x[3],  kf_jet2_p_resp);
+        const double s1 = _y2x(x[2],  p_jet1_p_resp);
+        const double s2 = _y2x(x[3],  p_jet2_p_resp);
         const double sl = _y2x(x[4],  kf_lep_p_resp);
         const double sn = _y2x(x[5],  kf_met_p_resp);
-        const double t1 = _y2x(x[6],  kf_jet1_theta_resol);
-        const double t2 = _y2x(x[7],  kf_jet2_theta_resol);
+        const double t1 = _y2x(x[6],  p_jet1_theta_resol);
+        const double t2 = _y2x(x[7],  p_jet2_theta_resol);
         const double tn = _y2x(x[8],  kf_met_theta_resol);
-        const double p1 = _y2x(x[9],  kf_jet1_phi_resol);
-        const double p2 = _y2x(x[10], kf_jet2_phi_resol);
+        const double p1 = _y2x(x[9],  p_jet1_phi_resol);
+        const double p2 = _y2x(x[10], p_jet2_phi_resol);
         const double pn = _y2x(x[11], kf_met_phi_resol);
         const double tl = _y2x(x[12], kf_lep_theta_resol);
         const double pl = _y2x(x[13], kf_lep_phi_resol);
@@ -545,17 +601,17 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                     + dcb_gauss_neg2logpdf(WW.Pz(), kf_pz_tot_gen)
                     + dcb_expright_gauss_neg2logpdf(WW.M() - ECM, kf_m_gen_lnuqq_minus_ecm);
 
-        double scale_pen = dcb_gauss_neg2logpdf(s1, kf_jet1_p_resp)
-                         + dcb_gauss_neg2logpdf(s2, kf_jet2_p_resp)
+        double scale_pen = dcb_gauss_neg2logpdf(s1, p_jet1_p_resp)
+                         + dcb_gauss_neg2logpdf(s2, p_jet2_p_resp)
                          + dcb_expleft_gauss_neg2logpdf(sl, kf_lep_p_resp)
                          + dcb_neg2logpdf(sn, kf_met_p_resp);
 
-        double angular = dcb_gauss_neg2logpdf(t1, kf_jet1_theta_resol)
-                       + dcb_gauss_neg2logpdf(t2, kf_jet2_theta_resol)
+        double angular = dcb_gauss_neg2logpdf(t1, p_jet1_theta_resol)
+                       + dcb_gauss_neg2logpdf(t2, p_jet2_theta_resol)
                        + dcb_neg2logpdf(tn, kf_met_theta_resol)
                        + dcb_gauss_neg2logpdf(tl, kf_lep_theta_resol)
-                       + dcb_gauss_neg2logpdf(p1, kf_jet1_phi_resol)
-                       + dcb_gauss_neg2logpdf(p2, kf_jet2_phi_resol)
+                       + dcb_gauss_neg2logpdf(p1, p_jet1_phi_resol)
+                       + dcb_gauss_neg2logpdf(p2, p_jet2_phi_resol)
                        + dcb_neg2logpdf(pn, kf_met_phi_resol)
                        + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
 
@@ -592,58 +648,99 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         if (!fit_gW) m->FixVariable(1);
     };
 
-    // Pass 1: Migrad alone from default starting point (fast path).
     double x_default[14] = {KF_MW_INIT, KF_GW_FIXED, 0,0,0,0, 0,0,0, 0,0,0, 0,0};
     std::unique_ptr<ROOT::Math::Minimizer> minimizer(
         ROOT::Math::Factory::CreateMinimizer("Minuit2", "Migrad")
     );
-    configure(minimizer.get(), x_default, /*with_strategy=*/true);
-    minimizer->Minimize();
-    minimizer->Minimize();
 
-    // Fallback: if Migrad didn't certify (status != 0,1), do a Simplex pre-pass to
-    // descend without derivatives, then re-run Migrad from there. ~2× cost paid only
-    // for the events that actually need it (~50% at ecm163, <20% at ecm157/160).
-    int s = minimizer->Status();
-    if (s != 0 && s != 1) {
-        std::unique_ptr<ROOT::Math::Minimizer> simplex(
-            ROOT::Math::Factory::CreateMinimizer("Minuit2", "Simplex")
-        );
-        configure(simplex.get(), x_default, /*with_strategy=*/false);
-        simplex->Minimize();
-        configure(minimizer.get(), simplex->X(), /*with_strategy=*/true);
+    // Migrad → Simplex+Migrad fallback. Returns Migrad's final status code.
+    // Status 0 = minimum found; 1 = covariance forced positive-definite (still
+    // valid postfit); 3 = EDM > tol (the dominant residual failure). Tolerance
+    // was loosened from 1e-6 to 1e-3 (Migrad default). The Simplex pre-pass
+    // helps descend through non-quadratic regions; ~2× cost is paid only for
+    // events Migrad couldn't certify alone.
+    auto migrad_with_simplex_fallback = [&](const double* x_init) {
+        configure(minimizer.get(), x_init, /*with_strategy=*/true);
         minimizer->Minimize();
         minimizer->Minimize();
+        int s = minimizer->Status();
+        if (s != 0 && s != 1) {
+            std::unique_ptr<ROOT::Math::Minimizer> simplex(
+                ROOT::Math::Factory::CreateMinimizer("Minuit2", "Simplex")
+            );
+            configure(simplex.get(), x_init, /*with_strategy=*/false);
+            simplex->Minimize();
+            configure(minimizer.get(), simplex->X(), /*with_strategy=*/true);
+            minimizer->Minimize();
+            minimizer->Minimize();
+            s = minimizer->Status();
+        }
+        return s;
+    };
+
+    // Pass 1: natural (kf_jet1, kf_jet2) prior assignment.
+    int    status1 = migrad_with_simplex_fallback(x_default);
+    double chi2_1  = minimizer->MinValue();
+    double x_1[14];
+    { const double* xref = minimizer->X(); for (int i = 0; i < 14; ++i) x_1[i] = xref[i]; }
+
+    int    status; double chi2; double x_final[14];
+    if (status1 == 0 || status1 == 1 || !kf_jet_swap_enabled) {
+        // Accept pass-1 unconditionally under POOL: swapping jet-symmetric priors
+        // would re-run the identical fit. Under SEP we only accept now if pass-1
+        // converged; otherwise fall through to the swap fallback below.
+        status = status1; chi2 = chi2_1;
+        for (int i = 0; i < 14; ++i) x_final[i] = x_1[i];
+    } else {
+        // Pass 2 (SEP only): swap jet1↔jet2 priors (momentum + theta + phi) and
+        // retry. Tests the alternative jet-to-prior pairing for events where the
+        // input pT-ordering disagrees with the one used when the priors were fitted.
+        std::swap(p_jet1_p_resp,      p_jet2_p_resp);
+        std::swap(p_jet1_theta_resol, p_jet2_theta_resol);
+        std::swap(p_jet1_phi_resol,   p_jet2_phi_resol);
+
+        int    status2 = migrad_with_simplex_fallback(x_default);
+        double chi2_2  = minimizer->MinValue();
+        double x_2[14];
+        { const double* xref = minimizer->X(); for (int i = 0; i < 14; ++i) x_2[i] = xref[i]; }
+
+        bool swap_conv = (status2 == 0 || status2 == 1);
+        // Prefer a converged swap; otherwise prefer whichever has lower chi².
+        bool keep_swap = swap_conv || (chi2_2 < chi2_1);
+        if (keep_swap) {
+            status = status2; chi2 = chi2_2;
+            for (int i = 0; i < 14; ++i) x_final[i] = x_2[i];
+            // Priors stay swapped → result extraction below uses them.
+        } else {
+            status = status1; chi2 = chi2_1;
+            for (int i = 0; i < 14; ++i) x_final[i] = x_1[i];
+            // Roll back the prior swap so result extraction uses the natural ones.
+            std::swap(p_jet1_p_resp,      p_jet2_p_resp);
+            std::swap(p_jet1_theta_resol, p_jet2_theta_resol);
+            std::swap(p_jet1_phi_resol,   p_jet2_phi_resol);
+        }
     }
 
-    // Accept status 0 ("minimum found") and 1 ("covariance forced positive-definite").
-    // The latter is common with non-Gaussian PDFs where the local Hessian estimate
-    // needs PD adjustment — the postfit values are still valid.
-    // Status 3 (EDM above tolerance) is the dominant residual failure with this fit;
-    // bumping max calls doesn't help (EDM-bound, not call-bound). Tolerance was
-    // loosened from 1e-6 to 1e-3 (Migrad default) to capture genuinely-converged events.
-    int status = minimizer->Status();
     result.status = status;
-    result.valid = (status == 0 || status == 1) ? 1 : 0;
-    result.chi2  = minimizer->MinValue();
-    int n_par = fit_gW ? 14 : KF_NDIM;
+    result.valid  = (status == 0 || status == 1) ? 1 : 0;
+    result.chi2   = chi2;
+    int n_par    = fit_gW ? 14 : KF_NDIM;
     // +1 constraint from the gW Gaussian prior when fit_gW=true.
     int n_constr = KF_N_CONSTR + (fit_gW ? 1 : 0);
     result.chi2_ndof = (n_constr > n_par) ? result.chi2 / float(n_constr - n_par) : -1.0f;
-    const double* x = minimizer->X();
-    result.mW = x[0]; result.gW = x[1];
-    result.s1 = _y2x(x[2],  kf_jet1_p_resp);
-    result.s2 = _y2x(x[3],  kf_jet2_p_resp);
-    result.sl = _y2x(x[4],  kf_lep_p_resp);
-    result.sn = _y2x(x[5],  kf_met_p_resp);
-    result.t1 = _y2x(x[6],  kf_jet1_theta_resol);
-    result.t2 = _y2x(x[7],  kf_jet2_theta_resol);
-    result.tn = _y2x(x[8],  kf_met_theta_resol);
-    result.p1 = _y2x(x[9],  kf_jet1_phi_resol);
-    result.p2 = _y2x(x[10], kf_jet2_phi_resol);
-    result.pn = _y2x(x[11], kf_met_phi_resol);
-    result.tl = _y2x(x[12], kf_lep_theta_resol);
-    result.pl = _y2x(x[13], kf_lep_phi_resol);
+    result.mW = x_final[0]; result.gW = x_final[1];
+    result.s1 = _y2x(x_final[2],  p_jet1_p_resp);
+    result.s2 = _y2x(x_final[3],  p_jet2_p_resp);
+    result.sl = _y2x(x_final[4],  kf_lep_p_resp);
+    result.sn = _y2x(x_final[5],  kf_met_p_resp);
+    result.t1 = _y2x(x_final[6],  p_jet1_theta_resol);
+    result.t2 = _y2x(x_final[7],  p_jet2_theta_resol);
+    result.tn = _y2x(x_final[8],  kf_met_theta_resol);
+    result.p1 = _y2x(x_final[9],  p_jet1_phi_resol);
+    result.p2 = _y2x(x_final[10], p_jet2_phi_resol);
+    result.pn = _y2x(x_final[11], kf_met_phi_resol);
+    result.tl = _y2x(x_final[12], kf_lep_theta_resol);
+    result.pl = _y2x(x_final[13], kf_lep_phi_resol);
 
     // Post-fit kinematics (shared — uses result fields filled above)
     TLorentzVector j1f = _vec_spherical(jet1_p/result.s1,    jet1_theta    - result.t1, jet1_phi    - result.p1);

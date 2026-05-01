@@ -26,6 +26,10 @@ KIN_FIT_METHOD  = "minuit"
 # True → fit gW as a free parameter with Gaussian prior σ = KF_GW_PRIOR_SIGMA_REL × KF_GW_FIXED;
 # False → pin gW = KF_GW_FIXED via Migrad FixVariable.
 KIN_FIT_FREE_GW = True
+# Jet-prior convention. "pool": jet1 and jet2 share the pooled prior — pass-1 covers
+# both pT-orderings, swap fallback off (~10-25% faster). "swap": separate per-jet
+# priors with jet1↔jet2 swap fallback on non-converged events.
+KIN_FIT_JET_PRIOR_MODE = "pool"
 
 # Run ONNX flavour tagging? Currently outputs are not consumed by any branch
 # in FULL_BRANCHES, but the helper is wired up here for future use.
@@ -129,7 +133,8 @@ class RDFanalysis:
         print(f"[treemaker step2] dataset={_dataset}  ecm={_ecm}")
         if str(_ecm) not in tc.AVAILABLE_ECM:
             raise ValueError(f"ecm={_ecm} parsed from '{_dataset}' not in AVAILABLE_ECM={tc.AVAILABLE_ECM}")
-        ROOT.gInterpreter.ProcessLine(f"FCCAnalyses::WWFunctions::setKinFitParams({_ecm});")
+        ROOT.gInterpreter.ProcessLine(
+            f'FCCAnalyses::WWFunctions::setKinFitParams({_ecm}, "{KIN_FIT_JET_PRIOR_MODE}");')
         ROOT.gInterpreter.ProcessLine(
             'std::cout << "[DEBUG step2] ECM from WWFunctions = " << FCCAnalyses::WWFunctions::ECM << std::endl;')
 
