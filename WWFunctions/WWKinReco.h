@@ -120,9 +120,23 @@ static constexpr double KF_MW_INIT = 80.419;
 static constexpr double KF_GW_FIXED = 2.049;
 static constexpr int    KF_NDIM    = 13;   // free parameters when gW is fixed (added tl, pl)
 // Number of constraint terms in chi2: 4 momentum-response + 8 angular-resolution
-// + 4 WW-system (Px,Py,Pz,M-ECM) + 2 BW. The phase-space factor is part of the
-// joint BW/PS density and is not counted separately.
+// + 4 WW-system (Px,Py,Pz,M-ECM) + 2 BW. When fit_gW=true a Gaussian prior on gW
+// adds +1 constraint, applied at chi2_ndof time.
 static constexpr int    KF_N_CONSTR = 18;
+
+// Gaussian prior on gW (only active when fit_gW=true).
+static constexpr double KF_GW_PRIOR_SIGMA_REL = 0.01;
+static constexpr double KF_GW_PRIOR_SIGMA     = KF_GW_PRIOR_SIGMA_REL * KF_GW_FIXED;
+static constexpr double KF_GW_PRIOR_INV_SIGMA = 1.0 / KF_GW_PRIOR_SIGMA;
+// std::log isn't constexpr until C++26, so this is a runtime const initialized once.
+inline const double KF_GW_PRIOR_LOG_NORM =
+        std::log(2.0 * M_PI * KF_GW_PRIOR_SIGMA * KF_GW_PRIOR_SIGMA);
+
+// −2·log G(gW; KF_GW_FIXED, KF_GW_PRIOR_SIGMA).
+static inline double _gw_prior_neg2logpdf(double gW) {
+    const double dgw = (gW - KF_GW_FIXED) * KF_GW_PRIOR_INV_SIGMA;
+    return dgw * dgw + KF_GW_PRIOR_LOG_NORM;
+}
 
 struct KinFitResult {
     float mW, gW;
@@ -342,7 +356,9 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
                            + dcb_neg2logpdf(pn, kf_met_phi_resol)
                            + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
 
-            return bw_term + cons + scale_pen + angular;
+            double gw_term = _gw_prior_neg2logpdf(gW);
+
+            return bw_term + cons + scale_pen + angular + gw_term;
         };
 
         // y-coords start at 0 → physical starts at prior μ for each nuisance param.
@@ -351,7 +367,8 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
         result.status = status;
         result.valid = (status == 0) ? 1 : 0;
         result.chi2  = fmin;
-        result.chi2_ndof = (KF_N_CONSTR > 14) ? fmin / float(KF_N_CONSTR - 14) : -1.0f;
+        // +1 constraint from the gW Gaussian prior.
+        result.chi2_ndof = (KF_N_CONSTR + 1 > 14) ? fmin / float(KF_N_CONSTR + 1 - 14) : -1.0f;
         result.mW = x0[0]; result.gW = x0[1];
         result.s1 = _y2x(x0[2],  kf_jet1_p_resp);
         result.s2 = _y2x(x0[3],  kf_jet2_p_resp);
@@ -542,7 +559,9 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                        + dcb_neg2logpdf(pn, kf_met_phi_resol)
                        + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
 
-        return bw_term + cons + scale_pen + angular;
+        double gw_term = fit_gW ? _gw_prior_neg2logpdf(gW) : 0.0;
+
+        return bw_term + cons + scale_pen + angular + gw_term;
     };
 
     std::function<double(const double*)> fObj = chi2fn;
@@ -608,7 +627,9 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.valid = (status == 0 || status == 1) ? 1 : 0;
     result.chi2  = minimizer->MinValue();
     int n_par = fit_gW ? 14 : KF_NDIM;
-    result.chi2_ndof = (KF_N_CONSTR > n_par) ? result.chi2 / float(KF_N_CONSTR - n_par) : -1.0f;
+    // +1 constraint from the gW Gaussian prior when fit_gW=true.
+    int n_constr = KF_N_CONSTR + (fit_gW ? 1 : 0);
+    result.chi2_ndof = (n_constr > n_par) ? result.chi2 / float(n_constr - n_par) : -1.0f;
     const double* x = minimizer->X();
     result.mW = x[0]; result.gW = x[1];
     result.s1 = _y2x(x[2],  kf_jet1_p_resp);

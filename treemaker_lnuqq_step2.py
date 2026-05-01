@@ -23,8 +23,9 @@ if _ecm_env:
 # "bfgs"   → custom BFGS, stack-only, no heap, template-inlined chi2
 #             (~50-150 evaluations, thread-safe without thread_local)
 KIN_FIT_METHOD  = "minuit"
-# True → fit gW as a free parameter (12-dim); False → fix gW = KF_GW_FIXED (11-dim)
-KIN_FIT_FREE_GW = False
+# True → fit gW as a free parameter with Gaussian prior σ = KF_GW_PRIOR_SIGMA_REL × KF_GW_FIXED;
+# False → pin gW = KF_GW_FIXED via Migrad FixVariable.
+KIN_FIT_FREE_GW = True
 
 # Run ONNX flavour tagging? Currently outputs are not consumed by any branch
 # in FULL_BRANCHES, but the helper is wired up here for future use.
