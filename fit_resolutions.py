@@ -32,7 +32,12 @@ _SQRT2   = math.sqrt(2.0)
 _LOG_MAX = math.log(np.finfo(np.float64).max)   # max safe float64 exponent ≈ 709.78
 _LOG_MIN = -_LOG_MAX
 
-os.makedirs("outputs/response/functions", exist_ok=True)
+# Output prefix is configurable via FIT_OUT_PREFIX so multiple fit_resolutions
+# invocations can run in parallel (each writing to its own subtree).
+OUT_PREFIX = os.environ.get("FIT_OUT_PREFIX", "outputs/response")
+FUNC_DIR   = f"{OUT_PREFIX}/functions"
+PLOTS_DIR  = f"{OUT_PREFIX}/plots"
+os.makedirs(FUNC_DIR, exist_ok=True)
 
 ECM_LIST    = [157, 160, 163]
 INFILE_TMPL = "outputs/treemaker/lnuqq/step1/semihad/wzp6_ee_munumuqq_noCut_ecm{ecm}.root"
@@ -42,8 +47,9 @@ CLIP_DEF  = (0.5, 99.5)
 # Jet/quark matching dR cut: only events with both jets matched to quarks
 # within DR_MAX feed the resolution-prior fits. Looser cuts admit
 # matching-failure tails into the priors and degrade kinfit convergence
-# (verified non-monotonically at dR ∈ {0.1, 0.15, 0.2}).
-DR_MAX = 0.1
+# (verified non-monotonically at dR ∈ {0.1, 0.15, 0.2}). Override via
+# FIT_DR_MAX env var (use a large value like 999 to effectively disable).
+DR_MAX = float(os.environ.get("FIT_DR_MAX", "0.1"))
 DR_BRANCHES = ("jet1_matched_q_dR", "jet2_matched_q_dR")
 
 # ── Per-branch configuration overrides ─────────────────────────────────────
@@ -701,7 +707,7 @@ class _NpEncoder(json.JSONEncoder):
 
 def process_ecm(ecm):
     INFILE   = INFILE_TMPL.format(ecm=ecm)
-    plot_dir = f"outputs/response/plots/ecm{ecm}"
+    plot_dir = f"{PLOTS_DIR}/ecm{ecm}"
     os.makedirs(plot_dir, exist_ok=True)
     print(f"\n{'='*60}\nECM {ecm} GeV  —  {INFILE}\n{'='*60}")
 
@@ -1064,8 +1070,8 @@ def process_ecm(ecm):
     print(f"  Jet comparison plots → {comp_dir}/")
 
     # ── JSON ──────────────────────────────────────────────────────────────────
-    os.makedirs("outputs/response/functions", exist_ok=True)
-    json_path = f"outputs/response/functions/dcb_results_ecm{ecm}.json"
+    os.makedirs(FUNC_DIR, exist_ok=True)
+    json_path = f"{FUNC_DIR}/dcb_results_ecm{ecm}.json"
     with open(json_path, "w") as fj:
         json.dump(results, fj, indent=2, cls=_NpEncoder)
 
@@ -1232,7 +1238,7 @@ def write_combined_header(all_results):
 
     lines += ["", "} // namespace WWFunctions", ""]
 
-    out_path = "outputs/response/functions/dcb_params.h"
+    out_path = f"{FUNC_DIR}/dcb_params.h"
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as fh:
         fh.write("\n".join(lines))
@@ -1243,4 +1249,4 @@ if __name__ == '__main__':
     with ProcessPoolExecutor(max_workers=len(ECM_LIST)) as pool:
         all_results = dict(pool.map(process_ecm, ECM_LIST))
     write_combined_header(all_results)
-    publish("outputs/response/plots", "resolutions")
+    publish(PLOTS_DIR, os.environ.get("FIT_PUBSUB", "resolutions"))

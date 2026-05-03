@@ -29,7 +29,7 @@ KIN_FIT_FREE_GW = True
 # Jet-prior convention. "pool": jet1 and jet2 share the pooled prior — pass-1 covers
 # both pT-orderings, swap fallback off (~10-25% faster). "swap": separate per-jet
 # priors with jet1↔jet2 swap fallback on non-converged events.
-KIN_FIT_JET_PRIOR_MODE = "swap"
+KIN_FIT_JET_PRIOR_MODE = os.environ.get("KF_JET_PRIOR_MODE", "swap")
 
 # Run ONNX flavour tagging? Currently outputs are not consumed by any branch
 # in FULL_BRANCHES, but the helper is wired up here for future use.
@@ -41,7 +41,8 @@ if channel not in ["lep", "semihad", "had"]:
 print(channel)
 
 prodTag      = "FCCee/winter2023/IDEA/"
-outputDir    = "outputs/treemaker/lnuqq/step2/{}".format(channel)
+outputDir    = os.environ.get("STEP2_OUTDIR",
+                              "outputs/treemaker/lnuqq/step2/{}".format(channel))
 includePaths = ["examples/functions.h", "WWFunctions/WWFunctions.h", "WWFunctions/WWKinReco.h"]
 
 all_branches = [
@@ -90,6 +91,7 @@ all_branches = [
     "kinfit_t1", "kinfit_t2", "kinfit_tn", "kinfit_tl",
     "kinfit_p1", "kinfit_p2", "kinfit_pn", "kinfit_pl",
     "kinfit_chi2", "kinfit_chi2_ndof", "kinfit_valid", "kinfit_status",
+    "kinfit_winner_pass", "kinfit_n_passes_run", "kinfit_priors_swapped",
 
     # ── misc derived ───────────────────────────────────────────────────
     "n_lep_reco", "n_reco_jets", "deltaM",

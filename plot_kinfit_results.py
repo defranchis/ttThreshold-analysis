@@ -24,7 +24,7 @@ from eos_publish import publish
 # ── Shared constants ─────────────────────────────────────────────────────────
 
 ECM_LIST    = [157, 160, 163]
-INDIR       = "outputs/treemaker/lnuqq/step2/semihad"
+INDIR       = os.environ.get("STEP2_INDIR", "outputs/treemaker/lnuqq/step2/semihad")
 INFILE_TMPL = INDIR + "/wzp6_ee_munumuqq_noCut_ecm{ecm}.root"
 JSON_TMPL   = "outputs/response/functions/dcb_results_ecm{ecm}.json"
 TREE_NAME   = "events"
@@ -143,7 +143,7 @@ def run_mW_overlay():
 
     plot_mW_ecm_comparison(trees)
     print(f"Saved ecm_comparison_*.[png|pdf]  →  {MW_OUTDIR}/")
-    publish(MW_OUTDIR, "mW_overlay")
+    publish(MW_OUTDIR, os.environ.get("MW_PUBSUB", "mW_overlay"))
 
 
 # =============================================================================
@@ -818,7 +818,7 @@ def run_kinfit_vars():
 
     plot_kinfit_ecm_comparison(all_data, all_json)
     print(f"\nDone. All plots in {KINFIT_OUTDIR}/")
-    publish(KINFIT_OUTDIR, "kinfit_vars")
+    publish(KINFIT_OUTDIR, os.environ.get("KINFIT_PUBSUB", "kinfit_vars"))
 
 
 # =============================================================================

@@ -194,6 +194,14 @@ struct KinFitResult {
                             //   BFGS: 0=converged, 1=max-iter/LS-fail).
                             //   −1 if early-returned without fitting (invalid input p).
     int   valid;            // currently (status == 0 || status == 1)
+    // Diagnostics: which of the 4 passes won and how many actually ran.
+    //   winner_pass: 1=Migrad-natural, 2=Migrad-swapped,
+    //                3=Simplex+Migrad-natural, 4=Simplex+Migrad-swapped.
+    //   n_passes_run: total passes executed before stopping (1..4).
+    //   priors_swapped: 1 if the winning pass used jet1↔jet2-swapped priors.
+    int   winner_pass;
+    int   n_passes_run;
+    int   priors_swapped;
     // Post-fit 4-vectors. All scalar projections (P, Pt, M, Px, ...) and the
     // Wlep/Whad/WW sums are derived in the consumer.
     TLorentzVector j1, j2, lep, nu;
@@ -411,6 +419,9 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
         result.status = status;
         result.valid = (status == 0) ? 1 : 0;
         result.chi2  = fmin;
+        result.winner_pass    = 1;
+        result.n_passes_run   = 1;
+        result.priors_swapped = 0;
         // +1 constraint from the gW Gaussian prior.
         result.chi2_ndof = (KF_N_CONSTR + 1 > 14) ? fmin / float(KF_N_CONSTR + 1 - 14) : -1.0f;
         result.mW = x0[0]; result.gW = x0[1];
@@ -495,6 +506,9 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
         result.status = status;
         result.valid = (status == 0) ? 1 : 0;
         result.chi2  = fmin;
+        result.winner_pass    = 1;
+        result.n_passes_run   = 1;
+        result.priors_swapped = 0;
         result.chi2_ndof = (KF_N_CONSTR > KF_NDIM) ? fmin / float(KF_N_CONSTR - KF_NDIM) : -1.0f;
         result.mW = x0[0];
         result.s1 = _y2x(x0[1],  kf_jet1_p_resp);
@@ -685,12 +699,13 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         std::swap(p_jet1_phi_resol,   p_jet2_phi_resol);
     };
 
-    struct PassResult { int status; double chi2; double x[14]; bool swapped; };
-    auto snapshot = [&](int s, bool swapped_now) {
+    struct PassResult { int status; double chi2; double x[14]; bool swapped; int pass_id; };
+    auto snapshot = [&](int s, bool swapped_now, int pass_id) {
         PassResult r{};
-        r.status  = s;
-        r.chi2    = minimizer->MinValue();
-        r.swapped = swapped_now;
+        r.status   = s;
+        r.chi2     = minimizer->MinValue();
+        r.swapped  = swapped_now;
+        r.pass_id  = pass_id;
         const double* xref = minimizer->X();
         for (int i = 0; i < 14; ++i) r.x[i] = xref[i];
         return r;
@@ -713,20 +728,24 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     // Stop as soon as a pass converges. With swap disabled (POOL priors are
     // jet-symmetric) the swap passes are skipped → Migrad → Simplex+Migrad on
     // natural priors only.
+    int n_passes_run = 1;
     bool priors_swapped = false;
-    PassResult best = snapshot(migrad_only(x_default), priors_swapped);
+    PassResult best = snapshot(migrad_only(x_default), priors_swapped, /*pass=*/1);
 
     if (!converged(best.status) && kf_jet_swap_enabled) {
         swap_jet_priors(); priors_swapped = true;
-        pick_better(best, snapshot(migrad_only(x_default), priors_swapped));
+        ++n_passes_run;
+        pick_better(best, snapshot(migrad_only(x_default), priors_swapped, /*pass=*/2));
     }
     if (!converged(best.status)) {
         if (priors_swapped) { swap_jet_priors(); priors_swapped = false; }
-        pick_better(best, snapshot(simplex_then_migrad(x_default), priors_swapped));
+        ++n_passes_run;
+        pick_better(best, snapshot(simplex_then_migrad(x_default), priors_swapped, /*pass=*/3));
     }
     if (!converged(best.status) && kf_jet_swap_enabled) {
         swap_jet_priors(); priors_swapped = true;
-        pick_better(best, snapshot(simplex_then_migrad(x_default), priors_swapped));
+        ++n_passes_run;
+        pick_better(best, snapshot(simplex_then_migrad(x_default), priors_swapped, /*pass=*/4));
     }
 
     // Sync in-scope priors to the winner's orientation — result extraction
@@ -737,9 +756,12 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     double chi2     = best.chi2;
     const double* x_final = best.x;
 
-    result.status = status;
-    result.valid  = (status == 0 || status == 1) ? 1 : 0;
-    result.chi2   = chi2;
+    result.status         = status;
+    result.valid          = (status == 0 || status == 1) ? 1 : 0;
+    result.chi2           = chi2;
+    result.winner_pass    = best.pass_id;
+    result.n_passes_run   = n_passes_run;
+    result.priors_swapped = best.swapped ? 1 : 0;
     int n_par    = fit_gW ? 14 : KF_NDIM;
     // +1 constraint from the gW Gaussian prior when fit_gW=true.
     int n_constr = KF_N_CONSTR + (fit_gW ? 1 : 0);
