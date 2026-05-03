@@ -9,6 +9,9 @@ __pycache__/
 # Local helper scripts (ssh-driven pipeline wrappers)
 .run_*.sh
 
+# Claude's throwaway diagnostics / launchers — never tracked
+scripts_local/
+
 # C extensions
 *.so
 
