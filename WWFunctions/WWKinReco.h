@@ -269,6 +269,7 @@ struct KinFitResult {
     int   winner_pass;
     int   n_passes_run;
     int   priors_swapped;
+    float edm;              // estimated distance to minimum at convergence (Minuit2)
     // Post-fit 4-vectors. All scalar projections (P, Pt, M, Px, ...) and the
     // Wlep/Whad/WW sums are derived in the consumer.
     TLorentzVector j1, j2, lep, nu;
@@ -811,11 +812,12 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         std::swap(p_jet2_phi_resol,   p_jet2_phi_resol_alt);
     };
 
-    struct PassResult { int status; double chi2; double x[14]; bool swapped; int pass_id; };
+    struct PassResult { int status; double chi2; double edm; double x[14]; bool swapped; int pass_id; };
     auto snapshot = [&](int s, bool swapped_now, int pass_id) {
         PassResult r{};
         r.status   = s;
         r.chi2     = minimizer->MinValue();
+        r.edm      = minimizer->Edm();
         r.swapped  = swapped_now;
         r.pass_id  = pass_id;
         const double* xref = minimizer->X();
@@ -860,6 +862,22 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         pick_better(best, snapshot(simplex_then_migrad(x_default), priors_swapped, /*pass=*/4));
     }
 
+    // Pass 5: Hesse + re-Migrad recovery from the best.x found so far. Refreshes
+    // Hessian numerically (breaks stale-Davidon plateaus). Also fires when the
+    // Davidon estimate is NaN/Inf — Hesse recomputes from scratch by finite
+    // differences and doesn't depend on the broken estimate.
+    if (!converged(best.status) && (!std::isfinite(best.edm) || best.edm < 1.0)) {
+        if (priors_swapped != best.swapped) {
+            swap_jet_priors();
+            priors_swapped = best.swapped;
+        }
+        configure(minimizer.get(), best.x, /*with_strategy=*/true);
+        minimizer->Hesse();
+        minimizer->Minimize();
+        ++n_passes_run;
+        pick_better(best, snapshot(minimizer->Status(), priors_swapped, /*pass=*/5));
+    }
+
     // Sync in-scope priors to the winner's orientation — result extraction
     // below reads them by reference.
     if (priors_swapped != best.swapped) swap_jet_priors();
@@ -874,6 +892,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.winner_pass    = best.pass_id;
     result.n_passes_run   = n_passes_run;
     result.priors_swapped = best.swapped ? 1 : 0;
+    result.edm            = static_cast<float>(best.edm);
     int n_par    = fit_gW ? 14 : KF_NDIM;
     // +1 constraint from the gW Gaussian prior when fit_gW=true.
     int n_constr = KF_N_CONSTR + (fit_gW ? 1 : 0);
