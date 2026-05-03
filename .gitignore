@@ -5,6 +5,10 @@ __pycache__/
 *.txt~
 *.py~
 *.root
+
+# Local helper scripts (ssh-driven pipeline wrappers)
+.run_*.sh
+
 # C extensions
 *.so
 
