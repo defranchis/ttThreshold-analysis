@@ -20,7 +20,9 @@ prodTag      = "FCCee/winter2023/IDEA/"
 outputDir    = "outputs/treemaker/lnuqq/step1/{}".format(channel)
 includePaths = ["examples/functions.h", "WWFunctions/WWFunctions.h"]
 
-# Branches consumed by fit_dcb_resolutions.py --kinfit-only.
+# Branches consumed by fit_resolutions.py + matching/diagnostic branches
+# (jet/lep/MET gen↔reco dR). The dR cut is applied inside fit_resolutions on
+# the loaded arrays, so step1 keeps every event.
 all_branches = [
     "jet1_p_resp", "jet2_p_resp", "lep_p_resp", "met_p_resp",
     "jet1_theta_resol", "jet2_theta_resol", "jet1_phi_resol", "jet2_phi_resol",
@@ -28,6 +30,8 @@ all_branches = [
     "met_theta_resol", "met_phi_resol",
     "gen_WW_px", "gen_WW_py", "gen_WW_pz",
     "gen_WW_m", "gen_WW_m_minus_ecm",
+    "jet1_matched_q_dR", "jet2_matched_q_dR",
+    "lep_gen_reco_dR", "met_gen_reco_dR",
 ]
 
 # Module-level helper, set inside analysers(); fccanalysis reads it from here
@@ -62,6 +66,7 @@ class RDFanalysis:
 
         df = tc.define_reco_W_WW(df)
         df = tc.match_jets_to_quarks(df)
+        df = tc.define_gen_reco_dR(df)
         df = tc.define_resolutions(df)
 
         print(f"\n[cutflow] dataset={_dataset}")

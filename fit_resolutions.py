@@ -39,6 +39,13 @@ INFILE_TMPL = "outputs/treemaker/lnuqq/step1/semihad/wzp6_ee_munumuqq_noCut_ecm{
 NBINS_DEF   = 100
 CLIP_DEF  = (0.5, 99.5)
 
+# Jet/quark matching dR cut: only events with both jets matched to quarks
+# within DR_MAX feed the resolution-prior fits. Looser cuts admit
+# matching-failure tails into the priors and degrade kinfit convergence
+# (verified non-monotonically at dR ∈ {0.1, 0.15, 0.2}).
+DR_MAX = 0.1
+DR_BRANCHES = ("jet1_matched_q_dR", "jet2_matched_q_dR")
+
 # ── Per-branch configuration overrides ─────────────────────────────────────
 BRANCH_CONFIG = {
     # Jet p response: detector core + wide-radiation tail → DCB+G.
@@ -707,7 +714,27 @@ def process_ecm(ecm):
         missing  = [b for b in KINFIT_BRANCHES if b not in available]
         if missing:
             print(f"WARNING: {len(missing)} kinfit branch(es) not in tree: {missing}")
-        data_all = tree.arrays(branches, library="np")
+        # Read kinfit branches + the dR branches needed for the matching cut.
+        read_branches = list(branches)
+        for b in DR_BRANCHES:
+            if b in available and b not in read_branches:
+                read_branches.append(b)
+        data_all = tree.arrays(read_branches, library="np")
+
+        # Apply jet/quark matching cut: drop events where either jet's matched
+        # quark is farther than DR_MAX. The cut lives here (rather than in
+        # step1) so the saved tree retains the full dR distribution for
+        # diagnostics.
+        if all(b in data_all for b in DR_BRANCHES):
+            d1 = _flatten_raw(data_all[DR_BRANCHES[0]])
+            d2 = _flatten_raw(data_all[DR_BRANCHES[1]])
+            mask = (d1 < DR_MAX) & (d2 < DR_MAX)
+            n_in, n_out = mask.size, int(mask.sum())
+            print(f"  dR cut (<{DR_MAX}): {n_out}/{n_in} = {100.*n_out/n_in:.2f}%")
+            for b in branches:
+                data_all[b] = _flatten_raw(data_all[b])[mask]
+        else:
+            print(f"  WARNING: dR branches missing, skipping cut")
 
         # Build virtual jet1+jet2 combined branches for the comparison plot.
         for cname, (b1, b2) in COMBINED_BRANCHES.items():

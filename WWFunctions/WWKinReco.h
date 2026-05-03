@@ -653,73 +653,89 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         ROOT::Math::Factory::CreateMinimizer("Minuit2", "Migrad")
     );
 
-    // Migrad → Simplex+Migrad fallback. Returns Migrad's final status code.
+    // Two minimizer "modes": cheap Migrad-only, and Simplex pre-pass + Migrad.
     // Status 0 = minimum found; 1 = covariance forced positive-definite (still
     // valid postfit); 3 = EDM > tol (the dominant residual failure). Tolerance
     // was loosened from 1e-6 to 1e-3 (Migrad default). The Simplex pre-pass
-    // helps descend through non-quadratic regions; ~2× cost is paid only for
-    // events Migrad couldn't certify alone.
-    auto migrad_with_simplex_fallback = [&](const double* x_init) {
+    // helps descend through non-quadratic regions at ~2× cost.
+    auto migrad_only = [&](const double* x_init) {
         configure(minimizer.get(), x_init, /*with_strategy=*/true);
         minimizer->Minimize();
         minimizer->Minimize();
-        int s = minimizer->Status();
-        if (s != 0 && s != 1) {
-            std::unique_ptr<ROOT::Math::Minimizer> simplex(
-                ROOT::Math::Factory::CreateMinimizer("Minuit2", "Simplex")
-            );
-            configure(simplex.get(), x_init, /*with_strategy=*/false);
-            simplex->Minimize();
-            configure(minimizer.get(), simplex->X(), /*with_strategy=*/true);
-            minimizer->Minimize();
-            minimizer->Minimize();
-            s = minimizer->Status();
-        }
-        return s;
+        return minimizer->Status();
+    };
+    auto simplex_then_migrad = [&](const double* x_init) {
+        std::unique_ptr<ROOT::Math::Minimizer> simplex(
+            ROOT::Math::Factory::CreateMinimizer("Minuit2", "Simplex")
+        );
+        configure(simplex.get(), x_init, /*with_strategy=*/false);
+        simplex->Minimize();
+        configure(minimizer.get(), simplex->X(), /*with_strategy=*/true);
+        minimizer->Minimize();
+        minimizer->Minimize();
+        return minimizer->Status();
     };
 
-    // Pass 1: natural (kf_jet1, kf_jet2) prior assignment.
-    int    status1 = migrad_with_simplex_fallback(x_default);
-    double chi2_1  = minimizer->MinValue();
-    double x_1[14];
-    { const double* xref = minimizer->X(); for (int i = 0; i < 14; ++i) x_1[i] = xref[i]; }
-
-    int    status; double chi2; double x_final[14];
-    if (status1 == 0 || status1 == 1 || !kf_jet_swap_enabled) {
-        // Accept pass-1 unconditionally under POOL: swapping jet-symmetric priors
-        // would re-run the identical fit. Under SEP we only accept now if pass-1
-        // converged; otherwise fall through to the swap fallback below.
-        status = status1; chi2 = chi2_1;
-        for (int i = 0; i < 14; ++i) x_final[i] = x_1[i];
-    } else {
-        // Pass 2 (SEP only): swap jet1↔jet2 priors (momentum + theta + phi) and
-        // retry. Tests the alternative jet-to-prior pairing for events where the
-        // input pT-ordering disagrees with the one used when the priors were fitted.
+    // Toggle the jet1↔jet2 prior assignment (momentum + theta + phi). Tests the
+    // alternative jet-to-prior pairing for events whose pT-ordering disagrees
+    // with the one used when the priors were fitted.
+    auto swap_jet_priors = [&]() {
         std::swap(p_jet1_p_resp,      p_jet2_p_resp);
         std::swap(p_jet1_theta_resol, p_jet2_theta_resol);
         std::swap(p_jet1_phi_resol,   p_jet2_phi_resol);
+    };
 
-        int    status2 = migrad_with_simplex_fallback(x_default);
-        double chi2_2  = minimizer->MinValue();
-        double x_2[14];
-        { const double* xref = minimizer->X(); for (int i = 0; i < 14; ++i) x_2[i] = xref[i]; }
+    struct PassResult { int status; double chi2; double x[14]; bool swapped; };
+    auto snapshot = [&](int s, bool swapped_now) {
+        PassResult r{};
+        r.status  = s;
+        r.chi2    = minimizer->MinValue();
+        r.swapped = swapped_now;
+        const double* xref = minimizer->X();
+        for (int i = 0; i < 14; ++i) r.x[i] = xref[i];
+        return r;
+    };
+    auto converged = [](int s) { return s == 0 || s == 1; };
+    // Converged beats non-converged; otherwise lower chi² wins.
+    auto pick_better = [&](PassResult& best, const PassResult& cand) {
+        bool ob = converged(best.status), oc = converged(cand.status);
+        if (oc && !ob)             { best = cand; return; }
+        if (!oc && ob)             return;
+        if (cand.chi2 < best.chi2) best = cand;
+    };
 
-        bool swap_conv = (status2 == 0 || status2 == 1);
-        // Prefer a converged swap; otherwise prefer whichever has lower chi².
-        bool keep_swap = swap_conv || (chi2_2 < chi2_1);
-        if (keep_swap) {
-            status = status2; chi2 = chi2_2;
-            for (int i = 0; i < 14; ++i) x_final[i] = x_2[i];
-            // Priors stay swapped → result extraction below uses them.
-        } else {
-            status = status1; chi2 = chi2_1;
-            for (int i = 0; i < 14; ++i) x_final[i] = x_1[i];
-            // Roll back the prior swap so result extraction uses the natural ones.
-            std::swap(p_jet1_p_resp,      p_jet2_p_resp);
-            std::swap(p_jet1_theta_resol, p_jet2_theta_resol);
-            std::swap(p_jet1_phi_resol,   p_jet2_phi_resol);
-        }
+    // Pass order (when swap is enabled, i.e. SEP priors): try cheap Migrad over
+    // both prior orderings before paying the ~2× Simplex cost.
+    //   1. Migrad, natural
+    //   2. Migrad, swapped
+    //   3. Simplex+Migrad, natural
+    //   4. Simplex+Migrad, swapped
+    // Stop as soon as a pass converges. With swap disabled (POOL priors are
+    // jet-symmetric) the swap passes are skipped → Migrad → Simplex+Migrad on
+    // natural priors only.
+    bool priors_swapped = false;
+    PassResult best = snapshot(migrad_only(x_default), priors_swapped);
+
+    if (!converged(best.status) && kf_jet_swap_enabled) {
+        swap_jet_priors(); priors_swapped = true;
+        pick_better(best, snapshot(migrad_only(x_default), priors_swapped));
     }
+    if (!converged(best.status)) {
+        if (priors_swapped) { swap_jet_priors(); priors_swapped = false; }
+        pick_better(best, snapshot(simplex_then_migrad(x_default), priors_swapped));
+    }
+    if (!converged(best.status) && kf_jet_swap_enabled) {
+        swap_jet_priors(); priors_swapped = true;
+        pick_better(best, snapshot(simplex_then_migrad(x_default), priors_swapped));
+    }
+
+    // Sync in-scope priors to the winner's orientation — result extraction
+    // below reads them by reference.
+    if (priors_swapped != best.swapped) swap_jet_priors();
+
+    int    status   = best.status;
+    double chi2     = best.chi2;
+    const double* x_final = best.x;
 
     result.status = status;
     result.valid  = (status == 0 || status == 1) ? 1 : 0;

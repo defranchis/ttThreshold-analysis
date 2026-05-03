@@ -33,4 +33,7 @@ python3 plot_mW_overlay.py
 echo "=== Plot: kinfit variables ==="
 python3 plot_kinfit_vars.py
 
+echo "=== Plot: kinfit results ==="
+python3 plot_kinfit_results.py
+
 echo "=== Done ==="

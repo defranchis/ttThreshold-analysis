@@ -67,6 +67,10 @@ def cluster_jets(df, channel):
     df = helper.define(df)
     df = df.Define("jets_p4",
         f"JetConstituentsUtils::compute_tlv_jets({helper.jets})")
+    # ExclusiveJetClusteringHelper passes arg_sorted=1 to clustering_ee_kt → jets
+    # are returned E-sorted (descending), not pT-sorted. jet1 = highest-E, jet2 =
+    # second-highest-E. For WW at √s ≈ 2·mW, leading-E ≈ leading-pT in most
+    # events, but they can disagree for forward/asymmetric configurations.
     df = df.Define("jet1", "jets_p4[0]")
     df = df.Define("jet2", "jets_p4[1]")
     df = df.Define("n_reco_jets", "(int)jets_p4.size()")
@@ -210,6 +214,9 @@ def match_jets_to_quarks(df):
     df = df.Define("jet1_matched_q_p4", "matched_gen_quarks.first")
     df = df.Define("jet2_matched_q_p4", "matched_gen_quarks.second")
 
+    df = df.Define("jet1_matched_q_dR", "(double)jet1.DeltaR(jet1_matched_q_p4)")
+    df = df.Define("jet2_matched_q_dR", "(double)jet2.DeltaR(jet2_matched_q_p4)")
+
     df = df.Define("gen_quark1_p",        "jet1_matched_q_p4.P()")
     df = df.Define("gen_quark1_pt",       "jet1_matched_q_p4.Pt()")
     df = df.Define("gen_quark1_theta",    "jet1_matched_q_p4.Theta()")
@@ -222,6 +229,19 @@ def match_jets_to_quarks(df):
     df = df.Define("gen_quark2_phi",      "jet2_matched_q_p4.Phi()")
     df = df.Define("gen_quark2_eta",      "jet2_matched_q_p4.Eta()")
     df = df.Define("gen_quark2_costheta", "jet2_matched_q_p4.CosTheta()")
+    return df
+
+
+def define_gen_reco_dR(df):
+    """gen↔reco angular distance for the lepton and (reco MET vs gen ν).
+
+    Diagnostic branches; not used by the kinfit but useful for resolution
+    studies and matching-quality plots.
+    """
+    df = df.Define("lep_gen_reco_dR",
+        "(double)Isoleps_p4_reco.DeltaR(lep_p4_gen)")
+    df = df.Define("met_gen_reco_dR",
+        "(double)missing_p_p4.DeltaR(nu_p4_gen)")
     return df
 
 

@@ -29,7 +29,7 @@ KIN_FIT_FREE_GW = True
 # Jet-prior convention. "pool": jet1 and jet2 share the pooled prior — pass-1 covers
 # both pT-orderings, swap fallback off (~10-25% faster). "swap": separate per-jet
 # priors with jet1↔jet2 swap fallback on non-converged events.
-KIN_FIT_JET_PRIOR_MODE = "pool"
+KIN_FIT_JET_PRIOR_MODE = "swap"
 
 # Run ONNX flavour tagging? Currently outputs are not consumed by any branch
 # in FULL_BRANCHES, but the helper is wired up here for future use.
@@ -94,6 +94,7 @@ all_branches = [
     # ── misc derived ───────────────────────────────────────────────────
     "n_lep_reco", "n_reco_jets", "deltaM",
     "d_12", "d_32",
+    "jet1_matched_q_dR", "jet2_matched_q_dR",
 ]
 
 # ── ONNX flavour-tagging model (loaded only if RUN_FLAVOUR_TAGGING) ─────────
@@ -176,8 +177,20 @@ class RDFanalysis:
 
         df = tc.run_kinfit(df, method=KIN_FIT_METHOD, free_gw=KIN_FIT_FREE_GW)
 
+        # Diagnostic (not enforced): count events that would pass a dR<0.1
+        # jet/quark matching cut. Side count, evaluated in the same event loop
+        # as Report() below.
+        n_total_lazy = df.Count()
+        n_match_lazy = df.Filter(
+            "jet1_matched_q_dR < 0.1 && jet2_matched_q_dR < 0.1").Count()
+
         print(f"\n[cutflow] dataset={_dataset}")
         df.Report().Print()
+        n_total = n_total_lazy.GetValue()
+        n_match = n_match_lazy.GetValue()
+        frac = (n_match / n_total) if n_total else 0.0
+        print(f"  [diag] jet/quark dR<0.1 (not enforced): "
+              f"{n_match}/{n_total} ({100*frac:.2f}%)")
         print()
 
         return df
