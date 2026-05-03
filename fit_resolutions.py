@@ -16,6 +16,11 @@ Outputs (per ECM)
 """
 
 import os, json, math, warnings
+# Pin BLAS thread pools to 1 BEFORE numpy is imported. The binned-prior pass
+# spawns a 24-process inner×outer pool; without this each worker would also
+# spawn (#cores) BLAS threads → severe oversubscription.
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import uproot
@@ -51,6 +56,36 @@ CLIP_DEF  = (0.5, 99.5)
 # FIT_DR_MAX env var (use a large value like 999 to effectively disable).
 DR_MAX = float(os.environ.get("FIT_DR_MAX", "0.1"))
 DR_BRANCHES = ("jet1_matched_q_dR", "jet2_matched_q_dR")
+
+# Reco-kinematics branches loaded alongside resolutions to drive per-bin priors
+# (and masked by the same dR cut). Required by BIN_CONFIG.
+BIN_VAR_BRANCHES = ("reco_jet1_p", "reco_jet2_p", "reco_lep_p",
+                    "reco_jet1_costheta", "reco_jet2_costheta")
+
+# Equal-occupancy bin count per binned branch.
+N_BINS_PRIOR = 5
+
+# Per-branch binning configuration: map resolution branch → binning variable(s).
+# A 1-tuple names a single reco-kinematics branch; a 2-tuple is concat'd to
+# match the pooled jet1+jet2 resolution branches (jet_*_resol).  *_costheta
+# values are folded via np.abs(...) before binning to fold forward/backward.
+# Jet/lep resolutions follow the resol_vs_kin study (see project memory):
+#   p_resp / θ resolution → bin on object p
+#   φ resolution          → jets on |cosθ| (1/sinθ); lep on p (track scaling)
+BIN_CONFIG = {
+    "jet1_p_resp":      ("reco_jet1_p",),
+    "jet2_p_resp":      ("reco_jet2_p",),
+    "jet_p_resp":       ("reco_jet1_p", "reco_jet2_p"),
+    "jet1_theta_resol": ("reco_jet1_p",),
+    "jet2_theta_resol": ("reco_jet2_p",),
+    "jet_theta_resol":  ("reco_jet1_p", "reco_jet2_p"),
+    "jet1_phi_resol":   ("reco_jet1_costheta",),
+    "jet2_phi_resol":   ("reco_jet2_costheta",),
+    "jet_phi_resol":    ("reco_jet1_costheta", "reco_jet2_costheta"),
+    "lep_p_resp":       ("reco_lep_p",),
+    "lep_theta_resol":  ("reco_lep_p",),
+    "lep_phi_resol":    ("reco_lep_p",),
+}
 
 # ── Per-branch configuration overrides ─────────────────────────────────────
 BRANCH_CONFIG = {
@@ -705,6 +740,151 @@ class _NpEncoder(json.JSONEncoder):
         return super().default(o)
 
 
+def _fit_bin_task(args):
+    """Module-level task wrapper for ProcessPoolExecutor (must be picklable)."""
+    bname, ibin, vals_subset, ecm = args
+    return bname, ibin, _fit_one(bname, vals_subset, ecm)
+
+
+def _fit_one(bname, vals_in, ecm):
+    """Fit a single histogram of `vals_in` for branch `bname` and return a
+    params dict with model, parameters, chi2_ndof, fit_ok, norm. No plotting.
+    Returns None if the slice is too sparse to fit. Mirrors the inline fit
+    dispatch in process_ecm — used for per-bin (binned-prior) fits.
+    """
+    cfg              = BRANCH_CONFIG.get(bname, {})
+    model            = cfg.get("model", "dcb")
+    nbins            = cfg.get("nbins", NBINS_DEF)
+    clip_lo, clip_hi = cfg.get("clip", CLIP_DEF)
+
+    vals = np.asarray(vals_in)
+    vals = vals[np.isfinite(vals)]
+    if len(vals) < 100:
+        return None
+
+    lo_p, hi_p = np.percentile(vals, [clip_lo, clip_hi])
+    vals_c = vals[(vals >= lo_p) & (vals <= hi_p)]
+
+    counts, edges = np.histogram(vals_c, bins=nbins)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    mask    = counts > 0
+
+    mu0  = float(centers[np.argmax(counts)])
+    sig0 = float(median_abs_deviation(vals_c, scale="normal"))
+
+    if model == "dcber2g":
+        popt, pcov, fit_ok, chi2 = fit_dcb_expright2g(centers[mask], counts[mask], mu0, sig0)
+        _ndof_est = max(int(mask.sum()) - 10, 1)
+        if popt is None or chi2 / _ndof_est > 5.0:
+            popt2, _, fit_ok2, chi2_2 = fit_dcb_expright2g_iminuit(centers[mask], counts[mask], mu0, sig0)
+            if popt2 is not None and (popt is None or chi2_2 < chi2):
+                popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
+        nparams = 10
+    elif model == "dcbgb":
+        popt, pcov, fit_ok, chi2 = fit_dcb_gaussbox_iminuit(centers[mask], counts[mask], mu0, sig0)
+        _ndof_est = max(int(mask.sum()) - 10, 1)
+        if popt is None or chi2 / _ndof_est > 3.0:
+            popt2, pcov2, fit_ok2, chi2_2 = fit_dcb_gaussbox(centers[mask], counts[mask], mu0, sig0)
+            if popt2 is not None and (popt is None or chi2_2 < chi2):
+                popt, pcov, fit_ok, chi2 = popt2, pcov2, fit_ok2, chi2_2
+        nparams = 10
+    elif model == "dcb2g":
+        popt, pcov, fit_ok, chi2 = fit_dcb2g(centers[mask], counts[mask], mu0, sig0)
+        _ndof_est = max(int(mask.sum()) - 10, 1)
+        # Lower threshold (2.5 vs 5.0) to give iminuit a shot at narrow-core
+        # distributions where curve_fit settles in a shallow secondary minimum.
+        if popt is None or chi2 / _ndof_est > 2.5:
+            popt2, _, fit_ok2, chi2_2 = fit_dcb2g_iminuit(centers[mask], counts[mask], mu0, sig0)
+            if popt2 is not None and chi2_2 < chi2:
+                popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
+        nparams = 10
+    elif model == "expleft2g":
+        constrain_mu0 = cfg.get("fix_mu0", False)
+        popt, pcov, fit_ok, chi2 = fit_dcb_expleft2g(centers[mask], counts[mask], mu0, sig0, constrain_mu0=constrain_mu0)
+        _ndof_est = max(int(mask.sum()) - 10, 1)
+        if popt is None or chi2 / _ndof_est > 3.0:
+            popt2, _, fit_ok2, chi2_2 = fit_dcb_expleft2g_iminuit(centers[mask], counts[mask], mu0, sig0, constrain_mu0=constrain_mu0)
+            if popt2 is not None and (popt is None or chi2_2 < chi2):
+                popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
+        nparams = 10
+    else:
+        popt, pcov, fit_ok, chi2 = fit_dcb(centers[mask], counts[mask], mu0, sig0)
+        nparams = 7
+
+    ndof      = max(int(mask.sum()) - nparams, 1)
+    chi2_ndof = chi2 / ndof
+
+    if popt is None:
+        # Fallback (rarely hit for a per-bin slice; mirrors the integrated path).
+        popt = [float(counts.max()), mu0, sig0, 5., 100., 5., 100.]
+        if model == "dcber2g":
+            _s = max((float(centers[-1]) - mu0) * 0.4, 0.15)
+            popt = [float(counts.max()), mu0, _s, 0.5, 2.0, 1.5, 5.0, 0.05, mu0 - 4*_s, 6*_s]
+        elif model == "dcbgb":
+            x_span = 0.5 * (centers[-1] - centers[0])
+            popt += [0.01, x_span * 0.8, sig0 * 0.2]
+        elif model in ("dcb2g", "expleft2g"):
+            popt += [0.01, mu0, sig0 * 5]
+        fit_ok    = False
+        chi2_ndof = float("inf")
+
+    if model == "dcber2g":
+        N_f, mu_c, sc, aL, nL, aR, kR, fw, muw, sw = popt
+        N_f, sc, aL, nL, aR, kR, fw, sw = abs(N_f), abs(sc), abs(aL), abs(nL), abs(aR), abs(kR), abs(fw), abs(sw)
+        res = dict(model="dcber2g", mu=float(mu_c), sigma=float(sc),
+                   aL=float(aL), nL=float(nL), aR=float(aR), kR=float(kR),
+                   f_wide=float(fw), mu_wide=float(muw), sigma_wide=float(sw))
+        yfn = lambda x, _N=N_f, _mc=float(mu_c), _sc=float(sc), _aL=float(aL), _nL=float(nL), _aR=float(aR), _kR=float(kR), _fw=float(fw), _mw=float(muw), _sw=float(sw): \
+            dcb_expright_gauss(x, _N, _mc, _sc, _aL, _nL, _aR, _kR, _fw, _mw, _sw)
+    elif model == "dcbgb":
+        N_f, mu_c, sc, aL, nL, aR, nR, fw, p_max, sb = popt
+        N_f, sc, aL, nL, aR, nR, fw, p_max, sb = abs(N_f), abs(sc), abs(aL), abs(nL), abs(aR), abs(nR), abs(fw), abs(p_max), abs(sb)
+        res = dict(model="dcbgb", mu=float(mu_c), sigma=float(sc),
+                   aL=float(aL), nL=float(nL), aR=float(aR), nR=float(nR),
+                   f_wide=float(fw), p_max=float(p_max), sigma_box=float(sb))
+        yfn = lambda x, _N=N_f, _mc=float(mu_c), _sc=float(sc), _aL=float(aL), _nL=float(nL), _aR=float(aR), _nR=float(nR), _fw=float(fw), _pm=float(p_max), _sb=float(sb): \
+            dcb_gaussbox(x, _N, _mc, _sc, _aL, _nL, _aR, _nR, _fw, _pm, _sb)
+    elif model == "dcb2g":
+        N_f, mu_c, sc, aL, nL, aR, nR, fw, muw, sw = popt
+        N_f, sc, aL, nL, aR, nR, fw, sw = abs(N_f), abs(sc), abs(aL), abs(nL), abs(aR), abs(nR), abs(fw), abs(sw)
+        res = dict(model="dcb2g", mu=float(mu_c), sigma=float(sc),
+                   aL=float(aL), nL=float(nL), aR=float(aR), nR=float(nR),
+                   f_wide=float(fw), mu_wide=float(muw), sigma_wide=float(sw))
+        yfn = lambda x, _N=N_f, _mc=float(mu_c), _sc=float(sc), _aL=float(aL), _nL=float(nL), _aR=float(aR), _nR=float(nR), _fw=float(fw), _mw=float(muw), _sw=float(sw): \
+            dcb_gauss(x, _N, _mc, _sc, _aL, _nL, _aR, _nR, _fw, _mw, _sw)
+    elif model == "expleft2g":
+        N_f, mu_c, sc, aL, kL, aR, nR, fw, muw, sw = popt
+        N_f, sc, aL, kL, aR, nR, fw, sw = abs(N_f), abs(sc), abs(aL), abs(kL), abs(aR), abs(nR), abs(fw), abs(sw)
+        res = dict(model="expleft2g", mu=float(mu_c), sigma=float(sc),
+                   aL=float(aL), kL=float(kL), aR=float(aR), nR=float(nR),
+                   f_wide=float(fw), mu_wide=float(muw), sigma_wide=float(sw))
+        yfn = lambda x, _N=N_f, _mc=float(mu_c), _sc=float(sc), _aL=float(aL), _kL=float(kL), _aR=float(aR), _nR=float(nR), _fw=float(fw), _mw=float(muw), _sw=float(sw): \
+            dcb_expleft_gauss(x, _N, _mc, _sc, _aL, _kL, _aR, _nR, _fw, _mw, _sw)
+    else:
+        N_f, mu_f, sf, aL, nL, aR, nR = popt
+        N_f, sf, aL, nL, aR, nR = abs(N_f), abs(sf), abs(aL), abs(nL), abs(aR), abs(nR)
+        res = dict(model="dcb", mu=float(mu_f), sigma=float(sf),
+                   aL=float(aL), nL=float(nL), aR=float(aR), nR=float(nR))
+        yfn = lambda x, _N=N_f, _m=float(mu_f), _s=float(sf), _aL=float(aL), _nL=float(nL), _aR=float(aR), _nR=float(nR): \
+            dcb(x, _N, _m, _s, _aL, _nL, _aR, _nR)
+
+    res["chi2_ndof"] = round(float(chi2_ndof), 3)
+    res["fit_ok"]    = bool(fit_ok)
+
+    # Norm: integrate the unnormalised yfn (which carries N_f) over ±10·max(αL,αR)·σ
+    # plus any wide-Gaussian span, then divide by N_f to get the unit-area shape.
+    _sg = res.get("sigma", 1.0)
+    _half = 10.0 * max(abs(res.get("aL", 2.0)), abs(res.get("aR", 2.0)), 1.0) * _sg
+    _mu_ref = res["mu"]
+    if "mu_wide" in res and "sigma_wide" in res:
+        _half = max(_half, abs(res["mu_wide"] - _mu_ref) + 10.0 * abs(res["sigma_wide"]))
+    _integ, _ = _quad(lambda x: yfn(x) / float(abs(N_f)),
+                      _mu_ref - _half, _mu_ref + _half,
+                      limit=500, epsrel=1e-6)
+    res["norm"] = float(1.0 / max(_integ, 1e-300))
+    return res
+
+
 def process_ecm(ecm):
     INFILE   = INFILE_TMPL.format(ecm=ecm)
     plot_dir = f"{PLOTS_DIR}/ecm{ecm}"
@@ -720,9 +900,13 @@ def process_ecm(ecm):
         missing  = [b for b in KINFIT_BRANCHES if b not in available]
         if missing:
             print(f"WARNING: {len(missing)} kinfit branch(es) not in tree: {missing}")
-        # Read kinfit branches + the dR branches needed for the matching cut.
+        # Read kinfit branches + the dR branches needed for the matching cut +
+        # the reco kinematics branches used to drive per-bin priors.
         read_branches = list(branches)
         for b in DR_BRANCHES:
+            if b in available and b not in read_branches:
+                read_branches.append(b)
+        for b in BIN_VAR_BRANCHES:
             if b in available and b not in read_branches:
                 read_branches.append(b)
         data_all = tree.arrays(read_branches, library="np")
@@ -737,7 +921,7 @@ def process_ecm(ecm):
             mask = (d1 < DR_MAX) & (d2 < DR_MAX)
             n_in, n_out = mask.size, int(mask.sum())
             print(f"  dR cut (<{DR_MAX}): {n_out}/{n_in} = {100.*n_out/n_in:.2f}%")
-            for b in branches:
+            for b in list(branches) + [v for v in BIN_VAR_BRANCHES if v in data_all]:
                 data_all[b] = _flatten_raw(data_all[b])[mask]
         else:
             print(f"  WARNING: dR branches missing, skipping cut")
@@ -798,9 +982,10 @@ def process_ecm(ecm):
             nparams = 10
         elif model == "dcb2g":
             popt, pcov, fit_ok, chi2 = fit_dcb2g(centers[mask], counts[mask], mu0, sig0)
-            # Only run iminuit (expensive) when scipy result is poor
+            # Run iminuit fallback once χ²/ndf > 2.5 — narrow-core distributions
+            # (lep angular resolutions in extreme p bins) often need it.
             _ndof_est = max(int(mask.sum()) - 10, 1)
-            if popt is None or chi2 / _ndof_est > 5.0:
+            if popt is None or chi2 / _ndof_est > 2.5:
                 popt2, _, fit_ok2, chi2_2 = fit_dcb2g_iminuit(
                     centers[mask], counts[mask], mu0, sig0)
                 if popt2 is not None and chi2_2 < chi2:
@@ -811,9 +996,7 @@ def process_ecm(ecm):
             popt, pcov, fit_ok, chi2 = fit_dcb_expleft2g(
                 centers[mask], counts[mask], mu0, sig0, constrain_mu0=constrain_mu0)
             _ndof_est = max(int(mask.sum()) - 10, 1)
-            # Lower threshold when constrained: scipy may settle in a suboptimal minimum
-            _chi2_thr = 3.0 if constrain_mu0 else 5.0
-            if popt is None or chi2 / _ndof_est > _chi2_thr:
+            if popt is None or chi2 / _ndof_est > 3.0:
                 popt2, _, fit_ok2, chi2_2 = fit_dcb_expleft2g_iminuit(
                     centers[mask], counts[mask], mu0, sig0, constrain_mu0=constrain_mu0)
                 if popt2 is not None and (popt is None or chi2_2 < chi2):
@@ -1069,6 +1252,82 @@ def process_ecm(ecm):
     )
     print(f"  Jet comparison plots → {comp_dir}/")
 
+    # ── Binned-prior pass: fit DCB per equal-occupancy bin of the binning var ─
+    # Equal-occupancy edges per binning variable, computed once on the dR-cut
+    # sample. Quantile arrays are built per binning-var key (for pooled jet
+    # branches the binning var is the concat'd jet1+jet2 reco kinematic). Bin
+    # fits are dispatched across an inner ProcessPool — they're independent
+    # and dwarf the per-ECM serial cost.
+    print(f"\n  [{ecm}]  Binned-prior pass: {N_BINS_PRIOR} bins per branch")
+    binvar_cache = {}
+    def _bin_var_array(bcfg):
+        key = bcfg
+        if key in binvar_cache:
+            return binvar_cache[key]
+        arrs = []
+        for v in bcfg:
+            if v not in data_all:
+                binvar_cache[key] = None
+                return None
+            a = _flatten_raw(data_all[v])
+            if "costheta" in v:
+                a = np.abs(a)
+            arrs.append(a)
+        out = np.concatenate(arrs) if len(arrs) > 1 else arrs[0]
+        binvar_cache[key] = out
+        return out
+
+    bin_specs = {}    # bname -> (list(bcfg), edges_list)
+    bin_tasks = []    # list of (bname, ibin, vals_subset, ecm)
+    bin_n     = {}    # (bname, ibin) -> N events
+    for bname, bcfg in BIN_CONFIG.items():
+        if bname not in branches:
+            continue
+        v = _bin_var_array(bcfg)
+        if v is None:
+            print(f"  [{ecm}]  SKIP {bname}: binning var(s) {bcfg} not in tree")
+            continue
+        yvals = _flatten_raw(data_all[bname])
+        if len(v) != len(yvals):
+            print(f"  [{ecm}]  SKIP {bname}: binning-var length {len(v)} != {len(yvals)}")
+            continue
+        edges_q = np.quantile(v, np.linspace(0, 1, N_BINS_PRIOR + 1))
+        edges_q[0]  -= 1e-9
+        edges_q[-1] += 1e-9
+        bin_specs[bname] = (list(bcfg), edges_q.tolist())
+        for ibin in range(N_BINS_PRIOR):
+            m = (v >= edges_q[ibin]) & (v < edges_q[ibin+1])
+            bin_tasks.append((bname, ibin, yvals[m], ecm))
+            bin_n[(bname, ibin)] = int(m.sum())
+
+    # Inner pool: 8 workers per ECM × 3 ECMs ≈ 24 cores busy on ironic (64 avail).
+    # Tasks are independent; worker count is bounded so we don't oversubscribe.
+    n_inner = min(8, max(1, len(bin_tasks)))
+    print(f"  [{ecm}]  dispatching {len(bin_tasks)} binned fits across {n_inner} workers")
+    bin_outputs = []
+    if bin_tasks:
+        with ProcessPoolExecutor(max_workers=n_inner) as inner_pool:
+            for out in inner_pool.map(_fit_bin_task, bin_tasks):
+                bin_outputs.append(out)
+
+    # Aggregate by branch (preserve bin order via index).
+    agg = {b: [None]*N_BINS_PRIOR for b in bin_specs}
+    for bname, ibin, p in bin_outputs:
+        agg[bname][ibin] = p
+        chi2 = p["chi2_ndof"] if p else float("nan")
+        ok   = "OK" if (p and p.get("fit_ok")) else "WARN"
+        print(f"    [{ecm}]  {bname:30s} bin {ibin}/{N_BINS_PRIOR}  "
+              f"N={bin_n.get((bname, ibin), -1)}  χ²/ndf={chi2:.2f}  {ok}")
+
+    for bname, bins_list in agg.items():
+        bin_var, edges = bin_specs[bname]
+        results.setdefault(bname, {})
+        results[bname]["binned"] = {
+            "bin_var": bin_var,
+            "edges":   edges,
+            "bins":    bins_list,
+        }
+
     # ── JSON ──────────────────────────────────────────────────────────────────
     os.makedirs(FUNC_DIR, exist_ok=True)
     json_path = f"{FUNC_DIR}/dcb_results_ecm{ecm}.json"
@@ -1079,40 +1338,74 @@ def process_ecm(ecm):
     return ecm, results
 
 
-def _cpp_param_line(bname, p, ecm):
-    tag  = bname.upper()
-    note = f"// chi2/ndf={p['chi2_ndof']:.2f}  {'OK' if p['fit_ok'] else 'WARN'}"
+def _cpp_struct_for_model(model):
+    """Map fit-model name → (C++ struct typename, name prefix)."""
+    if model == "dcb2g":     return ("DcbGaussParams",         "DCBG")
+    if model == "expleft2g": return ("DcbExpLeftGaussParams",  "DCBELG")
+    if model == "dcber2g":   return ("DcbExpRightGaussParams", "DCBERG")
+    return ("DcbParams", "DCB")
+
+
+def _cpp_struct_initializer(p):
+    """Inline brace-init body (params only, no `Type NAME =` prefix). Caller adds
+    the trailing `, norm }` and the type/declaration. chi2/ok comment is
+    appended by callers as needed. Returns the comma-separated parameter list
+    matching the C++ struct field order in dcb_params.h."""
     if p["model"] == "dcb2g":
-        return (
-            f"constexpr DcbGaussParams DCBG_{tag}_{ecm} = "
-            f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
+        return (f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
+                f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
+                f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
+                f"{p['norm']:.10e}")
+    if p["model"] == "expleft2g":
+        return (f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
+                f"{p['aL']:.6f}, {p['kL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
+                f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
+                f"{p['norm']:.10e}")
+    if p["model"] == "dcber2g":
+        return (f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
+                f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['kR']:.6f}, "
+                f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
+                f"{p['norm']:.10e}")
+    return (f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
             f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
-            f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
-            f"{p['norm']:.10e} }};  {note}"
+            f"{p['norm']:.10e}")
+
+
+def _cpp_binned_lines(bname, binned, ecm):
+    """Emit per-bin constexpr structs + per-ECM std::array bundles + edges.
+    Returns list of lines."""
+    bins = binned.get("bins") or []
+    if not bins or any(b is None for b in bins):
+        return [f"// (binned fit incomplete for {bname} ecm{ecm} — skipped)"]
+    model = bins[0]["model"]
+    typename, prefix = _cpp_struct_for_model(model)
+    tag   = bname.upper()
+    out   = []
+    for i, p in enumerate(bins):
+        note = f"// bin{i}: chi2/ndf={p['chi2_ndof']:.2f}  {'OK' if p['fit_ok'] else 'WARN'}"
+        out.append(
+            f"constexpr {typename} {prefix}_{tag}_BIN{i}_{ecm} = "
+            f"{{ {_cpp_struct_initializer(p)} }};  {note}"
         )
-    elif p["model"] == "expleft2g":
-        return (
-            f"constexpr DcbExpLeftGaussParams DCBELG_{tag}_{ecm} = "
-            f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
-            f"{p['aL']:.6f}, {p['kL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
-            f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
-            f"{p['norm']:.10e} }};  {note}"
-        )
-    elif p["model"] == "dcber2g":
-        return (
-            f"constexpr DcbExpRightGaussParams DCBERG_{tag}_{ecm} = "
-            f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
-            f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['kR']:.6f}, "
-            f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
-            f"{p['norm']:.10e} }};  {note}"
-        )
-    else:
-        return (
-            f"constexpr DcbParams DCB_{tag}_{ecm} = "
-            f"{{ {p['mu']:+.6f}, {p['sigma']:.6f}, "
-            f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
-            f"{p['norm']:.10e} }};  {note}"
-        )
+    bin_list = ", ".join(f"{prefix}_{tag}_BIN{i}_{ecm}" for i in range(len(bins)))
+    out.append(
+        f"constexpr std::array<{typename}, {len(bins)}> "
+        f"{prefix}_{tag}_BINS_{ecm} = {{ {bin_list} }};"
+    )
+    edges = binned.get("edges") or []
+    edge_str = ", ".join(f"{float(e):.6f}" for e in edges)
+    out.append(
+        f"constexpr std::array<double, {len(edges)}> "
+        f"{prefix}_{tag}_EDGES_{ecm} = {{ {edge_str} }};"
+    )
+    return out
+
+
+def _cpp_param_line(bname, p, ecm):
+    typename, prefix = _cpp_struct_for_model(p["model"])
+    note = f"// chi2/ndf={p['chi2_ndof']:.2f}  {'OK' if p['fit_ok'] else 'WARN'}"
+    return (f"constexpr {typename} {prefix}_{bname.upper()}_{ecm} = "
+            f"{{ {_cpp_struct_initializer(p)} }};  {note}")
 
 
 def write_combined_header(all_results):
@@ -1130,6 +1423,7 @@ def write_combined_header(all_results):
         "",
         "#include <cmath>",
         "#include <algorithm>",
+        "#include <array>",
         "",
         "namespace WWFunctions {",
         "",
@@ -1234,9 +1528,39 @@ def write_combined_header(all_results):
         lines.append(f"")
         lines.append(f"// ECM {ecm} GeV")
         for bname, p in sorted(results.items()):
-            lines.append(_cpp_param_line(bname, p, ecm))
+            # Emit the integrated (kinematics-averaged) prior; legacy callers
+            # still rely on the unbinned constants.
+            if "model" in p:
+                lines.append(_cpp_param_line(bname, p, ecm))
+            # Per-bin priors + bin-edge array (only for branches in BIN_CONFIG).
+            if "binned" in p:
+                lines.extend(_cpp_binned_lines(bname, p["binned"], ecm))
 
-    lines += ["", "} // namespace WWFunctions", ""]
+    # Generic helper: pick the right per-bin DCB prior given the binning value.
+    # Templated so the same code works for DcbGaussParams, DcbExpLeftGaussParams,
+    # DcbExpRightGaussParams and DcbParams.
+    lines += [
+        "",
+        "// ── Per-bin lookup helper ────────────────────────────────────────────",
+        "// Pick the prior whose bin the binning value v falls in. Edges are the",
+        "// same equal-occupancy quantile edges used in fit_resolutions.py; values",
+        "// outside the [first, last] range are clamped to the edge bin.",
+        "template <typename T, std::size_t Nb>",
+        "inline const T& pick_bin(const std::array<T, Nb>& bins,",
+        "                         const std::array<double, Nb + 1>& edges,",
+        "                         double v) {",
+        "    if (v <= edges[0])      return bins[0];",
+        "    if (v >= edges[Nb])     return bins[Nb - 1];",
+        "    // Linear scan; Nb is small (5).",
+        "    for (std::size_t i = 0; i < Nb; ++i) {",
+        "        if (v < edges[i + 1]) return bins[i];",
+        "    }",
+        "    return bins[Nb - 1];",
+        "}",
+        "",
+        "} // namespace WWFunctions",
+        "",
+    ]
 
     out_path = f"{FUNC_DIR}/dcb_params.h"
     os.makedirs(os.path.dirname(out_path), exist_ok=True)

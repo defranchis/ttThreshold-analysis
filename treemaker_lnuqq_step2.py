@@ -30,6 +30,9 @@ KIN_FIT_FREE_GW = True
 # both pT-orderings, swap fallback off (~10-25% faster). "swap": separate per-jet
 # priors with jet1↔jet2 swap fallback on non-converged events.
 KIN_FIT_JET_PRIOR_MODE = os.environ.get("KF_JET_PRIOR_MODE", "swap")
+# True → use binned priors (pick_bin per event from reco kinematics).
+# False → use the inclusive (kinematics-averaged) scalar priors.
+KIN_FIT_USE_BINNED = os.environ.get("KF_USE_BINNED", "true").lower() in ("1", "true", "yes")
 
 # Run ONNX flavour tagging? Currently outputs are not consumed by any branch
 # in FULL_BRANCHES, but the helper is wired up here for future use.
@@ -137,7 +140,8 @@ class RDFanalysis:
         if str(_ecm) not in tc.AVAILABLE_ECM:
             raise ValueError(f"ecm={_ecm} parsed from '{_dataset}' not in AVAILABLE_ECM={tc.AVAILABLE_ECM}")
         ROOT.gInterpreter.ProcessLine(
-            f'FCCAnalyses::WWFunctions::setKinFitParams({_ecm}, "{KIN_FIT_JET_PRIOR_MODE}");')
+            f'FCCAnalyses::WWFunctions::setKinFitParams({_ecm}, "{KIN_FIT_JET_PRIOR_MODE}", '
+            f'{"true" if KIN_FIT_USE_BINNED else "false"});')
         ROOT.gInterpreter.ProcessLine(
             'std::cout << "[DEBUG step2] ECM from WWFunctions = " << FCCAnalyses::WWFunctions::ECM << std::endl;')
 

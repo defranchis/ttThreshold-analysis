@@ -32,6 +32,10 @@ all_branches = [
     "gen_WW_m", "gen_WW_m_minus_ecm",
     "jet1_matched_q_dR", "jet2_matched_q_dR",
     "lep_gen_reco_dR", "met_gen_reco_dR",
+    # Reco kinematics needed by fit_resolutions for the equal-occupancy binning
+    # variable lookups (per-bin DCB priors).
+    "reco_jet1_p", "reco_jet2_p", "reco_lep_p",
+    "reco_jet1_costheta", "reco_jet2_costheta",
 ]
 
 # Module-level helper, set inside analysers(); fccanalysis reads it from here

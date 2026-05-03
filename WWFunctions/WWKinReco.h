@@ -17,140 +17,207 @@ namespace FCCAnalyses { namespace WWFunctions {
 using namespace ::WWFunctions;
 
 // ── Per-ECM parameter bundles ───────────────────────────────────────────────
+//
+// All resolutions (jet/lep p_resp, θ/φ resolutions) are now BINNED — each holds
+// a 5-element std::array of DCB params plus the equal-occupancy quantile edges
+// (6 doubles). The per-event prior is selected at kinFit() entry by feeding the
+// reco kinematic into pick_bin(): jet*_p / lep_p drive p_resp + θ_resol; jet
+// |cosθ| drives jet φ_resol; lep_p drives lep φ_resol. MET and gen-level
+// constraints remain unbinned (no kinematics dependence in the resol study).
+constexpr std::size_t KF_NBINS = 5;
+
 struct KinFitParamSet {
-    DcbGaussParams         jet1_p_resp;
-    DcbGaussParams         jet2_p_resp;
-    DcbExpLeftGaussParams  lep_p_resp;            // expleft2g
-    DcbParams              met_p_resp;
-    DcbGaussParams         jet1_phi_resol;        // dcb2g
-    DcbGaussParams         jet1_theta_resol;      // dcb2g
-    DcbGaussParams         jet2_phi_resol;        // dcb2g
-    DcbGaussParams         jet2_theta_resol;      // dcb2g
-    DcbGaussParams         lep_phi_resol;         // dcb2g
-    DcbGaussParams         lep_theta_resol;       // dcb2g
-    DcbParams              met_phi_resol;
-    DcbParams              met_theta_resol;
-    DcbExpRightGaussParams m_gen_lnuqq_minus_ecm;
-    DcbGaussParams         px_tot_gen;            // dcb2g
-    DcbGaussParams         py_tot_gen;            // dcb2g
-    DcbGaussParams         pz_tot_gen;            // dcb2g
+    // Binned variants (per-bin DCB params + equal-occupancy quantile edges).
+    std::array<DcbGaussParams,        KF_NBINS> jet1_p_resp_bins;
+    std::array<double,                KF_NBINS + 1> jet1_p_resp_edges;
+    std::array<DcbGaussParams,        KF_NBINS> jet2_p_resp_bins;
+    std::array<double,                KF_NBINS + 1> jet2_p_resp_edges;
+    std::array<DcbExpLeftGaussParams, KF_NBINS> lep_p_resp_bins;        // expleft2g
+    std::array<double,                KF_NBINS + 1> lep_p_resp_edges;
+    DcbParams                                    met_p_resp;
+    std::array<DcbGaussParams,        KF_NBINS> jet1_phi_resol_bins;    // dcb2g
+    std::array<double,                KF_NBINS + 1> jet1_phi_resol_edges;
+    std::array<DcbGaussParams,        KF_NBINS> jet1_theta_resol_bins;  // dcb2g
+    std::array<double,                KF_NBINS + 1> jet1_theta_resol_edges;
+    std::array<DcbGaussParams,        KF_NBINS> jet2_phi_resol_bins;    // dcb2g
+    std::array<double,                KF_NBINS + 1> jet2_phi_resol_edges;
+    std::array<DcbGaussParams,        KF_NBINS> jet2_theta_resol_bins;  // dcb2g
+    std::array<double,                KF_NBINS + 1> jet2_theta_resol_edges;
+    std::array<DcbGaussParams,        KF_NBINS> lep_phi_resol_bins;     // dcb2g
+    std::array<double,                KF_NBINS + 1> lep_phi_resol_edges;
+    std::array<DcbGaussParams,        KF_NBINS> lep_theta_resol_bins;   // dcb2g
+    std::array<double,                KF_NBINS + 1> lep_theta_resol_edges;
+    DcbParams                                    met_phi_resol;
+    DcbParams                                    met_theta_resol;
+    DcbExpRightGaussParams                       m_gen_lnuqq_minus_ecm;
+    DcbGaussParams                               px_tot_gen;
+    DcbGaussParams                               py_tot_gen;
+    DcbGaussParams                               pz_tot_gen;
+    // Inclusive (kinematics-averaged) variants — used when kf_use_binned_priors=false.
+    DcbGaussParams                               jet1_p_resp_incl;
+    DcbGaussParams                               jet2_p_resp_incl;
+    DcbExpLeftGaussParams                        lep_p_resp_incl;
+    DcbGaussParams                               jet1_phi_resol_incl;
+    DcbGaussParams                               jet1_theta_resol_incl;
+    DcbGaussParams                               jet2_phi_resol_incl;
+    DcbGaussParams                               jet2_theta_resol_incl;
+    DcbGaussParams                               lep_phi_resol_incl;
+    DcbGaussParams                               lep_theta_resol_incl;
 };
 
-// Two jet-prior conventions, selected at setKinFitParams() time:
-//  - POOL: jet1 and jet2 share the pooled prior DCBG_JET_*_{ECM}. No pT-ordering
-//          dependence; pass-1 already covers both orderings, swap fallback off.
-//  - SEP : jet1 / jet2 use the separately-fit DCBG_JET{1,2}_*_{ECM} priors. The
-//          per-jet ordering disagrees on some events, so the kinFit() pass-2
-//          swap fallback (jet1↔jet2 priors) is enabled to rescue them.
-static const KinFitParamSet KF_PARAMS_157_POOL = {
-    DCBG_JET_P_RESP_157, DCBG_JET_P_RESP_157,
-    DCBELG_LEP_P_RESP_157, DCB_MET_P_RESP_157,
-    DCBG_JET_PHI_RESOL_157, DCBG_JET_THETA_RESOL_157,
-    DCBG_JET_PHI_RESOL_157, DCBG_JET_THETA_RESOL_157,
-    DCBG_LEP_PHI_RESOL_157,  DCBG_LEP_THETA_RESOL_157,
-    DCB_MET_PHI_RESOL_157,   DCB_MET_THETA_RESOL_157,
-    DCBERG_GEN_WW_M_MINUS_ECM_157,
-    DCBG_GEN_WW_PX_157, DCBG_GEN_WW_PY_157, DCBG_GEN_WW_PZ_157,
-};
-static const KinFitParamSet KF_PARAMS_160_POOL = {
-    DCBG_JET_P_RESP_160, DCBG_JET_P_RESP_160,
-    DCBELG_LEP_P_RESP_160, DCB_MET_P_RESP_160,
-    DCBG_JET_PHI_RESOL_160, DCBG_JET_THETA_RESOL_160,
-    DCBG_JET_PHI_RESOL_160, DCBG_JET_THETA_RESOL_160,
-    DCBG_LEP_PHI_RESOL_160,  DCBG_LEP_THETA_RESOL_160,
-    DCB_MET_PHI_RESOL_160,   DCB_MET_THETA_RESOL_160,
-    DCBERG_GEN_WW_M_MINUS_ECM_160,
-    DCBG_GEN_WW_PX_160, DCBG_GEN_WW_PY_160, DCBG_GEN_WW_PZ_160,
-};
-static const KinFitParamSet KF_PARAMS_163_POOL = {
-    DCBG_JET_P_RESP_163, DCBG_JET_P_RESP_163,
-    DCBELG_LEP_P_RESP_163, DCB_MET_P_RESP_163,
-    DCBG_JET_PHI_RESOL_163, DCBG_JET_THETA_RESOL_163,
-    DCBG_JET_PHI_RESOL_163, DCBG_JET_THETA_RESOL_163,
-    DCBG_LEP_PHI_RESOL_163,  DCBG_LEP_THETA_RESOL_163,
-    DCB_MET_PHI_RESOL_163,   DCB_MET_THETA_RESOL_163,
-    DCBERG_GEN_WW_M_MINUS_ECM_163,
-    DCBG_GEN_WW_PX_163, DCBG_GEN_WW_PY_163, DCBG_GEN_WW_PZ_163,
-};
-static const KinFitParamSet KF_PARAMS_157_SEP = {
-    DCBG_JET1_P_RESP_157, DCBG_JET2_P_RESP_157,
-    DCBELG_LEP_P_RESP_157, DCB_MET_P_RESP_157,
-    DCBG_JET1_PHI_RESOL_157, DCBG_JET1_THETA_RESOL_157,
-    DCBG_JET2_PHI_RESOL_157, DCBG_JET2_THETA_RESOL_157,
-    DCBG_LEP_PHI_RESOL_157,  DCBG_LEP_THETA_RESOL_157,
-    DCB_MET_PHI_RESOL_157,   DCB_MET_THETA_RESOL_157,
-    DCBERG_GEN_WW_M_MINUS_ECM_157,
-    DCBG_GEN_WW_PX_157, DCBG_GEN_WW_PY_157, DCBG_GEN_WW_PZ_157,
-};
-static const KinFitParamSet KF_PARAMS_160_SEP = {
-    DCBG_JET1_P_RESP_160, DCBG_JET2_P_RESP_160,
-    DCBELG_LEP_P_RESP_160, DCB_MET_P_RESP_160,
-    DCBG_JET1_PHI_RESOL_160, DCBG_JET1_THETA_RESOL_160,
-    DCBG_JET2_PHI_RESOL_160, DCBG_JET2_THETA_RESOL_160,
-    DCBG_LEP_PHI_RESOL_160,  DCBG_LEP_THETA_RESOL_160,
-    DCB_MET_PHI_RESOL_160,   DCB_MET_THETA_RESOL_160,
-    DCBERG_GEN_WW_M_MINUS_ECM_160,
-    DCBG_GEN_WW_PX_160, DCBG_GEN_WW_PY_160, DCBG_GEN_WW_PZ_160,
-};
-static const KinFitParamSet KF_PARAMS_163_SEP = {
-    DCBG_JET1_P_RESP_163, DCBG_JET2_P_RESP_163,
-    DCBELG_LEP_P_RESP_163, DCB_MET_P_RESP_163,
-    DCBG_JET1_PHI_RESOL_163, DCBG_JET1_THETA_RESOL_163,
-    DCBG_JET2_PHI_RESOL_163, DCBG_JET2_THETA_RESOL_163,
-    DCBG_LEP_PHI_RESOL_163,  DCBG_LEP_THETA_RESOL_163,
-    DCB_MET_PHI_RESOL_163,   DCB_MET_THETA_RESOL_163,
-    DCBERG_GEN_WW_M_MINUS_ECM_163,
-    DCBG_GEN_WW_PX_163, DCBG_GEN_WW_PY_163, DCBG_GEN_WW_PZ_163,
-};
+// Three jet-prior conventions, selected at setKinFitParams() time:
+//  - POOL  : jet1 and jet2 share the pooled prior DCBG_JET_*_BINS_{ECM}. No
+//            pT-ordering dependence; jet1↔jet2 swap fallback is a no-op so it's
+//            disabled.
+//  - SWAP  : per-jet priors DCBG_JET{1,2}_*_BINS_{ECM}; swap fallback enabled
+//            so events whose pT ordering disagrees with the prior fit ordering
+//            can still converge.
+//  - FIXED : per-jet priors DCBG_JET{1,2}_*_BINS_{ECM}; swap fallback disabled
+//            (sanity check: how often do we lose convergence without swap?).
+#define KF_POOL_BUNDLE(E) \
+    DCBG_JET_P_RESP_BINS_##E,        DCBG_JET_P_RESP_EDGES_##E, \
+    DCBG_JET_P_RESP_BINS_##E,        DCBG_JET_P_RESP_EDGES_##E, \
+    DCBELG_LEP_P_RESP_BINS_##E,      DCBELG_LEP_P_RESP_EDGES_##E, \
+    DCB_MET_P_RESP_##E, \
+    DCBG_JET_PHI_RESOL_BINS_##E,     DCBG_JET_PHI_RESOL_EDGES_##E, \
+    DCBG_JET_THETA_RESOL_BINS_##E,   DCBG_JET_THETA_RESOL_EDGES_##E, \
+    DCBG_JET_PHI_RESOL_BINS_##E,     DCBG_JET_PHI_RESOL_EDGES_##E, \
+    DCBG_JET_THETA_RESOL_BINS_##E,   DCBG_JET_THETA_RESOL_EDGES_##E, \
+    DCBG_LEP_PHI_RESOL_BINS_##E,     DCBG_LEP_PHI_RESOL_EDGES_##E, \
+    DCBG_LEP_THETA_RESOL_BINS_##E,   DCBG_LEP_THETA_RESOL_EDGES_##E, \
+    DCB_MET_PHI_RESOL_##E,           DCB_MET_THETA_RESOL_##E, \
+    DCBERG_GEN_WW_M_MINUS_ECM_##E, \
+    DCBG_GEN_WW_PX_##E, DCBG_GEN_WW_PY_##E, DCBG_GEN_WW_PZ_##E, \
+    /* inclusive — POOL: jet1 and jet2 share the pooled scalar */ \
+    DCBG_JET_P_RESP_##E, DCBG_JET_P_RESP_##E, DCBELG_LEP_P_RESP_##E, \
+    DCBG_JET_PHI_RESOL_##E, DCBG_JET_THETA_RESOL_##E, \
+    DCBG_JET_PHI_RESOL_##E, DCBG_JET_THETA_RESOL_##E, \
+    DCBG_LEP_PHI_RESOL_##E, DCBG_LEP_THETA_RESOL_##E
+
+#define KF_SEP_BUNDLE(E) \
+    DCBG_JET1_P_RESP_BINS_##E,       DCBG_JET1_P_RESP_EDGES_##E, \
+    DCBG_JET2_P_RESP_BINS_##E,       DCBG_JET2_P_RESP_EDGES_##E, \
+    DCBELG_LEP_P_RESP_BINS_##E,      DCBELG_LEP_P_RESP_EDGES_##E, \
+    DCB_MET_P_RESP_##E, \
+    DCBG_JET1_PHI_RESOL_BINS_##E,    DCBG_JET1_PHI_RESOL_EDGES_##E, \
+    DCBG_JET1_THETA_RESOL_BINS_##E,  DCBG_JET1_THETA_RESOL_EDGES_##E, \
+    DCBG_JET2_PHI_RESOL_BINS_##E,    DCBG_JET2_PHI_RESOL_EDGES_##E, \
+    DCBG_JET2_THETA_RESOL_BINS_##E,  DCBG_JET2_THETA_RESOL_EDGES_##E, \
+    DCBG_LEP_PHI_RESOL_BINS_##E,     DCBG_LEP_PHI_RESOL_EDGES_##E, \
+    DCBG_LEP_THETA_RESOL_BINS_##E,   DCBG_LEP_THETA_RESOL_EDGES_##E, \
+    DCB_MET_PHI_RESOL_##E,           DCB_MET_THETA_RESOL_##E, \
+    DCBERG_GEN_WW_M_MINUS_ECM_##E, \
+    DCBG_GEN_WW_PX_##E, DCBG_GEN_WW_PY_##E, DCBG_GEN_WW_PZ_##E, \
+    /* inclusive — SEP: per-jet scalar */ \
+    DCBG_JET1_P_RESP_##E, DCBG_JET2_P_RESP_##E, DCBELG_LEP_P_RESP_##E, \
+    DCBG_JET1_PHI_RESOL_##E, DCBG_JET1_THETA_RESOL_##E, \
+    DCBG_JET2_PHI_RESOL_##E, DCBG_JET2_THETA_RESOL_##E, \
+    DCBG_LEP_PHI_RESOL_##E, DCBG_LEP_THETA_RESOL_##E
+
+static const KinFitParamSet KF_PARAMS_157_POOL = { KF_POOL_BUNDLE(157) };
+static const KinFitParamSet KF_PARAMS_160_POOL = { KF_POOL_BUNDLE(160) };
+static const KinFitParamSet KF_PARAMS_163_POOL = { KF_POOL_BUNDLE(163) };
+static const KinFitParamSet KF_PARAMS_157_SEP  = { KF_SEP_BUNDLE(157) };
+static const KinFitParamSet KF_PARAMS_160_SEP  = { KF_SEP_BUNDLE(160) };
+static const KinFitParamSet KF_PARAMS_163_SEP  = { KF_SEP_BUNDLE(163) };
 
 // ── Active kinfit parameters (set per-dataset via setKinFitParams) ─────────
-inline DcbGaussParams         kf_jet1_p_resp           = DCBG_JET1_P_RESP_160;
-inline DcbGaussParams         kf_jet2_p_resp           = DCBG_JET2_P_RESP_160;
-inline DcbExpLeftGaussParams  kf_lep_p_resp            = DCBELG_LEP_P_RESP_160;
-inline DcbParams              kf_met_p_resp            = DCB_MET_P_RESP_160;
-inline DcbGaussParams         kf_jet1_phi_resol        = DCBG_JET1_PHI_RESOL_160;
-inline DcbGaussParams         kf_jet1_theta_resol      = DCBG_JET1_THETA_RESOL_160;
-inline DcbGaussParams         kf_jet2_phi_resol        = DCBG_JET2_PHI_RESOL_160;
-inline DcbGaussParams         kf_jet2_theta_resol      = DCBG_JET2_THETA_RESOL_160;
-inline DcbGaussParams         kf_lep_phi_resol         = DCBG_LEP_PHI_RESOL_160;
-inline DcbGaussParams         kf_lep_theta_resol       = DCBG_LEP_THETA_RESOL_160;
-inline DcbParams              kf_met_phi_resol         = DCB_MET_PHI_RESOL_160;
-inline DcbParams              kf_met_theta_resol       = DCB_MET_THETA_RESOL_160;
-inline DcbExpRightGaussParams kf_m_gen_lnuqq_minus_ecm = DCBERG_GEN_WW_M_MINUS_ECM_160;
-inline DcbGaussParams         kf_px_tot_gen            = DCBG_GEN_WW_PX_160;
-inline DcbGaussParams         kf_py_tot_gen            = DCBG_GEN_WW_PY_160;
-inline DcbGaussParams         kf_pz_tot_gen            = DCBG_GEN_WW_PZ_160;
+// Binned priors live in std::array<...> bundles plus matching edge arrays.
+// kinFit() picks the per-event prior via pick_bin() at the function entry.
+inline std::array<DcbGaussParams,        KF_NBINS> kf_jet1_p_resp_bins      = DCBG_JET1_P_RESP_BINS_160;
+inline std::array<double,                KF_NBINS + 1> kf_jet1_p_resp_edges      = DCBG_JET1_P_RESP_EDGES_160;
+inline std::array<DcbGaussParams,        KF_NBINS> kf_jet2_p_resp_bins      = DCBG_JET2_P_RESP_BINS_160;
+inline std::array<double,                KF_NBINS + 1> kf_jet2_p_resp_edges      = DCBG_JET2_P_RESP_EDGES_160;
+inline std::array<DcbExpLeftGaussParams, KF_NBINS> kf_lep_p_resp_bins       = DCBELG_LEP_P_RESP_BINS_160;
+inline std::array<double,                KF_NBINS + 1> kf_lep_p_resp_edges       = DCBELG_LEP_P_RESP_EDGES_160;
+inline DcbParams                                    kf_met_p_resp            = DCB_MET_P_RESP_160;
+inline std::array<DcbGaussParams,        KF_NBINS> kf_jet1_phi_resol_bins   = DCBG_JET1_PHI_RESOL_BINS_160;
+inline std::array<double,                KF_NBINS + 1> kf_jet1_phi_resol_edges   = DCBG_JET1_PHI_RESOL_EDGES_160;
+inline std::array<DcbGaussParams,        KF_NBINS> kf_jet1_theta_resol_bins = DCBG_JET1_THETA_RESOL_BINS_160;
+inline std::array<double,                KF_NBINS + 1> kf_jet1_theta_resol_edges = DCBG_JET1_THETA_RESOL_EDGES_160;
+inline std::array<DcbGaussParams,        KF_NBINS> kf_jet2_phi_resol_bins   = DCBG_JET2_PHI_RESOL_BINS_160;
+inline std::array<double,                KF_NBINS + 1> kf_jet2_phi_resol_edges   = DCBG_JET2_PHI_RESOL_EDGES_160;
+inline std::array<DcbGaussParams,        KF_NBINS> kf_jet2_theta_resol_bins = DCBG_JET2_THETA_RESOL_BINS_160;
+inline std::array<double,                KF_NBINS + 1> kf_jet2_theta_resol_edges = DCBG_JET2_THETA_RESOL_EDGES_160;
+inline std::array<DcbGaussParams,        KF_NBINS> kf_lep_phi_resol_bins    = DCBG_LEP_PHI_RESOL_BINS_160;
+inline std::array<double,                KF_NBINS + 1> kf_lep_phi_resol_edges    = DCBG_LEP_PHI_RESOL_EDGES_160;
+inline std::array<DcbGaussParams,        KF_NBINS> kf_lep_theta_resol_bins  = DCBG_LEP_THETA_RESOL_BINS_160;
+inline std::array<double,                KF_NBINS + 1> kf_lep_theta_resol_edges  = DCBG_LEP_THETA_RESOL_EDGES_160;
+inline DcbParams                                    kf_met_phi_resol         = DCB_MET_PHI_RESOL_160;
+inline DcbParams                                    kf_met_theta_resol       = DCB_MET_THETA_RESOL_160;
+inline DcbExpRightGaussParams                       kf_m_gen_lnuqq_minus_ecm = DCBERG_GEN_WW_M_MINUS_ECM_160;
+inline DcbGaussParams                               kf_px_tot_gen            = DCBG_GEN_WW_PX_160;
+inline DcbGaussParams                               kf_py_tot_gen            = DCBG_GEN_WW_PY_160;
+inline DcbGaussParams                               kf_pz_tot_gen            = DCBG_GEN_WW_PZ_160;
 
-// True when SEP (per-jet) priors are active → kinFit() runs the jet1↔jet2 swap
-// fallback on non-converged events. False under POOL (priors are jet-symmetric,
-// swap is a no-op so we skip the second Migrad pass).
+// Inclusive (kinematics-averaged) scalars — used when kf_use_binned_priors=false.
+// Same data as the bin arrays would collapse to with one bin spanning all events.
+inline DcbGaussParams         kf_jet1_p_resp_incl      = DCBG_JET1_P_RESP_160;
+inline DcbGaussParams         kf_jet2_p_resp_incl      = DCBG_JET2_P_RESP_160;
+inline DcbExpLeftGaussParams  kf_lep_p_resp_incl       = DCBELG_LEP_P_RESP_160;
+inline DcbGaussParams         kf_jet1_phi_resol_incl   = DCBG_JET1_PHI_RESOL_160;
+inline DcbGaussParams         kf_jet1_theta_resol_incl = DCBG_JET1_THETA_RESOL_160;
+inline DcbGaussParams         kf_jet2_phi_resol_incl   = DCBG_JET2_PHI_RESOL_160;
+inline DcbGaussParams         kf_jet2_theta_resol_incl = DCBG_JET2_THETA_RESOL_160;
+inline DcbGaussParams         kf_lep_phi_resol_incl    = DCBG_LEP_PHI_RESOL_160;
+inline DcbGaussParams         kf_lep_theta_resol_incl  = DCBG_LEP_THETA_RESOL_160;
+
+// True when the jet1↔jet2 swap fallback should be tried on non-converged
+// events. Enabled only in "swap" mode; "pool" priors are jet-symmetric so swap
+// is a no-op, and "fixed" mode deliberately skips the swap to measure the
+// natural-ordering convergence rate alone.
 inline bool kf_jet_swap_enabled = false;
+// True → kinFit picks per-event prior from the binned arrays via pick_bin().
+// False → use the inclusive (kinematics-averaged) scalar priors.
+inline bool kf_use_binned_priors = true;
 
-inline void setKinFitParams(int ecm, const std::string& jet_mode = "pool") {
+inline void setKinFitParams(int ecm, const std::string& jet_mode = "swap",
+                             bool use_binned = true) {
     ECM = static_cast<float>(ecm);
-    const bool use_pool = (jet_mode == "pool");
-    kf_jet_swap_enabled = !use_pool;
+    const bool use_pool  = (jet_mode == "pool");
+    const bool use_fixed = (jet_mode == "fixed");
+    // Swap fallback only in "swap" (default) mode.
+    kf_jet_swap_enabled  = !use_pool && !use_fixed;
+    kf_use_binned_priors = use_binned;
     const KinFitParamSet* p =
         ecm == 157 ? (use_pool ? &KF_PARAMS_157_POOL : &KF_PARAMS_157_SEP) :
         ecm == 160 ? (use_pool ? &KF_PARAMS_160_POOL : &KF_PARAMS_160_SEP) :
         ecm == 163 ? (use_pool ? &KF_PARAMS_163_POOL : &KF_PARAMS_163_SEP) : nullptr;
     if (!p) return;
-    kf_jet1_p_resp           = p->jet1_p_resp;
-    kf_jet2_p_resp           = p->jet2_p_resp;
-    kf_lep_p_resp            = p->lep_p_resp;
-    kf_met_p_resp            = p->met_p_resp;
-    kf_jet1_phi_resol        = p->jet1_phi_resol;
-    kf_jet1_theta_resol      = p->jet1_theta_resol;
-    kf_jet2_phi_resol        = p->jet2_phi_resol;
-    kf_jet2_theta_resol      = p->jet2_theta_resol;
-    kf_lep_phi_resol         = p->lep_phi_resol;
-    kf_lep_theta_resol       = p->lep_theta_resol;
-    kf_met_phi_resol         = p->met_phi_resol;
-    kf_met_theta_resol       = p->met_theta_resol;
-    kf_m_gen_lnuqq_minus_ecm = p->m_gen_lnuqq_minus_ecm;
-    kf_px_tot_gen            = p->px_tot_gen;
-    kf_py_tot_gen            = p->py_tot_gen;
-    kf_pz_tot_gen            = p->pz_tot_gen;
+    kf_jet1_p_resp_bins       = p->jet1_p_resp_bins;
+    kf_jet1_p_resp_edges      = p->jet1_p_resp_edges;
+    kf_jet2_p_resp_bins       = p->jet2_p_resp_bins;
+    kf_jet2_p_resp_edges      = p->jet2_p_resp_edges;
+    kf_lep_p_resp_bins        = p->lep_p_resp_bins;
+    kf_lep_p_resp_edges       = p->lep_p_resp_edges;
+    kf_met_p_resp             = p->met_p_resp;
+    kf_jet1_phi_resol_bins    = p->jet1_phi_resol_bins;
+    kf_jet1_phi_resol_edges   = p->jet1_phi_resol_edges;
+    kf_jet1_theta_resol_bins  = p->jet1_theta_resol_bins;
+    kf_jet1_theta_resol_edges = p->jet1_theta_resol_edges;
+    kf_jet2_phi_resol_bins    = p->jet2_phi_resol_bins;
+    kf_jet2_phi_resol_edges   = p->jet2_phi_resol_edges;
+    kf_jet2_theta_resol_bins  = p->jet2_theta_resol_bins;
+    kf_jet2_theta_resol_edges = p->jet2_theta_resol_edges;
+    kf_lep_phi_resol_bins     = p->lep_phi_resol_bins;
+    kf_lep_phi_resol_edges    = p->lep_phi_resol_edges;
+    kf_lep_theta_resol_bins   = p->lep_theta_resol_bins;
+    kf_lep_theta_resol_edges  = p->lep_theta_resol_edges;
+    kf_met_phi_resol          = p->met_phi_resol;
+    kf_met_theta_resol        = p->met_theta_resol;
+    kf_m_gen_lnuqq_minus_ecm  = p->m_gen_lnuqq_minus_ecm;
+    kf_px_tot_gen             = p->px_tot_gen;
+    kf_py_tot_gen             = p->py_tot_gen;
+    kf_pz_tot_gen             = p->pz_tot_gen;
+    kf_jet1_p_resp_incl       = p->jet1_p_resp_incl;
+    kf_jet2_p_resp_incl       = p->jet2_p_resp_incl;
+    kf_lep_p_resp_incl        = p->lep_p_resp_incl;
+    kf_jet1_phi_resol_incl    = p->jet1_phi_resol_incl;
+    kf_jet1_theta_resol_incl  = p->jet1_theta_resol_incl;
+    kf_jet2_phi_resol_incl    = p->jet2_phi_resol_incl;
+    kf_jet2_theta_resol_incl  = p->jet2_theta_resol_incl;
+    kf_lep_phi_resol_incl     = p->lep_phi_resol_incl;
+    kf_lep_theta_resol_incl   = p->lep_theta_resol_incl;
 }
 
 // ── kinematic fit ──────────────────────────────────────────────────────────
@@ -343,11 +410,28 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
     if (Isolep_p < 0 || jet1_p <= 0 || jet2_p <= 0 || missing_p <= 0)
         return result;
 
+    // Pick per-event priors. When kf_use_binned_priors is true: bin via
+    // pick_bin() — p_resp / θ_resol on object p; jet φ_resol on |cos θ|; lep
+    // φ_resol on lep_p. Otherwise fall back to the inclusive scalar priors.
+    const double j1_acth = std::abs(std::cos(jet1_theta));
+    const double j2_acth = std::abs(std::cos(jet2_theta));
+    const DcbGaussParams         kf_jet1_p_resp      = kf_use_binned_priors ? pick_bin(kf_jet1_p_resp_bins,      kf_jet1_p_resp_edges,      jet1_p)   : kf_jet1_p_resp_incl;
+    const DcbGaussParams         kf_jet2_p_resp      = kf_use_binned_priors ? pick_bin(kf_jet2_p_resp_bins,      kf_jet2_p_resp_edges,      jet2_p)   : kf_jet2_p_resp_incl;
+    const DcbExpLeftGaussParams  kf_lep_p_resp       = kf_use_binned_priors ? pick_bin(kf_lep_p_resp_bins,       kf_lep_p_resp_edges,       Isolep_p) : kf_lep_p_resp_incl;
+    const DcbGaussParams         kf_jet1_theta_resol = kf_use_binned_priors ? pick_bin(kf_jet1_theta_resol_bins, kf_jet1_theta_resol_edges, jet1_p)   : kf_jet1_theta_resol_incl;
+    const DcbGaussParams         kf_jet2_theta_resol = kf_use_binned_priors ? pick_bin(kf_jet2_theta_resol_bins, kf_jet2_theta_resol_edges, jet2_p)   : kf_jet2_theta_resol_incl;
+    const DcbGaussParams         kf_jet1_phi_resol   = kf_use_binned_priors ? pick_bin(kf_jet1_phi_resol_bins,   kf_jet1_phi_resol_edges,   j1_acth)  : kf_jet1_phi_resol_incl;
+    const DcbGaussParams         kf_jet2_phi_resol   = kf_use_binned_priors ? pick_bin(kf_jet2_phi_resol_bins,   kf_jet2_phi_resol_edges,   j2_acth)  : kf_jet2_phi_resol_incl;
+    const DcbGaussParams         kf_lep_phi_resol    = kf_use_binned_priors ? pick_bin(kf_lep_phi_resol_bins,    kf_lep_phi_resol_edges,    Isolep_p) : kf_lep_phi_resol_incl;
+    const DcbGaussParams         kf_lep_theta_resol  = kf_use_binned_priors ? pick_bin(kf_lep_theta_resol_bins,  kf_lep_theta_resol_edges,  Isolep_p) : kf_lep_theta_resol_incl;
+
     double fmin = 0;
 
     if (fit_gW) {
         // 14 free params: x[0]=mW, x[1]=gW (physical); x[2..13] standardized y-coords.
-        auto chi2fn = [=](const double* x) -> double {
+        auto chi2fn = [=, &kf_jet1_p_resp, &kf_jet2_p_resp, &kf_lep_p_resp,
+                          &kf_jet1_theta_resol, &kf_jet2_theta_resol, &kf_lep_theta_resol,
+                          &kf_jet1_phi_resol,   &kf_jet2_phi_resol,   &kf_lep_phi_resol](const double* x) -> double {
             const double mW = x[0], gW = x[1];
             if (gW <= 0.0) return 1e10;
             const double s1 = _y2x(x[2],  kf_jet1_p_resp);
@@ -439,7 +523,9 @@ KinFitResult kinFitBFGS(float jet1_p,    float jet1_theta,    float jet1_phi,
         result.pl = _y2x(x0[13], kf_lep_phi_resol);
     } else {
         // 13 free params: x[0]=mW (physical); x[1..12] standardized y-coords.
-        auto chi2fn = [=](const double* x) -> double {
+        auto chi2fn = [=, &kf_jet1_p_resp, &kf_jet2_p_resp, &kf_lep_p_resp,
+                          &kf_jet1_theta_resol, &kf_jet2_theta_resol, &kf_lep_theta_resol,
+                          &kf_jet1_phi_resol,   &kf_jet2_phi_resol,   &kf_lep_phi_resol](const double* x) -> double {
             const double mW = x[0];
             const double s1 = _y2x(x[1],  kf_jet1_p_resp);
             const double s2 = _y2x(x[2],  kf_jet2_p_resp);
@@ -554,15 +640,36 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     if (Isolep_p < 0 || jet1_p <= 0 || jet2_p <= 0 || missing_p <= 0)
         return result;
 
-    // Local copies of the jet priors. chi2fn captures these by reference, so the
-    // jet1↔jet2 swap fallback below can repoint them via std::swap without
-    // rebuilding the lambda.
-    DcbGaussParams p_jet1_p_resp      = kf_jet1_p_resp;
-    DcbGaussParams p_jet2_p_resp      = kf_jet2_p_resp;
-    DcbGaussParams p_jet1_theta_resol = kf_jet1_theta_resol;
-    DcbGaussParams p_jet2_theta_resol = kf_jet2_theta_resol;
-    DcbGaussParams p_jet1_phi_resol   = kf_jet1_phi_resol;
-    DcbGaussParams p_jet2_phi_resol   = kf_jet2_phi_resol;
+    // Pick per-event priors. Jet priors are taken by VALUE so chi2fn can
+    // capture them by reference. Each jet ALSO has an "alt" pick — the other
+    // jet's prior at the SAME jet's own kinematics (binned: other binset, own
+    // bin index; inclusive: other jet's scalar). swap_jet_priors() toggles
+    // active <-> alt via std::swap (involution).
+    const double j1_acth = std::abs(std::cos(jet1_theta));
+    const double j2_acth = std::abs(std::cos(jet2_theta));
+    DcbGaussParams p_jet1_p_resp      = kf_use_binned_priors ? pick_bin(kf_jet1_p_resp_bins,      kf_jet1_p_resp_edges,      jet1_p)   : kf_jet1_p_resp_incl;
+    DcbGaussParams p_jet2_p_resp      = kf_use_binned_priors ? pick_bin(kf_jet2_p_resp_bins,      kf_jet2_p_resp_edges,      jet2_p)   : kf_jet2_p_resp_incl;
+    DcbGaussParams p_jet1_theta_resol = kf_use_binned_priors ? pick_bin(kf_jet1_theta_resol_bins, kf_jet1_theta_resol_edges, jet1_p)   : kf_jet1_theta_resol_incl;
+    DcbGaussParams p_jet2_theta_resol = kf_use_binned_priors ? pick_bin(kf_jet2_theta_resol_bins, kf_jet2_theta_resol_edges, jet2_p)   : kf_jet2_theta_resol_incl;
+    DcbGaussParams p_jet1_phi_resol   = kf_use_binned_priors ? pick_bin(kf_jet1_phi_resol_bins,   kf_jet1_phi_resol_edges,   j1_acth)  : kf_jet1_phi_resol_incl;
+    DcbGaussParams p_jet2_phi_resol   = kf_use_binned_priors ? pick_bin(kf_jet2_phi_resol_bins,   kf_jet2_phi_resol_edges,   j2_acth)  : kf_jet2_phi_resol_incl;
+    DcbGaussParams p_jet1_p_resp_alt{};
+    DcbGaussParams p_jet2_p_resp_alt{};
+    DcbGaussParams p_jet1_theta_resol_alt{};
+    DcbGaussParams p_jet2_theta_resol_alt{};
+    DcbGaussParams p_jet1_phi_resol_alt{};
+    DcbGaussParams p_jet2_phi_resol_alt{};
+    if (kf_jet_swap_enabled) {
+        p_jet1_p_resp_alt      = kf_use_binned_priors ? pick_bin(kf_jet2_p_resp_bins,      kf_jet2_p_resp_edges,      jet1_p)   : kf_jet2_p_resp_incl;
+        p_jet2_p_resp_alt      = kf_use_binned_priors ? pick_bin(kf_jet1_p_resp_bins,      kf_jet1_p_resp_edges,      jet2_p)   : kf_jet1_p_resp_incl;
+        p_jet1_theta_resol_alt = kf_use_binned_priors ? pick_bin(kf_jet2_theta_resol_bins, kf_jet2_theta_resol_edges, jet1_p)   : kf_jet2_theta_resol_incl;
+        p_jet2_theta_resol_alt = kf_use_binned_priors ? pick_bin(kf_jet1_theta_resol_bins, kf_jet1_theta_resol_edges, jet2_p)   : kf_jet1_theta_resol_incl;
+        p_jet1_phi_resol_alt   = kf_use_binned_priors ? pick_bin(kf_jet2_phi_resol_bins,   kf_jet2_phi_resol_edges,   j1_acth)  : kf_jet2_phi_resol_incl;
+        p_jet2_phi_resol_alt   = kf_use_binned_priors ? pick_bin(kf_jet1_phi_resol_bins,   kf_jet1_phi_resol_edges,   j2_acth)  : kf_jet1_phi_resol_incl;
+    }
+    const DcbExpLeftGaussParams kf_lep_p_resp     = kf_use_binned_priors ? pick_bin(kf_lep_p_resp_bins,      kf_lep_p_resp_edges,      Isolep_p) : kf_lep_p_resp_incl;
+    const DcbGaussParams        kf_lep_theta_resol = kf_use_binned_priors ? pick_bin(kf_lep_theta_resol_bins, kf_lep_theta_resol_edges, Isolep_p) : kf_lep_theta_resol_incl;
+    const DcbGaussParams        kf_lep_phi_resol   = kf_use_binned_priors ? pick_bin(kf_lep_phi_resol_bins,   kf_lep_phi_resol_edges,   Isolep_p) : kf_lep_phi_resol_incl;
 
     // 14 parameters: x[0]=mW, x[1]=gW, x[2..5]=scales, x[6..8]=jet/MET theta, x[9..11]=jet/MET phi, x[12..13]=lep angles.
     // When fit_gW=false, gW is pinned to KF_GW_FIXED via FixVariable(1).
@@ -690,13 +797,18 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         return minimizer->Status();
     };
 
-    // Toggle the jet1↔jet2 prior assignment (momentum + theta + phi). Tests the
-    // alternative jet-to-prior pairing for events whose pT-ordering disagrees
-    // with the one used when the priors were fitted.
+    // Toggle the jet1↔jet2 prior assignment (momentum + theta + phi). Tests
+    // the alternative jet-to-prior pairing for events whose pT-ordering
+    // disagrees with the prior-fit ordering. Each std::swap exchanges the
+    // active prior with its precomputed alt (other-jet binset, own kinematics)
+    // — so the bin index per jet stays fixed; only the binset name flips.
     auto swap_jet_priors = [&]() {
-        std::swap(p_jet1_p_resp,      p_jet2_p_resp);
-        std::swap(p_jet1_theta_resol, p_jet2_theta_resol);
-        std::swap(p_jet1_phi_resol,   p_jet2_phi_resol);
+        std::swap(p_jet1_p_resp,      p_jet1_p_resp_alt);
+        std::swap(p_jet2_p_resp,      p_jet2_p_resp_alt);
+        std::swap(p_jet1_theta_resol, p_jet1_theta_resol_alt);
+        std::swap(p_jet2_theta_resol, p_jet2_theta_resol_alt);
+        std::swap(p_jet1_phi_resol,   p_jet1_phi_resol_alt);
+        std::swap(p_jet2_phi_resol,   p_jet2_phi_resol_alt);
     };
 
     struct PassResult { int status; double chi2; double x[14]; bool swapped; int pass_id; };
