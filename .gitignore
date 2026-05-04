@@ -9,6 +9,13 @@ __pycache__/
 # Local helper scripts (ssh-driven pipeline wrappers)
 .run_*.sh
 
+# LaTeX build artefacts in report/
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+report/*.pdf
+
 # Claude's throwaway diagnostics / launchers — never tracked
 scripts_local/
 
