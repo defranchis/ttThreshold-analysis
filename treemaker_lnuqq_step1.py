@@ -31,7 +31,15 @@ all_branches = [
     "gen_WW_px", "gen_WW_py", "gen_WW_pz",
     "gen_WW_m", "gen_WW_m_minus_ecm",
     "jet1_matched_q_dR", "jet2_matched_q_dR",
-    "lep_gen_reco_dR", "met_gen_reco_dR",
+    # Beam-energy-spread proxies on the post-BES e+e- (depth=1):
+    #   m−ECM ∝ (δE+ + δE−) sum component;  pz ∝ (δE+ − δE−) asymmetry.
+    "gen_ee_m_minus_ecm", "gen_ee_pz",
+    # m(WW) − m(ee): pure ISR mass-loss (BES contribution subtracted off vs
+    # the older gen_WW_m_minus_ecm).
+    "gen_WW_m_minus_m_ee",
+    # ISR 3-momentum: (post-BES e+e- depth=1) − (post-ISR e+e- depth=2). E is
+    # redundant given p_T/|pz| ≈ 1-3% (collinear ISR dominates) — dropped.
+    "gen_isr_px", "gen_isr_py", "gen_isr_pz",
     # Reco kinematics needed by fit_resolutions for the equal-occupancy binning
     # variable lookups (per-bin DCB priors).
     "reco_jet1_p", "reco_jet2_p", "reco_lep_p",
@@ -67,10 +75,10 @@ class RDFanalysis:
 
         df = tc.select_gen_fromele(df)
         df = tc.define_gen_kinematics(df)
+        df = tc.define_beam_kinematics(df)
 
         df = tc.define_reco_W_WW(df)
         df = tc.match_jets_to_quarks(df)
-        df = tc.define_gen_reco_dR(df)
         df = tc.define_resolutions(df)
 
         print(f"\n[cutflow] dataset={_dataset}")

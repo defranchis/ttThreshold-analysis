@@ -149,6 +149,44 @@ def select_gen_fromele(df):
     return df
 
 
+def define_beam_kinematics(df):
+    """Beam e± at the two relevant chain depths:
+      depth=1 (post-BES, pre-ISR) → m(ee)−ECM gives BES;
+      depth=2 (post-ISR, into hard process) → (depth1 − depth2) gives the
+      total ISR 4-momentum."""
+    df = df.Define("gen_beams",
+        "FCCAnalyses::WWFunctions::sel_beam_electrons()(Particle, Particle0)")
+    df = df.Filter("gen_beams.size() == 2",
+                   "gen: exactly 2 post-BES beam e± (depth=1)")
+    df = df.Define("gen_beams_tlv",
+        "FCCAnalyses::MCParticle::get_tlv(gen_beams)")
+    df = df.Define("gen_ee_p4",
+        "FCCAnalyses::WWFunctions::sum_p4({gen_beams_tlv[0], gen_beams_tlv[1]})")
+    df = df.Define("gen_ee_m_minus_ecm", "gen_ee_p4.M() - FCCAnalyses::WWFunctions::ECM")
+    # Longitudinal momentum of the depth-1 e+e- system = E+ − E−, the BES
+    # asymmetry between the two beams. Independent of m(ee)−ECM (sum vs diff of
+    # independent Gaussians) but same width.
+    df = df.Define("gen_ee_pz", "gen_ee_p4.Pz()")
+
+    df = df.Define("gen_post_isr_e",
+        "FCCAnalyses::WWFunctions::sel_post_isr_electrons()(Particle, Particle0)")
+    df = df.Filter("gen_post_isr_e.size() == 2",
+                   "gen: exactly 2 post-ISR e± (depth=2)")
+    df = df.Define("gen_post_isr_e_tlv",
+        "FCCAnalyses::MCParticle::get_tlv(gen_post_isr_e)")
+    df = df.Define("gen_ee_postisr_p4",
+        "FCCAnalyses::WWFunctions::sum_p4({gen_post_isr_e_tlv[0], gen_post_isr_e_tlv[1]})")
+    df = df.Define("gen_isr_p4", "gen_ee_p4 - gen_ee_postisr_p4")
+    df = df.Define("gen_isr_px", "gen_isr_p4.Px()")
+    df = df.Define("gen_isr_py", "gen_isr_p4.Py()")
+    df = df.Define("gen_isr_pz", "gen_isr_p4.Pz()")
+    # m(WW) − m(ee) — pure ISR mass-loss, with BES variance subtracted off vs
+    # the older m(WW) − ECM. In the no-ISR limit it is exactly 0; with ISR it
+    # is < 0 (energy loss to the ISR photons).
+    df = df.Define("gen_WW_m_minus_m_ee", "gen_WW_m - gen_ee_p4.M()")
+    return df
+
+
 def define_gen_kinematics(df):
     df = df.Define("gen_leps_fromele_tlv",
         "FCCAnalyses::MCParticle::get_tlv(gen_leps_fromele)")
@@ -229,19 +267,6 @@ def match_jets_to_quarks(df):
     df = df.Define("gen_quark2_phi",      "jet2_matched_q_p4.Phi()")
     df = df.Define("gen_quark2_eta",      "jet2_matched_q_p4.Eta()")
     df = df.Define("gen_quark2_costheta", "jet2_matched_q_p4.CosTheta()")
-    return df
-
-
-def define_gen_reco_dR(df):
-    """gen↔reco angular distance for the lepton and (reco MET vs gen ν).
-
-    Diagnostic branches; not used by the kinfit but useful for resolution
-    studies and matching-quality plots.
-    """
-    df = df.Define("lep_gen_reco_dR",
-        "(double)Isoleps_p4_reco.DeltaR(lep_p4_gen)")
-    df = df.Define("met_gen_reco_dR",
-        "(double)missing_p_p4.DeltaR(nu_p4_gen)")
     return df
 
 

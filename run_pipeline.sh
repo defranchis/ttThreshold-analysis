@@ -27,13 +27,7 @@ if [ $fail -ne 0 ]; then
     exit 1
 fi
 
-echo "=== Plot: mW overlay ==="
-python3 plot_mW_overlay.py
-
-echo "=== Plot: kinfit variables ==="
-python3 plot_kinfit_vars.py
-
-echo "=== Plot: kinfit results ==="
+echo "=== Plot: kinfit results (mW overlays + kinfit vars) ==="
 python3 plot_kinfit_results.py
 
 echo "=== Done ==="

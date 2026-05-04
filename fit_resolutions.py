@@ -124,6 +124,29 @@ BRANCH_CONFIG = {
                              "zoom_xlim": (-3.0, 3.0)},
     # Gen WW invariant mass minus ECM. Peak just below 0 (ISR), hard boundary at 0.
     "gen_WW_m_minus_ecm": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber2g"},
+    # m(WW) − m(ee) — pure ISR mass-loss, BES variance subtracted off. Same
+    # right-boundary-at-0 + heavy-left-tail shape as gen_WW_m_minus_ecm but the
+    # peak/right-edge should be tighter (no BES smearing).
+    "gen_WW_m_minus_m_ee": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber2g"},
+    # m(e+e-) − ECM at depth=1 in the e± chain (post-BES, pre-ISR). Symmetric
+    # Gaussian smearing of the beam energies — single Gauss is sufficient.
+    "gen_ee_m_minus_ecm":  {"clip": (0.1, 99.9),  "nbins": 100, "model": "gauss"},
+    "gen_ee_pz":           {"clip": (0.1, 99.9),  "nbins": 100, "model": "gauss"},
+    # ISR 4-momentum (depth=1 − depth=2 e+e-). True delta-at-0 spike (~40-43% of
+    # events have no ISR, sub-bin precision) + smooth ISR tail (σ ≈ 0.3-2 GeV).
+    # `spike_dcb2g`: f_delta · G(0, σ_res) + (1−f_delta) · dcb2g(x). f_delta is
+    # the fraction with |x|<delta_threshold (no-ISR), σ_res smooths the delta
+    # for kinfit numerical stability, and dcb2g is fitted on the |x|>threshold
+    # subset.
+    "gen_isr_px":         {"clip": (0.5, 99.5),  "nbins": 200,  "model": "spike_dcb2g",
+                             "delta_threshold": 0.001, "sig_res": 0.001,
+                             "zoom_xlim": (-2.0, 2.0)},
+    "gen_isr_py":         {"clip": (0.5, 99.5),  "nbins": 200,  "model": "spike_dcb2g",
+                             "delta_threshold": 0.001, "sig_res": 0.001,
+                             "zoom_xlim": (-2.0, 2.0)},
+    "gen_isr_pz":         {"clip": (0.5, 99.5),  "nbins": 200,  "model": "spike_dcb2g",
+                             "delta_threshold": 0.001, "sig_res": 0.001,
+                             "zoom_xlim": (-10.0, 10.0)},
 }
 
 # Virtual combined branches: concatenate jet1 + jet2 into a single distribution
@@ -142,6 +165,12 @@ KINFIT_BRANCHES = [
     "met_theta_resol",  "met_phi_resol",
     "gen_WW_px", "gen_WW_py", "gen_WW_pz",
     "gen_WW_m_minus_ecm",
+    "gen_ee_m_minus_ecm",    # BES proxy: m(post-BES e+e-) − ECM, single-Gauss fit
+    "gen_ee_pz",             # BES asymmetry δE+ − δE−, single-Gauss fit
+    "gen_WW_m_minus_m_ee",   # pure ISR mass-loss (BES variance removed)
+    # ISR 3-momentum: (depth=1 e+e-) − (depth=2 e+e-). Same delta-at-0 shape as
+    # gen_WW_*: ~40% no-ISR spike + smooth tail → spike_dcb2g.
+    "gen_isr_px", "gen_isr_py", "gen_isr_pz",
 ]
 
 # ── Model functions ──────────────────────────────────────────────────────────
@@ -229,6 +258,27 @@ def dcb_expright_gauss(x, N, mu_c, sigma_c, aL, nL, aR, kR, f_wide, mu_w, sigma_
     core = _dcb_expright_core((x - mu_c) / sigma_c, aL, nL, aR, kR)
     wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
     return N * ((1.0 - f_wide) * core + f_wide * wide)
+
+
+def gauss(x, N, mu, sigma):
+    """Single Gaussian, area-normalised to N: ∫ gauss dx = N."""
+    sigma = abs(sigma)
+    return N * np.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * math.sqrt(2.0 * math.pi))
+
+
+def fit_gauss(centers, counts, mu0, sig0):
+    """Single-Gaussian fit. Returns (popt=(N,mu,sigma), pcov, fit_ok, chi2)."""
+    sigma_y = np.sqrt(np.maximum(counts, 1.0))
+    bw = float(centers[1] - centers[0]) if len(centers) > 1 else 1.0
+    p0 = [float(counts.sum()) * bw, mu0, sig0]
+    try:
+        popt, pcov = curve_fit(gauss, centers, counts, p0=p0, sigma=sigma_y,
+                               absolute_sigma=False, maxfev=20000)
+        pred = gauss(centers, *popt)
+        chi2 = float(np.sum((counts - pred) ** 2 / np.maximum(sigma_y ** 2, 1.0)))
+        return popt, pcov, True, chi2
+    except Exception:
+        return None, None, False, float("inf")
 
 
 def dcb_gaussbox(x, N, mu_c, sigma_c, aL, nL, aR, nR, f_wide, p_max, sigma_box):
@@ -949,6 +999,19 @@ def process_ecm(ecm):
         if len(vals) < 100:
             print(f"  [{ecm}]  SKIP {bname}: {len(vals)} entries"); continue
 
+        # spike_dcb2g: split out the no-ISR delta-at-0 events. The dcb2g part
+        # is fitted on the |x|>delta_threshold subset; f_delta is computed from
+        # the full data and stored alongside for the kinfit composite PDF.
+        f_delta = None
+        sig_res = None
+        if model == "spike_dcb2g":
+            delta_threshold = cfg.get("delta_threshold", 0.001)
+            sig_res         = cfg.get("sig_res", 0.001)
+            f_delta = float((np.abs(vals) < delta_threshold).mean())
+            vals = vals[np.abs(vals) >= delta_threshold]
+            if len(vals) < 100:
+                print(f"  [{ecm}]  SKIP {bname}: {len(vals)} non-delta entries"); continue
+
         lo_p, hi_p = np.percentile(vals, [clip_lo, clip_hi])
         vals_c = vals[(vals >= lo_p) & (vals <= hi_p)]
 
@@ -980,7 +1043,7 @@ def process_ecm(ecm):
                 if popt2 is not None and (popt is None or chi2_2 < chi2):
                     popt, pcov, fit_ok, chi2 = popt2, pcov2, fit_ok2, chi2_2
             nparams = 10
-        elif model == "dcb2g":
+        elif model in ("dcb2g", "spike_dcb2g"):
             popt, pcov, fit_ok, chi2 = fit_dcb2g(centers[mask], counts[mask], mu0, sig0)
             # Run iminuit fallback once χ²/ndf > 2.5 — narrow-core distributions
             # (lep angular resolutions in extreme p bins) often need it.
@@ -1002,6 +1065,9 @@ def process_ecm(ecm):
                 if popt2 is not None and (popt is None or chi2_2 < chi2):
                     popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
             nparams = 10
+        elif model == "gauss":
+            popt, pcov, fit_ok, chi2 = fit_gauss(centers[mask], counts[mask], mu0, sig0)
+            nparams = 3
         else:
             popt, pcov, fit_ok, chi2 = fit_dcb(centers[mask], counts[mask], mu0, sig0)
             nparams = 7
@@ -1011,16 +1077,19 @@ def process_ecm(ecm):
 
         if popt is None:
             print(f"  [{ecm}]  FAIL {bname}: all starts failed, using Gaussian-like fallback")
-            popt = [float(counts.max()), mu0, sig0, 5., 100., 5., 100.]
-            if model == "dcber2g":
-                _s = max((float(centers[-1]) - mu0) * 0.4, 0.15)
-                popt = [float(counts.max()), mu0, _s, 0.5, 2.0, 1.5, 5.0, 0.05,
-                        mu0 - 4*_s, 6*_s]
-            elif model == "dcbgb":
-                x_span = 0.5 * (centers[-1] - centers[0])
-                popt += [0.01, x_span * 0.8, sig0 * 0.2]
-            elif model in ("dcb2g", "expleft2g"):
-                popt += [0.01, mu0, sig0 * 5]
+            if model == "gauss":
+                popt = [float(counts.sum()) * float(centers[1] - centers[0]), mu0, sig0]
+            else:
+                popt = [float(counts.max()), mu0, sig0, 5., 100., 5., 100.]
+                if model == "dcber2g":
+                    _s = max((float(centers[-1]) - mu0) * 0.4, 0.15)
+                    popt = [float(counts.max()), mu0, _s, 0.5, 2.0, 1.5, 5.0, 0.05,
+                            mu0 - 4*_s, 6*_s]
+                elif model == "dcbgb":
+                    x_span = 0.5 * (centers[-1] - centers[0])
+                    popt += [0.01, x_span * 0.8, sig0 * 0.2]
+                elif model in ("dcb2g", "expleft2g"):
+                    popt += [0.01, mu0, sig0 * 5]
             fit_ok    = False
             chi2_ndof = np.inf
 
@@ -1118,6 +1187,44 @@ def process_ecm(ecm):
                    "\n"
                    rf"$f_w$={fw:.3f}, $\mu_w$={muw:.3g}, $\sigma_w$={sw:.3g}"
                    rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
+        elif model == "spike_dcb2g":
+            N_f, mu_c, sc, aL, nL, aR, nR, fw, muw, sw = popt
+            mu_c = float(mu_c);  sc  = abs(float(sc))
+            aL   = abs(float(aL)); nL = abs(float(nL))
+            aR   = abs(float(aR)); nR = abs(float(nR))
+            fw   = abs(float(fw)); muw = float(muw); sw = abs(float(sw))
+            N_f  = abs(float(N_f))
+            results[bname] = dict(
+                model="spike_dcb2g",
+                f_delta=float(f_delta), sig_res=float(sig_res),
+                mu=mu_c, sigma=sc, aL=aL, nL=nL, aR=aR, nR=nR,
+                f_wide=fw, mu_wide=muw, sigma_wide=sw,
+                chi2_ndof=round(float(chi2_ndof), 3), fit_ok=bool(fit_ok),
+            )
+            def yfn(x, _N=N_f, _mc=mu_c, _sc=sc, _aL=aL, _nL=nL, _aR=aR, _nR=nR,
+                    _fw=fw, _mw=muw, _sw=sw):
+                return dcb_gauss(x, _N, _mc, _sc, _aL, _nL, _aR, _nR, _fw, _mw, _sw)
+            lbl = (rf"$f_\Delta$={f_delta*100:.1f}% (no-ISR removed)+ DCB+G:"
+                   "\n"
+                   rf"$\mu_c$={mu_c:+.3g}, $\sigma_c$={sc:.3g}, "
+                   rf"$\alpha_L$={aL:.2f}, $n_L$={nL:.1f}, $\alpha_R$={aR:.2f}, $n_R$={nR:.1f}"
+                   "\n"
+                   rf"$f_w$={fw:.3f}, $\mu_w$={muw:.3g}, $\sigma_w$={sw:.3g}"
+                   rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
+        elif model == "gauss":
+            N_f, mu_g, sg = popt
+            N_f = abs(float(N_f)); mu_g = float(mu_g); sg = abs(float(sg))
+            # mu_c / sc are referenced by the post-fit plotting code (xfine peak grid).
+            mu_c, sc = mu_g, sg
+            results[bname] = dict(
+                model="gauss",
+                mu=mu_g, sigma=sg,
+                chi2_ndof=round(float(chi2_ndof), 3), fit_ok=bool(fit_ok),
+            )
+            def yfn(x, _N=N_f, _m=mu_g, _s=sg):
+                return gauss(x, _N, _m, _s)
+            lbl = (rf"Gauss: $\mu$={mu_g*1000:+.2f} MeV, $\sigma$={sg*1000:.2f} MeV"
+                   rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
         else:
             N_f, mu_f, sf, aL, nL, aR, nR = popt
             mu_f = float(mu_f); sf  = abs(float(sf))
@@ -1197,7 +1304,7 @@ def process_ecm(ecm):
                     label="DCB core")
             ax.plot(xfine, y_wide * fw,       color="tab:green",  lw=1.2, ls=":",
                     label="GaussBox component")
-        elif model == "dcb2g":
+        elif model in ("dcb2g", "spike_dcb2g"):
             y_core = dcb_gauss(xfine, N_f, mu_c, sc, aL, nL, aR, nR, 0., muw, sw)
             y_wide = dcb_gauss(xfine, N_f, mu_c, sc, aL, nL, aR, nR, 1., muw, sw)
             ax.plot(xfine, y_core * (1 - fw), color="tab:orange", lw=1.2, ls="--",
@@ -1328,6 +1435,18 @@ def process_ecm(ecm):
             "bins":    bins_list,
         }
 
+    # ── BES correlation diagnostic: ρ(m_ee−ECM, pz_ee) ───────────────────────
+    if "gen_ee_m_minus_ecm" in data_all and "gen_ee_pz" in data_all:
+        a = _flatten_raw(data_all["gen_ee_m_minus_ecm"])
+        b = _flatten_raw(data_all["gen_ee_pz"])
+        if len(a) == len(b) and len(a) > 1:
+            rho = float(np.corrcoef(a, b)[0, 1])
+            print(f"  [{ecm}]  BES correlation  ρ(m_ee−ECM, pz_ee) = {rho:+.5f}")
+            results["_bes_correlations"] = {
+                "m_ee_pz_rho": rho,
+                "n_events":    int(len(a)),
+            }
+
     # ── JSON ──────────────────────────────────────────────────────────────────
     os.makedirs(FUNC_DIR, exist_ok=True)
     json_path = f"{FUNC_DIR}/dcb_results_ecm{ecm}.json"
@@ -1343,6 +1462,8 @@ def _cpp_struct_for_model(model):
     if model == "dcb2g":     return ("DcbGaussParams",         "DCBG")
     if model == "expleft2g": return ("DcbExpLeftGaussParams",  "DCBELG")
     if model == "dcber2g":   return ("DcbExpRightGaussParams", "DCBERG")
+    if model == "gauss":     return ("GaussParams",            "GAUSS")
+    if model == "spike_dcb2g": return ("SpikeDcbGaussParams",  "SDCBG")
     return ("DcbParams", "DCB")
 
 
@@ -1364,6 +1485,14 @@ def _cpp_struct_initializer(p):
     if p["model"] == "dcber2g":
         return (f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
                 f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['kR']:.6f}, "
+                f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
+                f"{p['norm']:.10e}")
+    if p["model"] == "gauss":
+        return f"{p['mu']:+.6f}, {p['sigma']:.6f}"
+    if p["model"] == "spike_dcb2g":
+        return (f"{p['f_delta']:.6f}, {p['sig_res']:.6f}, "
+                f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
+                f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['nR']:.6f}, "
                 f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
                 f"{p['norm']:.10e}")
     return (f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
@@ -1453,6 +1582,17 @@ def write_combined_header(all_results):
         "    double norm;                           // 1/integral, shape integrates to 1",
         "};",
         "",
+        "struct GaussParams {",
+        "    double mu, sigma;                      // single Gaussian (analytically normalised)",
+        "};",
+        "",
+        "struct SpikeDcbGaussParams {",
+        "    double f_delta, sigma_res;             // delta-spike (smoothed Gaussian at 0)",
+        "    double mu, sigma, aL, nL, aR, nR;     // smooth narrow DCB core",
+        "    double f_wide, mu_wide, sigma_wide;    // smooth broad Gaussian",
+        "    double norm;                           // 1/integral of (smooth) shape",
+        "};",
+        "",
         "// ── Unnormalised shape helpers ───────────────────────────────────────",
         "",
         "namespace detail {",
@@ -1501,6 +1641,26 @@ def write_combined_header(all_results):
         "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
         "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
         "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
+        "}",
+        "",
+        "inline double gauss_neg2logpdf(double x, const GaussParams& p) {",
+        "    double t = (x - p.mu) / p.sigma;",
+        "    return t*t + 2.0 * std::log(p.sigma) + std::log(2.0 * M_PI);",
+        "}",
+        "",
+        "inline double spike_dcb_gauss_neg2logpdf(double x, const SpikeDcbGaussParams& p) {",
+        "    // Composite PDF: f_delta * G(0, sigma_res) + (1 - f_delta) * dcb_gauss(x).",
+        "    // Used for distributions with a true delta-at-0 spike (e.g. ISR pz with",
+        "    // ~40% of events at exactly 0); sigma_res smooths the delta for kinfit",
+        "    // numerical stability.",
+        "    double inv_sr   = 1.0 / p.sigma_res;",
+        "    double delta_pdf = p.f_delta * inv_sr * std::exp(-0.5 * x * x * inv_sr * inv_sr)",
+        "                       / std::sqrt(2.0 * M_PI);",
+        "    double core = detail::dcb_unnorm((x - p.mu)/p.sigma, p.aL, p.nL, p.aR, p.nR);",
+        "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
+        "    double shape = (1.0 - p.f_wide) * core + p.f_wide * wide;",
+        "    double smooth_pdf = (1.0 - p.f_delta) * shape * p.norm;",
+        "    return -2.0 * std::log(std::max(delta_pdf + smooth_pdf, 1e-300));",
         "}",
         "",
         "inline double dcb_expright_gauss_neg2logpdf(double x, const DcbExpRightGaussParams& p) {",

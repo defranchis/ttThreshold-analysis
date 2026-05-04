@@ -49,6 +49,76 @@ struct sel_genleps_fromele {
     }
 };
 
+// Post-BES, pre-ISR beam e± (depth=1 in the e± chain).
+// In Winter2023 wzp6 samples the chain is:
+//   depth 0 = nominal beams (no parents, m(ee)=ECM exactly, no BES)
+//   depth 1 = e± with an e± parent that itself has no parents — BES applied
+//             here (σ_BES ≈ 84 MeV per beam, m(ee) symmetric around ECM)
+//   depth≥2 = post-ISR (energy-loss tail, m(ee) ≪ ECM with ISR-photon recoil)
+// We pick depth=1 to isolate BES from ISR.
+struct sel_beam_electrons {
+    sel_beam_electrons() {}
+    ROOT::VecOps::RVec<edm4hep::MCParticleData> operator()(
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> in,
+        const ROOT::VecOps::RVec<int>& parents_relation) const {
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> result;
+        result.reserve(2);
+        for (size_t i = 0; i < in.size(); ++i) {
+            const auto& p = in[i];
+            if (std::abs(p.PDG) != 11) continue;
+            if (p.parents_begin == p.parents_end) continue;  // skip depth 0
+            int parent_e = -1;
+            for (unsigned j = p.parents_begin; j < p.parents_end; ++j) {
+                if (j >= parents_relation.size()) break;
+                int idx = parents_relation[j];
+                if (idx < 0 || idx >= (int)in.size()) continue;
+                if (std::abs(in[idx].PDG) == 11) { parent_e = idx; break; }
+            }
+            if (parent_e < 0) continue;
+            const auto& pa = in[parent_e];
+            if (pa.parents_begin != pa.parents_end) continue;  // require depth-0 parent
+            result.emplace_back(p);
+        }
+        return result;
+    }
+};
+
+// Post-ISR beam e± (depth=2 in the e± chain) — the e± entering the hard
+// process, after the ISR photons have been emitted. Identified as e± with an
+// e± parent whose own first e± parent has no parents (= depth-0 beams).
+// (gen_ee_p4_depth1 − gen_ee_p4_depth2) gives the total ISR 4-momentum.
+struct sel_post_isr_electrons {
+    sel_post_isr_electrons() {}
+    ROOT::VecOps::RVec<edm4hep::MCParticleData> operator()(
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> in,
+        const ROOT::VecOps::RVec<int>& parents_relation) const {
+        auto first_e_parent = [&](const edm4hep::MCParticleData& p) -> int {
+            for (unsigned j = p.parents_begin; j < p.parents_end; ++j) {
+                if (j >= parents_relation.size()) break;
+                int idx = parents_relation[j];
+                if (idx < 0 || idx >= (int)in.size()) continue;
+                if (std::abs(in[idx].PDG) == 11) return idx;
+            }
+            return -1;
+        };
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> result;
+        result.reserve(2);
+        for (size_t i = 0; i < in.size(); ++i) {
+            const auto& p = in[i];
+            if (std::abs(p.PDG) != 11) continue;
+            int parent = first_e_parent(p);
+            if (parent < 0) continue;
+            const auto& pa = in[parent];
+            if (pa.parents_begin == pa.parents_end) continue;       // parent is depth-0; we want depth-2
+            int grandp = first_e_parent(pa);
+            if (grandp < 0) continue;
+            if (in[grandp].parents_begin != in[grandp].parents_end) continue;  // grandparent must be depth-0
+            result.emplace_back(p);
+        }
+        return result;
+    }
+};
+
 // Light quarks (|PDG|<=5) with e± parent — like FCCAnalyses::MCParticle::sel_lightQuarks_fromele
 // but using the robust parents-relation walk.
 struct sel_lightQuarks_fromele {
