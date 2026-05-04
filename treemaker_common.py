@@ -315,16 +315,10 @@ def define_resolutions(df):
 
 
 # ── kinematic fit (step2 only) ───────────────────────────────────────────────
-_KINFIT_FUNCS = {
-    "minuit": "FCCAnalyses::WWFunctions::kinFit",
-    "bfgs":   "FCCAnalyses::WWFunctions::kinFitBFGS",
-}
-
-def run_kinfit(df, method="minuit", free_gw=False):
-    call    = _KINFIT_FUNCS[method]
+def run_kinfit(df, free_gw=False):
     free_gw = "true" if free_gw else "false"
     df = df.Define("kinfit",
-        call + "("
+        "FCCAnalyses::WWFunctions::kinFit("
         "reco_jet1_p, reco_jet1_theta, reco_jet1_phi,"
         "reco_jet2_p, reco_jet2_theta, reco_jet2_phi,"
         "reco_lep_p,  reco_lep_theta,  reco_lep_phi,"

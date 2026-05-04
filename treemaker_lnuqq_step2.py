@@ -18,11 +18,10 @@ if _ecm_env:
         raise ValueError(f"WW_ECM={_ecm_env} not in processList ({list(processList)})")
     processList = {_key: processList[_key]}
 
-# ── kinematic fit method ───────────────────────────────────────────────────
-# "minuit" → ROOT Minuit2 (robust, ~200-500 function evaluations per event)
-# "bfgs"   → custom BFGS, stack-only, no heap, template-inlined chi2
-#             (~50-150 evaluations, thread-safe without thread_local)
-KIN_FIT_METHOD  = "minuit"
+# ── kinematic fit configuration ────────────────────────────────────────────
+# Optimizer is ROOT Minuit2 (robust, ~200-500 chi² evaluations per event).
+# An older custom BFGS variant was archived to WWFunctions/old/WWKinFitBFGS.h
+# on 2026-05-04 — see the file header for the test outcome and removal rationale.
 # True → fit gW as a free parameter with Gaussian prior σ = KF_GW_PRIOR_SIGMA_REL × KF_GW_FIXED;
 # False → pin gW = KF_GW_FIXED via Migrad FixVariable.
 KIN_FIT_FREE_GW = True
@@ -181,7 +180,7 @@ class RDFanalysis:
         df = tc.match_jets_to_quarks(df)
         df = tc.define_resolutions(df)
 
-        df = tc.run_kinfit(df, method=KIN_FIT_METHOD, free_gw=KIN_FIT_FREE_GW)
+        df = tc.run_kinfit(df, free_gw=KIN_FIT_FREE_GW)
 
         # Diagnostic (not enforced): count events that would pass a dR<0.1
         # jet/quark matching cut. Side count, evaluated in the same event loop
