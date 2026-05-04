@@ -2,8 +2,11 @@
 #define WWKinReco_H
 
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <memory>
 #include <functional>
+#include <random>
 #include <string>
 #include "Math/Minimizer.h"
 #include "Math/Factory.h"
@@ -235,6 +238,17 @@ static constexpr int    KF_NDIM    = 13;   // free parameters when gW is fixed (
 // adds +1 constraint, applied at chi2_ndof time.
 static constexpr int    KF_N_CONSTR = 18;
 
+// Loose-valid EDM cap. Migrad tolerance is 1e-3 (set in configure); any status=3
+// event with finite EDM under 10× that lands a fit point essentially indistinguishable
+// from a converged one (matched chi²/ndof distributions; verified 2026-05-04).
+static constexpr double KF_LOOSE_EDM_MAX = 1e-2;
+
+// Random-restart 6th pass. After the 5-pass cascade has failed, re-run Migrad
+// from up to N draws of x_default jittered by 0.5σ in y-space. Seeded from the
+// event's reco kinematics → reproducible across runs.
+static constexpr int    KF_RESTART_N      = 2;
+static constexpr double KF_RESTART_SIGMA  = 0.5;
+
 // Gaussian prior on gW (only active when fit_gW=true).
 static constexpr double KF_GW_PRIOR_SIGMA_REL = 0.01;
 static constexpr double KF_GW_PRIOR_SIGMA     = KF_GW_PRIOR_SIGMA_REL * KF_GW_FIXED;
@@ -260,11 +274,16 @@ struct KinFitResult {
                             //   2=Hesse failed, 3=EDM>tol, 4=max calls, 5=other;
                             //   BFGS: 0=converged, 1=max-iter/LS-fail).
                             //   −1 if early-returned without fitting (invalid input p).
-    int   valid;            // currently (status == 0 || status == 1)
-    // Diagnostics: which of the 4 passes won and how many actually ran.
+    int   valid;            // strict: status ∈ {0,1} (Migrad+Hesse clean)
+    int   valid_loose;      // loose: valid OR (status==3 AND finite EDM AND edm<KF_LOOSE_EDM_MAX)
+                            //   — Migrad-near-converged events whose EDM is within one
+                            //   decade of tolerance. Empirically clean (~57-61% of
+                            //   status=3 events; no chi²/ndof tail vs strict valid).
+    // Diagnostics: which pass won and how many actually ran.
     //   winner_pass: 1=Migrad-natural, 2=Migrad-swapped,
-    //                3=Simplex+Migrad-natural, 4=Simplex+Migrad-swapped.
-    //   n_passes_run: total passes executed before stopping (1..4).
+    //                3=Simplex+Migrad-natural, 4=Simplex+Migrad-swapped,
+    //                5=Hesse-refresh, 6=random-restart Migrad.
+    //   n_passes_run: total passes executed before stopping (1..6+restarts).
     //   priors_swapped: 1 if the winning pass used jet1↔jet2-swapped priors.
     int   winner_pass;
     int   n_passes_run;
@@ -546,6 +565,31 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         pick_better(best, snapshot(minimizer->Status(), priors_swapped, /*pass=*/5));
     }
 
+    // Pass 6: deterministic random-restart Migrad. Catches events the 5-pass
+    // cascade leaves with large or non-finite EDM (the residual ~20% of
+    // status=3 events that pass 5 can't touch). Seed is hashed from event
+    // kinematics so the same event gets the same jitter on re-runs.
+    if (!converged(best.status)) {
+        if (priors_swapped != best.swapped) {
+            swap_jet_priors();
+            priors_swapped = best.swapped;
+        }
+        auto bits_of = [](double d) -> uint64_t {
+            uint64_t b; std::memcpy(&b, &d, sizeof(b)); return b;
+        };
+        uint64_t s = bits_of(jet1_p) ^ (bits_of(jet2_p) << 1) ^ (bits_of(Isolep_p) << 2);
+        std::mt19937_64 rng(s);
+        std::normal_distribution<double> jitter(0.0, KF_RESTART_SIGMA);
+        for (int t = 0; t < KF_RESTART_N; ++t) {
+            double x_jitter[14];
+            for (int i = 0; i < 14; ++i) x_jitter[i] = x_default[i];
+            for (int i = 2; i < 14; ++i) x_jitter[i] += jitter(rng);  // jitter y-coords only
+            ++n_passes_run;
+            pick_better(best, snapshot(migrad_only(x_jitter), priors_swapped, /*pass=*/6));
+            if (converged(best.status)) break;
+        }
+    }
+
     // Sync in-scope priors to the winner's orientation — result extraction
     // below reads them by reference.
     if (priors_swapped != best.swapped) swap_jet_priors();
@@ -556,6 +600,9 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
 
     result.status         = status;
     result.valid          = (status == 0 || status == 1) ? 1 : 0;
+    result.valid_loose    = (result.valid
+                             || (status == 3 && std::isfinite(best.edm)
+                                 && best.edm < KF_LOOSE_EDM_MAX)) ? 1 : 0;
     result.chi2           = chi2;
     result.winner_pass    = best.pass_id;
     result.n_passes_run   = n_passes_run;
