@@ -35,8 +35,8 @@ struct KinFitParamSet {
     std::array<double,                KF_NBINS + 1> jet1_p_resp_edges;
     std::array<DcbGaussParams,        KF_NBINS> jet2_p_resp_bins;
     std::array<double,                KF_NBINS + 1> jet2_p_resp_edges;
-    std::array<DcbExpLeftGaussParams, KF_NBINS> lep_p_resp_bins;        // expleft2g
-    std::array<double,                KF_NBINS + 1> lep_p_resp_edges;
+    std::array<DcbExpRightGaussParams, KF_NBINS> lep_p_resp_bins;       // dcber2g
+    std::array<double,                 KF_NBINS + 1> lep_p_resp_edges;
     DcbParams                                    met_p_resp;
     std::array<DcbGaussParams,        KF_NBINS> jet1_phi_resol_bins;    // dcb2g
     std::array<double,                KF_NBINS + 1> jet1_phi_resol_edges;
@@ -66,7 +66,7 @@ struct KinFitParamSet {
     // Inclusive (kinematics-averaged) variants — used when kf_use_binned_priors=false.
     DcbGaussParams                               jet1_p_resp_incl;
     DcbGaussParams                               jet2_p_resp_incl;
-    DcbExpLeftGaussParams                        lep_p_resp_incl;
+    DcbExpRightGaussParams                       lep_p_resp_incl;
     DcbGaussParams                               jet1_phi_resol_incl;
     DcbGaussParams                               jet1_theta_resol_incl;
     DcbGaussParams                               jet2_phi_resol_incl;
@@ -87,7 +87,7 @@ struct KinFitParamSet {
 #define KF_POOL_BUNDLE(E) \
     DCBG_JET_P_RESP_BINS_##E,        DCBG_JET_P_RESP_EDGES_##E, \
     DCBG_JET_P_RESP_BINS_##E,        DCBG_JET_P_RESP_EDGES_##E, \
-    DCBELG_LEP_P_RESP_BINS_##E,      DCBELG_LEP_P_RESP_EDGES_##E, \
+    DCBERG_LEP_P_RESP_BINS_##E,      DCBERG_LEP_P_RESP_EDGES_##E, \
     DCB_MET_P_RESP_##E, \
     DCBG_JET_PHI_RESOL_BINS_##E,     DCBG_JET_PHI_RESOL_EDGES_##E, \
     DCBG_JET_THETA_RESOL_BINS_##E,   DCBG_JET_THETA_RESOL_EDGES_##E, \
@@ -100,7 +100,7 @@ struct KinFitParamSet {
     SDCBG_GEN_ISR_PX_##E, SDCBG_GEN_ISR_PY_##E, SDCBG_GEN_ISR_PZ_##E, \
     DCBERG_GEN_WW_M_MINUS_M_EE_##E, \
     /* inclusive — POOL: jet1 and jet2 share the pooled scalar */ \
-    DCBG_JET_P_RESP_##E, DCBG_JET_P_RESP_##E, DCBELG_LEP_P_RESP_##E, \
+    DCBG_JET_P_RESP_##E, DCBG_JET_P_RESP_##E, DCBERG_LEP_P_RESP_##E, \
     DCBG_JET_PHI_RESOL_##E, DCBG_JET_THETA_RESOL_##E, \
     DCBG_JET_PHI_RESOL_##E, DCBG_JET_THETA_RESOL_##E, \
     DCBG_LEP_PHI_RESOL_##E, DCBG_LEP_THETA_RESOL_##E
@@ -108,7 +108,7 @@ struct KinFitParamSet {
 #define KF_SEP_BUNDLE(E) \
     DCBG_JET1_P_RESP_BINS_##E,       DCBG_JET1_P_RESP_EDGES_##E, \
     DCBG_JET2_P_RESP_BINS_##E,       DCBG_JET2_P_RESP_EDGES_##E, \
-    DCBELG_LEP_P_RESP_BINS_##E,      DCBELG_LEP_P_RESP_EDGES_##E, \
+    DCBERG_LEP_P_RESP_BINS_##E,      DCBERG_LEP_P_RESP_EDGES_##E, \
     DCB_MET_P_RESP_##E, \
     DCBG_JET1_PHI_RESOL_BINS_##E,    DCBG_JET1_PHI_RESOL_EDGES_##E, \
     DCBG_JET1_THETA_RESOL_BINS_##E,  DCBG_JET1_THETA_RESOL_EDGES_##E, \
@@ -121,7 +121,7 @@ struct KinFitParamSet {
     SDCBG_GEN_ISR_PX_##E, SDCBG_GEN_ISR_PY_##E, SDCBG_GEN_ISR_PZ_##E, \
     DCBERG_GEN_WW_M_MINUS_M_EE_##E, \
     /* inclusive — SEP: per-jet scalar */ \
-    DCBG_JET1_P_RESP_##E, DCBG_JET2_P_RESP_##E, DCBELG_LEP_P_RESP_##E, \
+    DCBG_JET1_P_RESP_##E, DCBG_JET2_P_RESP_##E, DCBERG_LEP_P_RESP_##E, \
     DCBG_JET1_PHI_RESOL_##E, DCBG_JET1_THETA_RESOL_##E, \
     DCBG_JET2_PHI_RESOL_##E, DCBG_JET2_THETA_RESOL_##E, \
     DCBG_LEP_PHI_RESOL_##E, DCBG_LEP_THETA_RESOL_##E
@@ -140,8 +140,8 @@ inline std::array<DcbGaussParams,        KF_NBINS> kf_jet1_p_resp_bins      = DC
 inline std::array<double,                KF_NBINS + 1> kf_jet1_p_resp_edges      = DCBG_JET1_P_RESP_EDGES_160;
 inline std::array<DcbGaussParams,        KF_NBINS> kf_jet2_p_resp_bins      = DCBG_JET2_P_RESP_BINS_160;
 inline std::array<double,                KF_NBINS + 1> kf_jet2_p_resp_edges      = DCBG_JET2_P_RESP_EDGES_160;
-inline std::array<DcbExpLeftGaussParams, KF_NBINS> kf_lep_p_resp_bins       = DCBELG_LEP_P_RESP_BINS_160;
-inline std::array<double,                KF_NBINS + 1> kf_lep_p_resp_edges       = DCBELG_LEP_P_RESP_EDGES_160;
+inline std::array<DcbExpRightGaussParams, KF_NBINS> kf_lep_p_resp_bins       = DCBERG_LEP_P_RESP_BINS_160;
+inline std::array<double,                 KF_NBINS + 1> kf_lep_p_resp_edges       = DCBERG_LEP_P_RESP_EDGES_160;
 inline DcbParams                                    kf_met_p_resp            = DCB_MET_P_RESP_160;
 inline std::array<DcbGaussParams,        KF_NBINS> kf_jet1_phi_resol_bins   = DCBG_JET1_PHI_RESOL_BINS_160;
 inline std::array<double,                KF_NBINS + 1> kf_jet1_phi_resol_edges   = DCBG_JET1_PHI_RESOL_EDGES_160;
@@ -168,7 +168,7 @@ inline DcbExpRightGaussParams                       kf_ww_m_minus_m_ee       = D
 // Same data as the bin arrays would collapse to with one bin spanning all events.
 inline DcbGaussParams         kf_jet1_p_resp_incl      = DCBG_JET1_P_RESP_160;
 inline DcbGaussParams         kf_jet2_p_resp_incl      = DCBG_JET2_P_RESP_160;
-inline DcbExpLeftGaussParams  kf_lep_p_resp_incl       = DCBELG_LEP_P_RESP_160;
+inline DcbExpRightGaussParams kf_lep_p_resp_incl       = DCBERG_LEP_P_RESP_160;
 inline DcbGaussParams         kf_jet1_phi_resol_incl   = DCBG_JET1_PHI_RESOL_160;
 inline DcbGaussParams         kf_jet1_theta_resol_incl = DCBG_JET1_THETA_RESOL_160;
 inline DcbGaussParams         kf_jet2_phi_resol_incl   = DCBG_JET2_PHI_RESOL_160;
@@ -263,6 +263,12 @@ static constexpr int    KF_N_CONSTR = 20;
 static constexpr int    KF_MAX_FUNCTION_CALLS = 100000;
 static constexpr double KF_MIGRAD_TOLERANCE   = 1e-3;
 static constexpr int    KF_MIGRAD_STRATEGY    = 2;
+// Initial Migrad finite-difference step in y-space (every parameter is
+// y-rescaled to unit-σ priors). 0.01 = 1 % of prior σ — small enough to
+// resolve posteriors that are 5–10 % of prior σ (BES, MET angular, lep tl)
+// without spending too many extra evaluations on parameters whose posterior
+// matches the prior.
+static constexpr double KF_INIT_STEP = 0.01;
 
 // Quadratic-barrier scale above the m(WW) ≤ m_ee_fit boundary. Returns finite,
 // smooth penalty when Migrad probes the unphysical region (m_WW > m_ee_fit).
@@ -388,7 +394,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         p_jet1_phi_resol_alt   = kf_use_binned_priors ? pick_bin(kf_jet2_phi_resol_bins,   kf_jet2_phi_resol_edges,   j1_acth)  : kf_jet2_phi_resol_incl;
         p_jet2_phi_resol_alt   = kf_use_binned_priors ? pick_bin(kf_jet1_phi_resol_bins,   kf_jet1_phi_resol_edges,   j2_acth)  : kf_jet1_phi_resol_incl;
     }
-    const DcbExpLeftGaussParams kf_lep_p_resp     = kf_use_binned_priors ? pick_bin(kf_lep_p_resp_bins,      kf_lep_p_resp_edges,      Isolep_p) : kf_lep_p_resp_incl;
+    const DcbExpRightGaussParams kf_lep_p_resp    = kf_use_binned_priors ? pick_bin(kf_lep_p_resp_bins,      kf_lep_p_resp_edges,      Isolep_p) : kf_lep_p_resp_incl;
     const DcbGaussParams        kf_lep_theta_resol = kf_use_binned_priors ? pick_bin(kf_lep_theta_resol_bins, kf_lep_theta_resol_edges, Isolep_p) : kf_lep_theta_resol_incl;
     const DcbGaussParams        kf_lep_phi_resol   = kf_use_binned_priors ? pick_bin(kf_lep_phi_resol_bins,   kf_lep_phi_resol_edges,   Isolep_p) : kf_lep_phi_resol_incl;
 
@@ -473,7 +479,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
 
         double scale_pen = dcb_gauss_neg2logpdf(s1, p_jet1_p_resp)
                          + dcb_gauss_neg2logpdf(s2, p_jet2_p_resp)
-                         + dcb_expleft_gauss_neg2logpdf(sl, kf_lep_p_resp)
+                         + dcb_expright_gauss_neg2logpdf(sl, kf_lep_p_resp)
                          + dcb_neg2logpdf(sn, kf_met_p_resp);
 
         double angular = dcb_gauss_neg2logpdf(t1, p_jet1_theta_resol)
@@ -505,22 +511,22 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         m->SetTolerance(KF_MIGRAD_TOLERANCE);
         if (with_strategy) m->SetStrategy(KF_MIGRAD_STRATEGY);
         m->SetPrintLevel(-1);
-        m->SetVariable(0,  "y_mW",     x0[0],  0.1);
-        m->SetVariable(1,  "y_gW",     x0[1],  0.1);
-        m->SetVariable(2,  "y_s1",     x0[2],  0.1);
-        m->SetVariable(3,  "y_s2",     x0[3],  0.1);
-        m->SetVariable(4,  "y_sl",     x0[4],  0.1);
-        m->SetVariable(5,  "y_sn",     x0[5],  0.1);
-        m->SetVariable(6,  "y_t1",     x0[6],  0.1);
-        m->SetVariable(7,  "y_t2",     x0[7],  0.1);
-        m->SetVariable(8,  "y_tn",     x0[8],  0.1);
-        m->SetVariable(9,  "y_p1",     x0[9],  0.1);
-        m->SetVariable(10, "y_p2",     x0[10], 0.1);
-        m->SetVariable(11, "y_pn",     x0[11], 0.1);
-        m->SetVariable(12, "y_tl",     x0[12], 0.1);
-        m->SetVariable(13, "y_pl",     x0[13], 0.1);
-        m->SetVariable(14, "y_bes_m",  x0[14], 0.1);
-        m->SetVariable(15, "y_bes_pz", x0[15], 0.1);
+        m->SetVariable(0,  "y_mW",     x0[0],  KF_INIT_STEP);
+        m->SetVariable(1,  "y_gW",     x0[1],  KF_INIT_STEP);
+        m->SetVariable(2,  "y_s1",     x0[2],  KF_INIT_STEP);
+        m->SetVariable(3,  "y_s2",     x0[3],  KF_INIT_STEP);
+        m->SetVariable(4,  "y_sl",     x0[4],  KF_INIT_STEP);
+        m->SetVariable(5,  "y_sn",     x0[5],  KF_INIT_STEP);
+        m->SetVariable(6,  "y_t1",     x0[6],  KF_INIT_STEP);
+        m->SetVariable(7,  "y_t2",     x0[7],  KF_INIT_STEP);
+        m->SetVariable(8,  "y_tn",     x0[8],  KF_INIT_STEP);
+        m->SetVariable(9,  "y_p1",     x0[9],  KF_INIT_STEP);
+        m->SetVariable(10, "y_p2",     x0[10], KF_INIT_STEP);
+        m->SetVariable(11, "y_pn",     x0[11], KF_INIT_STEP);
+        m->SetVariable(12, "y_tl",     x0[12], KF_INIT_STEP);
+        m->SetVariable(13, "y_pl",     x0[13], KF_INIT_STEP);
+        m->SetVariable(14, "y_bes_m",  x0[14], KF_INIT_STEP);
+        m->SetVariable(15, "y_bes_pz", x0[15], KF_INIT_STEP);
         if (!fit_gW) m->FixVariable(1);
     };
 

@@ -100,10 +100,10 @@ BRANCH_CONFIG = {
     "jet1_phi_resol":       {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
     "jet2_phi_resol":       {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
     "jet_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
-    # Lepton p response: narrow detector core + exponential FSR left tail +
-    # sharp right cliff just past 1. expleft2g (exp-left + Gaussian core +
-    # power-right + wide Gauss). Right-side clip extended to 99.95%.
-    "lep_p_resp":           {"clip": (0.2, 99.95), "nbins": 150, "model": "expleft2g"},
+    # Lepton p response: narrow detector core + heavy power-law left tail (FSR)
+    # + sharp exponential right cutoff at 1 (kinematic ceiling). dcber2g —
+    # mirror-image of expleft2g; physically motivated and fits ~2× better.
+    "lep_p_resp":           {"clip": (0.1, 99.9),  "nbins": 300, "model": "dcber2g"},
     # Lepton angular resolutions: tight detector core + wide-angle FSR tails → DCB+G.
     "lep_theta_resol":      {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
     "lep_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
