@@ -282,8 +282,10 @@ struct KinFitResult {
     // Diagnostics: which pass won and how many actually ran.
     //   winner_pass: 1=Migrad-natural, 2=Migrad-swapped,
     //                3=Simplex+Migrad-natural, 4=Simplex+Migrad-swapped,
-    //                5=Hesse-refresh, 6=random-restart Migrad.
-    //   n_passes_run: total passes executed before stopping (1..6+restarts).
+    //                5=Hesse-refresh, 6=random-restart Migrad,
+    //                7=Minimize-method-natural (Combined: Migrad→Simplex→Migrad),
+    //                8=Minimize-method-swapped.
+    //   n_passes_run: total passes executed before stopping (1..8+restarts).
     //   priors_swapped: 1 if the winning pass used jet1↔jet2-swapped priors.
     int   winner_pass;
     int   n_passes_run;
@@ -588,6 +590,30 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
             pick_better(best, snapshot(migrad_only(x_jitter), priors_swapped, /*pass=*/6));
             if (converged(best.status)) break;
         }
+    }
+
+    // Pass 7-8: ROOT's "Minimize" method (Combined: Migrad → Simplex → Migrad)
+    // on natural then swapped priors. Different inner sequencing than our
+    // manual cascade — Minuit2 internally uses different step-size heuristics
+    // and gradient checks when falling back, sometimes catching events all 6
+    // cascade passes missed.
+    auto minimize_method = [&](const double* x_init) {
+        minimizer = std::unique_ptr<ROOT::Math::Minimizer>(
+            ROOT::Math::Factory::CreateMinimizer("Minuit2", "Minimize")
+        );
+        configure(minimizer.get(), x_init, /*with_strategy=*/true);
+        minimizer->Minimize();
+        return minimizer->Status();
+    };
+    if (!converged(best.status)) {
+        if (priors_swapped) { swap_jet_priors(); priors_swapped = false; }
+        ++n_passes_run;
+        pick_better(best, snapshot(minimize_method(x_default), priors_swapped, /*pass=*/7));
+    }
+    if (!converged(best.status) && kf_jet_swap_enabled) {
+        swap_jet_priors(); priors_swapped = true;
+        ++n_passes_run;
+        pick_better(best, snapshot(minimize_method(x_default), priors_swapped, /*pass=*/8));
     }
 
     // Sync in-scope priors to the winner's orientation — result extraction
