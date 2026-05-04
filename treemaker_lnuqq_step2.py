@@ -92,6 +92,7 @@ all_branches = [
     "kinfit_s1", "kinfit_s2", "kinfit_sl", "kinfit_sn",
     "kinfit_t1", "kinfit_t2", "kinfit_tn", "kinfit_tl",
     "kinfit_p1", "kinfit_p2", "kinfit_pn", "kinfit_pl",
+    "kinfit_bes_m_minus_ecm", "kinfit_bes_pz",
     "kinfit_chi2", "kinfit_chi2_ndof", "kinfit_valid", "kinfit_valid_loose", "kinfit_status", "kinfit_edm",
     "kinfit_winner_pass", "kinfit_n_passes_run", "kinfit_priors_swapped",
 

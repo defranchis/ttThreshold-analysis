@@ -170,11 +170,9 @@ KINFIT_TO_RESOL = {
     "kinfit_p2":  "jet2_phi_resol",
     "kinfit_pl":  "lep_phi_resol",
     "kinfit_pn":  "met_phi_resol",
-    # WW system constraints
-    "kinfit_WW_px":          "gen_WW_px",
-    "kinfit_WW_py":          "gen_WW_py",
-    "kinfit_WW_pz":          "gen_WW_pz",
-    "kinfit_WW_m_minus_ecm": "gen_WW_m_minus_ecm",
+    # BES nuisances (Gaussian priors)
+    "kinfit_bes_m_minus_ecm": "gen_ee_m_minus_ecm",
+    "kinfit_bes_pz":          "gen_ee_pz",
 }
 
 # Mapping: kinfit post-fit branch → reco / gen counterpart, derived from the
@@ -212,6 +210,7 @@ _PULL_BRANCHES = {
     "kinfit_s1","kinfit_s2","kinfit_sl","kinfit_sn",
     "kinfit_t1","kinfit_t2","kinfit_tn","kinfit_tl",
     "kinfit_p1","kinfit_p2","kinfit_pn","kinfit_pl",
+    "kinfit_bes_m_minus_ecm","kinfit_bes_pz",
 }
 
 def _subdir(bname):
@@ -229,6 +228,7 @@ KINFIT_BRANCHES = [
     "kinfit_s1", "kinfit_s2", "kinfit_sl", "kinfit_sn",
     "kinfit_t1", "kinfit_t2", "kinfit_tn", "kinfit_tl",
     "kinfit_p1", "kinfit_p2", "kinfit_pn", "kinfit_pl",
+    "kinfit_bes_m_minus_ecm", "kinfit_bes_pz",
     "kinfit_chi2", "kinfit_chi2_ndof", "kinfit_valid", "kinfit_status",
     # constituent kinematics
     "kinfit_jet1_p",  "kinfit_jet2_p",  "kinfit_lep_p",  "kinfit_nu_p",
@@ -240,9 +240,9 @@ KINFIT_BRANCHES = [
     "kinfit_Wlep_px", "kinfit_Wlep_py", "kinfit_Wlep_pz",
     "kinfit_Whad_m", "kinfit_Whad_p", "kinfit_Whad_pt",
     "kinfit_Whad_px", "kinfit_Whad_py", "kinfit_Whad_pz",
-    # WW system
+    # WW system (post-fit derived; no direct prior — overlaid via ISR balance)
     "kinfit_WW_px", "kinfit_WW_py", "kinfit_WW_pz",
-    "kinfit_WW_m", "kinfit_WW_m_minus_ecm", "kinfit_WW_p_imbalance_tot",
+    "kinfit_WW_m", "kinfit_WW_p_imbalance_tot",
 ]
 
 
@@ -323,9 +323,16 @@ def dcb_gaussbox(x, N, mu_c, sigma_c, aL, nL, aR, nR, f_wide, p_max, sigma_box):
 
 def _make_pdf(p):
     """Return a callable f(x) → normalized PDF value, from JSON param dict."""
-    norm = p["norm"]
     model = p["model"]
 
+    if model == "gauss":
+        mu, sg = p["mu"], p["sigma"]
+        inv_sg = 1.0 / abs(sg)
+        norm_g = inv_sg / math.sqrt(2.0 * math.pi)
+        def fn(x): return norm_g * np.exp(-0.5 * ((x - mu) * inv_sg) ** 2)
+        return fn
+
+    norm = p["norm"]
     if model == "dcb":
         mu, sg = p["mu"], p["sigma"]
         aL, nL, aR, nR = p["aL"], p["nL"], p["aR"], p["nR"]
@@ -388,6 +395,9 @@ _FIXED_RANGE = {
     "kinfit_WW_px": (100, -0.05, 0.05),
     "kinfit_WW_py": (100, -0.05, 0.05),
     "kinfit_WW_pz": (100, -0.3, 0.3),
+    # BES nuisances: Gaussian priors with σ ≈ 119 MeV → ±400 MeV is ~3.5σ.
+    "kinfit_bes_m_minus_ecm": (100, -0.4, 0.4),
+    "kinfit_bes_pz":          (100, -0.4, 0.4),
     "kinfit_jet1_theta":  (100, 0,   3.2),
     "kinfit_jet2_theta":  (100, 0,   3.2),
     "kinfit_nu_theta":  (100, 0,   3.2),
@@ -396,7 +406,6 @@ _FIXED_RANGE = {
     "kinfit_nu_phi":    (100, -3.2, 3.2),
     # WW system post-fit: mass near ECM, mass-minus-ECM near 0 (slightly below, ISR)
     "kinfit_WW_m":           (100, 150, 170),
-    "kinfit_WW_m_minus_ecm": (100,  -8,   1),
     # Pull/scale parameters: span post-fit data, not the wider prior tails.
     "kinfit_s1":  (100, 0.85, 1.15),
     "kinfit_s2":  (100, 0.85, 1.15),

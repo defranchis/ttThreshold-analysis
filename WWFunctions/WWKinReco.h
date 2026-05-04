@@ -52,10 +52,17 @@ struct KinFitParamSet {
     std::array<double,                KF_NBINS + 1> lep_theta_resol_edges;
     DcbParams                                    met_phi_resol;
     DcbParams                                    met_theta_resol;
-    DcbExpRightGaussParams                       m_gen_lnuqq_minus_ecm;
-    DcbGaussParams                               px_tot_gen;
-    DcbGaussParams                               py_tot_gen;
-    DcbGaussParams                               pz_tot_gen;
+    // BES nuisances (Gaussian) — sum and asymmetry of beam-energy fluctuations.
+    GaussParams                                  ee_m_minus_ecm;
+    GaussParams                                  ee_pz;
+    // ISR 3-momentum (spike_dcb2g) — delta-at-0 for no-ISR events + dcb_gauss
+    // tail for radiated events. Px/Py from transverse balance, Pz from
+    // longitudinal balance with the BES pz nuisance.
+    SpikeDcbGaussParams                          isr_px;
+    SpikeDcbGaussParams                          isr_py;
+    SpikeDcbGaussParams                          isr_pz;
+    // m(WW) − m(ee) — pure ISR mass-loss with hard right boundary at 0.
+    DcbExpRightGaussParams                       ww_m_minus_m_ee;
     // Inclusive (kinematics-averaged) variants — used when kf_use_binned_priors=false.
     DcbGaussParams                               jet1_p_resp_incl;
     DcbGaussParams                               jet2_p_resp_incl;
@@ -89,8 +96,9 @@ struct KinFitParamSet {
     DCBG_LEP_PHI_RESOL_BINS_##E,     DCBG_LEP_PHI_RESOL_EDGES_##E, \
     DCBG_LEP_THETA_RESOL_BINS_##E,   DCBG_LEP_THETA_RESOL_EDGES_##E, \
     DCB_MET_PHI_RESOL_##E,           DCB_MET_THETA_RESOL_##E, \
-    DCBERG_GEN_WW_M_MINUS_ECM_##E, \
-    DCBG_GEN_WW_PX_##E, DCBG_GEN_WW_PY_##E, DCBG_GEN_WW_PZ_##E, \
+    GAUSS_GEN_EE_M_MINUS_ECM_##E, GAUSS_GEN_EE_PZ_##E, \
+    SDCBG_GEN_ISR_PX_##E, SDCBG_GEN_ISR_PY_##E, SDCBG_GEN_ISR_PZ_##E, \
+    DCBERG_GEN_WW_M_MINUS_M_EE_##E, \
     /* inclusive — POOL: jet1 and jet2 share the pooled scalar */ \
     DCBG_JET_P_RESP_##E, DCBG_JET_P_RESP_##E, DCBELG_LEP_P_RESP_##E, \
     DCBG_JET_PHI_RESOL_##E, DCBG_JET_THETA_RESOL_##E, \
@@ -109,8 +117,9 @@ struct KinFitParamSet {
     DCBG_LEP_PHI_RESOL_BINS_##E,     DCBG_LEP_PHI_RESOL_EDGES_##E, \
     DCBG_LEP_THETA_RESOL_BINS_##E,   DCBG_LEP_THETA_RESOL_EDGES_##E, \
     DCB_MET_PHI_RESOL_##E,           DCB_MET_THETA_RESOL_##E, \
-    DCBERG_GEN_WW_M_MINUS_ECM_##E, \
-    DCBG_GEN_WW_PX_##E, DCBG_GEN_WW_PY_##E, DCBG_GEN_WW_PZ_##E, \
+    GAUSS_GEN_EE_M_MINUS_ECM_##E, GAUSS_GEN_EE_PZ_##E, \
+    SDCBG_GEN_ISR_PX_##E, SDCBG_GEN_ISR_PY_##E, SDCBG_GEN_ISR_PZ_##E, \
+    DCBERG_GEN_WW_M_MINUS_M_EE_##E, \
     /* inclusive — SEP: per-jet scalar */ \
     DCBG_JET1_P_RESP_##E, DCBG_JET2_P_RESP_##E, DCBELG_LEP_P_RESP_##E, \
     DCBG_JET1_PHI_RESOL_##E, DCBG_JET1_THETA_RESOL_##E, \
@@ -148,10 +157,12 @@ inline std::array<DcbGaussParams,        KF_NBINS> kf_lep_theta_resol_bins  = DC
 inline std::array<double,                KF_NBINS + 1> kf_lep_theta_resol_edges  = DCBG_LEP_THETA_RESOL_EDGES_160;
 inline DcbParams                                    kf_met_phi_resol         = DCB_MET_PHI_RESOL_160;
 inline DcbParams                                    kf_met_theta_resol       = DCB_MET_THETA_RESOL_160;
-inline DcbExpRightGaussParams                       kf_m_gen_lnuqq_minus_ecm = DCBERG_GEN_WW_M_MINUS_ECM_160;
-inline DcbGaussParams                               kf_px_tot_gen            = DCBG_GEN_WW_PX_160;
-inline DcbGaussParams                               kf_py_tot_gen            = DCBG_GEN_WW_PY_160;
-inline DcbGaussParams                               kf_pz_tot_gen            = DCBG_GEN_WW_PZ_160;
+inline GaussParams                                  kf_ee_m_minus_ecm        = GAUSS_GEN_EE_M_MINUS_ECM_160;
+inline GaussParams                                  kf_ee_pz                 = GAUSS_GEN_EE_PZ_160;
+inline SpikeDcbGaussParams                          kf_isr_px                = SDCBG_GEN_ISR_PX_160;
+inline SpikeDcbGaussParams                          kf_isr_py                = SDCBG_GEN_ISR_PY_160;
+inline SpikeDcbGaussParams                          kf_isr_pz                = SDCBG_GEN_ISR_PZ_160;
+inline DcbExpRightGaussParams                       kf_ww_m_minus_m_ee       = DCBERG_GEN_WW_M_MINUS_M_EE_160;
 
 // Inclusive (kinematics-averaged) scalars — used when kf_use_binned_priors=false.
 // Same data as the bin arrays would collapse to with one bin spanning all events.
@@ -208,10 +219,12 @@ inline void setKinFitParams(int ecm, const std::string& jet_mode = "swap",
     kf_lep_theta_resol_edges  = p->lep_theta_resol_edges;
     kf_met_phi_resol          = p->met_phi_resol;
     kf_met_theta_resol        = p->met_theta_resol;
-    kf_m_gen_lnuqq_minus_ecm  = p->m_gen_lnuqq_minus_ecm;
-    kf_px_tot_gen             = p->px_tot_gen;
-    kf_py_tot_gen             = p->py_tot_gen;
-    kf_pz_tot_gen             = p->pz_tot_gen;
+    kf_ee_m_minus_ecm         = p->ee_m_minus_ecm;
+    kf_ee_pz                  = p->ee_pz;
+    kf_isr_px                 = p->isr_px;
+    kf_isr_py                 = p->isr_py;
+    kf_isr_pz                 = p->isr_pz;
+    kf_ww_m_minus_m_ee        = p->ww_m_minus_m_ee;
     kf_jet1_p_resp_incl       = p->jet1_p_resp_incl;
     kf_jet2_p_resp_incl       = p->jet2_p_resp_incl;
     kf_lep_p_resp_incl        = p->lep_p_resp_incl;
@@ -226,17 +239,36 @@ inline void setKinFitParams(int ecm, const std::string& jet_mode = "swap",
 // ── kinematic fit ──────────────────────────────────────────────────────────
 
 // Kinematic fit constants.
-// Momentum scale params (s1,s2,sl,sn) are now response = p_reco/p_gen;
-// angular params (t1,t2,tn,p1,p2,pn) are now absolute shifts in radians.
-// Constraints use DCB/DCB+G PDFs from dcb_params_ecm<N>.h (selected per-dataset by setKinFitParams).
-// WW momentum and mass constraints use kf_px/py/pz_tot_gen and kf_m_gen_lnuqq_minus_ecm.
+// Momentum scale params (s1,s2,sl,sn) are response = p_reco/p_gen; angular
+// params (t1,t2,tn,p1,p2,pn,tl,pl) are absolute shifts in radians. All priors
+// (DCB family, GaussParams, SpikeDcbGaussParams) live in dcb_params.h and are
+// selected per-dataset by setKinFitParams().
 static constexpr double KF_MW_INIT = 80.419;
 static constexpr double KF_GW_FIXED = 2.049;
-static constexpr int    KF_NDIM    = 13;   // free parameters when gW is fixed (added tl, pl)
+// Pre-conditioning σ for mW (no Gaussian prior — y-rescale around KF_MW_INIT
+// using a typical per-event posterior scale). gW uses KF_GW_PRIOR_SIGMA below.
+static constexpr double KF_MW_PHYS_SIGMA = 2.0;
+static constexpr int    KF_NDIM    = 15;   // free parameters when gW is fixed
+                                            // (12 detector nuisances + mW + 2 BES)
+// Total slots in the parameter array x[] (includes gW even when fixed).
+static constexpr int    KF_NPAR_TOTAL = KF_NDIM + 1;
 // Number of constraint terms in chi2: 4 momentum-response + 8 angular-resolution
-// + 4 WW-system (Px,Py,Pz,M-ECM) + 2 BW. When fit_gW=true a Gaussian prior on gW
-// adds +1 constraint, applied at chi2_ndof time.
-static constexpr int    KF_N_CONSTR = 18;
+// + 2 BES (m, pz) + 3 ISR (px, py, pz via balance) + 1 m(WW)−m(ee) + 2 BW.
+// When fit_gW=true a Gaussian prior on gW adds +1 constraint, applied at
+// chi2_ndof time.
+static constexpr int    KF_N_CONSTR = 20;
+
+// Migrad / Minuit2 tuning. These get tweaked together when convergence
+// behaviour changes (cascade order, status-3 recovery, etc.).
+static constexpr int    KF_MAX_FUNCTION_CALLS = 100000;
+static constexpr double KF_MIGRAD_TOLERANCE   = 1e-3;
+static constexpr int    KF_MIGRAD_STRATEGY    = 2;
+
+// Quadratic-barrier scale above the m(WW) ≤ m_ee_fit boundary. Returns finite,
+// smooth penalty when Migrad probes the unphysical region (m_WW > m_ee_fit).
+// Tighter than σ(m_WW − m_ee) (~few GeV) so it's a genuine restoring force,
+// looser than the BES width (~119 MeV) so it doesn't spike the Hessian.
+static constexpr double KF_M_LOSS_BARRIER_SIGMA = 0.010;
 
 // Loose-valid EDM cap. Migrad tolerance is 1e-3 (set in configure); any status=3
 // event with finite EDM under 10× that lands a fit point essentially indistinguishable
@@ -249,19 +281,13 @@ static constexpr double KF_LOOSE_EDM_MAX = 1e-2;
 static constexpr int    KF_RESTART_N      = 2;
 static constexpr double KF_RESTART_SIGMA  = 0.5;
 
-// Gaussian prior on gW (only active when fit_gW=true).
+// Gaussian prior on gW (only active when fit_gW=true). gW is also y-rescaled
+// using this σ, so the prior collapses to y_gW² + log_norm in the χ².
 static constexpr double KF_GW_PRIOR_SIGMA_REL = 0.01;
 static constexpr double KF_GW_PRIOR_SIGMA     = KF_GW_PRIOR_SIGMA_REL * KF_GW_FIXED;
-static constexpr double KF_GW_PRIOR_INV_SIGMA = 1.0 / KF_GW_PRIOR_SIGMA;
 // std::log isn't constexpr until C++26, so this is a runtime const initialized once.
 inline const double KF_GW_PRIOR_LOG_NORM =
         std::log(2.0 * M_PI * KF_GW_PRIOR_SIGMA * KF_GW_PRIOR_SIGMA);
-
-// −2·log G(gW; KF_GW_FIXED, KF_GW_PRIOR_SIGMA).
-static inline double _gw_prior_neg2logpdf(double gW) {
-    const double dgw = (gW - KF_GW_FIXED) * KF_GW_PRIOR_INV_SIGMA;
-    return dgw * dgw + KF_GW_PRIOR_LOG_NORM;
-}
 
 struct KinFitResult {
     float mW, gW;
@@ -291,6 +317,10 @@ struct KinFitResult {
     int   n_passes_run;
     int   priors_swapped;
     float edm;              // estimated distance to minimum at convergence (Minuit2)
+    // Post-fit BES nuisances (depth-1 e+e- system): m_ee_fit − ECM (sum BES
+    // component) and pz_ee_fit (asymmetry). Diagnostic.
+    float bes_m_minus_ecm;
+    float bes_pz;
     // Post-fit 4-vectors. All scalar projections (P, Pt, M, Px, ...) and the
     // Wlep/Whad/WW sums are derived in the consumer.
     TLorentzVector j1, j2, lep, nu;
@@ -306,10 +336,11 @@ static TLorentzVector _vec_spherical(double p, double theta, double phi) {
 
 // Decode standardized y-coord to physical value: x = μ_prior + σ_prior · y.
 // All prior PDFs (DcbParams, DcbGaussParams, DcbExpLeftGaussParams,
-// DcbExpRightGaussParams) expose .mu/.sigma as their first two fields, so this
-// template works for every kf_* struct. Preconditions the Hessian: in y-space
-// all 12 nuisance directions have unit RMS, so Migrad's EDM tolerance is uniform.
-// mW (and gW when free) stay in physical units.
+// DcbExpRightGaussParams, GaussParams) expose .mu/.sigma as their first two
+// fields, so this template works for every kf_* struct. Preconditions the
+// Hessian: in y-space all 14 nuisance directions (12 detector + 2 BES) have
+// unit RMS, so Migrad's EDM tolerance is uniform. mW (and gW when free) stay
+// in physical units.
 template<typename PdfT>
 static inline double _y2x(double y, const PdfT& p) { return p.mu + p.sigma * y; }
 
@@ -361,15 +392,20 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     const DcbGaussParams        kf_lep_theta_resol = kf_use_binned_priors ? pick_bin(kf_lep_theta_resol_bins, kf_lep_theta_resol_edges, Isolep_p) : kf_lep_theta_resol_incl;
     const DcbGaussParams        kf_lep_phi_resol   = kf_use_binned_priors ? pick_bin(kf_lep_phi_resol_bins,   kf_lep_phi_resol_edges,   Isolep_p) : kf_lep_phi_resol_incl;
 
-    // 14 parameters: x[0]=mW, x[1]=gW, x[2..5]=scales, x[6..8]=jet/MET theta, x[9..11]=jet/MET phi, x[12..13]=lep angles.
-    // When fit_gW=false, gW is pinned to KF_GW_FIXED via FixVariable(1).
+    // KF_NPAR_TOTAL parameters: x[0]=mW, x[1]=gW, x[2..5]=scales,
+    // x[6..8]=jet/MET theta, x[9..11]=jet/MET phi, x[12..13]=lep angles,
+    // x[14]=BES m, x[15]=BES pz.
+    // When fit_gW=false, gW is pinned to KF_GW_FIXED (y_gW=0) via FixVariable(1).
     auto chi2fn = [=, &p_jet1_p_resp, &p_jet2_p_resp,
                        &p_jet1_theta_resol, &p_jet2_theta_resol,
                        &p_jet1_phi_resol,   &p_jet2_phi_resol](const double* x) -> double {
-        // x[0]=mW, x[1]=gW kept physical. x[2..13] are standardized y-coords
-        // (y = (x_phys − μ_prior)/σ_prior); decoded back to physical via _y2x.
+        // ALL 16 entries are standardized y-coords (y = (x_phys − μ)/σ): mW
+        // around KF_MW_INIT with σ = KF_MW_PHYS_SIGMA, gW around KF_GW_FIXED
+        // with σ = KF_GW_PRIOR_SIGMA, and 14 nuisances around their prior μ/σ.
+        // Pre-conditions the Hessian to unit RMS in every direction.
         // s_i guard handles transient negative regions during Migrad line search.
-        const double mW = x[0], gW = x[1];
+        const double mW = KF_MW_INIT  + KF_MW_PHYS_SIGMA  * x[0];
+        const double gW = KF_GW_FIXED + KF_GW_PRIOR_SIGMA * x[1];
         const double s1 = _y2x(x[2],  p_jet1_p_resp);
         const double s2 = _y2x(x[3],  p_jet2_p_resp);
         const double sl = _y2x(x[4],  kf_lep_p_resp);
@@ -382,6 +418,8 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         const double pn = _y2x(x[11], kf_met_phi_resol);
         const double tl = _y2x(x[12], kf_lep_theta_resol);
         const double pl = _y2x(x[13], kf_lep_phi_resol);
+        const double bes_m  = _y2x(x[14], kf_ee_m_minus_ecm);   // = m_ee_fit − ECM
+        const double bes_pz = _y2x(x[15], kf_ee_pz);            // = pz_ee_fit
         if (s1 <= 0.0 || s2 <= 0.0 || sl <= 0.0 || sn <= 0.0) return 1e10;
 
         TLorentzVector j1f = _vec_spherical(jet1_p/s1,    jet1_theta    - t1, jet1_phi    - p1);
@@ -407,10 +445,31 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                        + 4.0 * std::log(M_PI)
                        - std::log(lam) + 2.0 * std::log(s_ww);
 
-        double cons = dcb_gauss_neg2logpdf(WW.Px(), kf_px_tot_gen)
-                    + dcb_gauss_neg2logpdf(WW.Py(), kf_py_tot_gen)
-                    + dcb_gauss_neg2logpdf(WW.Pz(), kf_pz_tot_gen)
-                    + dcb_expright_gauss_neg2logpdf(WW.M() - ECM, kf_m_gen_lnuqq_minus_ecm);
+        // BES nuisance priors (Gaussian).
+        double bes_term = gauss_neg2logpdf(bes_m,  kf_ee_m_minus_ecm)
+                        + gauss_neg2logpdf(bes_pz, kf_ee_pz);
+
+        // ISR via 4-momentum balance with depth-1 e+e- (px=py=0, pz=bes_pz):
+        //   ISR_p = depth1_p − WW_p
+        const double isr_px_val = -WW.Px();
+        const double isr_py_val = -WW.Py();
+        const double isr_pz_val = bes_pz - WW.Pz();
+        double isr_term = spike_dcb_gauss_neg2logpdf(isr_px_val, kf_isr_px)
+                        + spike_dcb_gauss_neg2logpdf(isr_py_val, kf_isr_py)
+                        + spike_dcb_gauss_neg2logpdf(isr_pz_val, kf_isr_pz);
+
+        // m(WW) − m_ee_fit, with hard right boundary at 0 (m_WW ≤ m_ee always)
+        // enforced by a quadratic barrier above the boundary.
+        double m_ee_fit = ECM + bes_m;
+        double m_loss   = WW.M() - m_ee_fit;
+        double m_loss_term;
+        if (m_loss <= 0.0) {
+            m_loss_term = dcb_expright_gauss_neg2logpdf(m_loss, kf_ww_m_minus_m_ee);
+        } else {
+            const double bnd = dcb_expright_gauss_neg2logpdf(0.0, kf_ww_m_minus_m_ee);
+            const double t   = m_loss / KF_M_LOSS_BARRIER_SIGMA;
+            m_loss_term = bnd + t*t;
+        }
 
         double scale_pen = dcb_gauss_neg2logpdf(s1, p_jet1_p_resp)
                          + dcb_gauss_neg2logpdf(s2, p_jet2_p_resp)
@@ -426,40 +485,46 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                        + dcb_neg2logpdf(pn, kf_met_phi_resol)
                        + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
 
-        double gw_term = fit_gW ? _gw_prior_neg2logpdf(gW) : 0.0;
+        // gW prior collapses to y_gW² + log_norm under the y-rescaling.
+        double gw_term = fit_gW ? (x[1] * x[1] + KF_GW_PRIOR_LOG_NORM) : 0.0;
 
-        return bw_term + cons + scale_pen + angular + gw_term;
+        return bw_term + bes_term + isr_term + m_loss_term + scale_pen + angular + gw_term;
     };
 
     std::function<double(const double*)> fObj = chi2fn;
-    ROOT::Math::Functor functor(fObj, 14);
+    ROOT::Math::Functor functor(fObj, KF_NPAR_TOTAL);
 
-    // Configure a Minuit2 minimizer (Migrad or Simplex) with a 14-D starting point.
-    // Variable layout: 0=mW, 1=gW (physical, optionally fixed); 2..13=y-coords.
+    // Configure a Minuit2 minimizer (Migrad or Simplex) with a KF_NPAR_TOTAL-D
+    // starting point. ALL variables are y-coords with σ=1 by construction:
+    // 0=y_mW, 1=y_gW, 2..13=detector y-coords, 14..15=BES y-coords. Step 0.1
+    // is uniformly ~10% of the prior (or pre-conditioning) σ. No limits — the
+    // priors keep the fit in physical regions.
     auto configure = [&](ROOT::Math::Minimizer* m, const double* x0, bool with_strategy) {
         m->SetFunction(functor);
-        m->SetMaxFunctionCalls(100000);
-        m->SetTolerance(1e-3);
-        if (with_strategy) m->SetStrategy(2);
+        m->SetMaxFunctionCalls(KF_MAX_FUNCTION_CALLS);
+        m->SetTolerance(KF_MIGRAD_TOLERANCE);
+        if (with_strategy) m->SetStrategy(KF_MIGRAD_STRATEGY);
         m->SetPrintLevel(-1);
-        m->SetVariable(0,  "mW",   x0[0],  0.1);  m->SetVariableLimits(0, 0.0, 200.0);
-        m->SetVariable(1,  "gW",   x0[1],  0.01); m->SetVariableLimits(1, 0.01, 10.0);
-        m->SetVariable(2,  "y_s1", x0[2],  0.1);
-        m->SetVariable(3,  "y_s2", x0[3],  0.1);
-        m->SetVariable(4,  "y_sl", x0[4],  0.1);
-        m->SetVariable(5,  "y_sn", x0[5],  0.1);
-        m->SetVariable(6,  "y_t1", x0[6],  0.1);
-        m->SetVariable(7,  "y_t2", x0[7],  0.1);
-        m->SetVariable(8,  "y_tn", x0[8],  0.1);
-        m->SetVariable(9,  "y_p1", x0[9],  0.1);
-        m->SetVariable(10, "y_p2", x0[10], 0.1);
-        m->SetVariable(11, "y_pn", x0[11], 0.1);
-        m->SetVariable(12, "y_tl", x0[12], 0.1);
-        m->SetVariable(13, "y_pl", x0[13], 0.1);
+        m->SetVariable(0,  "y_mW",     x0[0],  0.1);
+        m->SetVariable(1,  "y_gW",     x0[1],  0.1);
+        m->SetVariable(2,  "y_s1",     x0[2],  0.1);
+        m->SetVariable(3,  "y_s2",     x0[3],  0.1);
+        m->SetVariable(4,  "y_sl",     x0[4],  0.1);
+        m->SetVariable(5,  "y_sn",     x0[5],  0.1);
+        m->SetVariable(6,  "y_t1",     x0[6],  0.1);
+        m->SetVariable(7,  "y_t2",     x0[7],  0.1);
+        m->SetVariable(8,  "y_tn",     x0[8],  0.1);
+        m->SetVariable(9,  "y_p1",     x0[9],  0.1);
+        m->SetVariable(10, "y_p2",     x0[10], 0.1);
+        m->SetVariable(11, "y_pn",     x0[11], 0.1);
+        m->SetVariable(12, "y_tl",     x0[12], 0.1);
+        m->SetVariable(13, "y_pl",     x0[13], 0.1);
+        m->SetVariable(14, "y_bes_m",  x0[14], 0.1);
+        m->SetVariable(15, "y_bes_pz", x0[15], 0.1);
         if (!fit_gW) m->FixVariable(1);
     };
 
-    double x_default[14] = {KF_MW_INIT, KF_GW_FIXED, 0,0,0,0, 0,0,0, 0,0,0, 0,0};
+    double x_default[KF_NPAR_TOTAL] = {0,0, 0,0,0,0, 0,0,0, 0,0,0, 0,0, 0,0};
     std::unique_ptr<ROOT::Math::Minimizer> minimizer(
         ROOT::Math::Factory::CreateMinimizer("Minuit2", "Migrad")
     );
@@ -501,7 +566,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         std::swap(p_jet2_phi_resol,   p_jet2_phi_resol_alt);
     };
 
-    struct PassResult { int status; double chi2; double edm; double x[14]; bool swapped; int pass_id; };
+    struct PassResult { int status; double chi2; double edm; double x[KF_NPAR_TOTAL]; bool swapped; int pass_id; };
     auto snapshot = [&](int s, bool swapped_now, int pass_id) {
         PassResult r{};
         r.status   = s;
@@ -510,7 +575,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         r.swapped  = swapped_now;
         r.pass_id  = pass_id;
         const double* xref = minimizer->X();
-        for (int i = 0; i < 14; ++i) r.x[i] = xref[i];
+        for (int i = 0; i < KF_NPAR_TOTAL; ++i) r.x[i] = xref[i];
         return r;
     };
     auto converged = [](int s) { return s == 0 || s == 1; };
@@ -583,9 +648,9 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         std::mt19937_64 rng(s);
         std::normal_distribution<double> jitter(0.0, KF_RESTART_SIGMA);
         for (int t = 0; t < KF_RESTART_N; ++t) {
-            double x_jitter[14];
-            for (int i = 0; i < 14; ++i) x_jitter[i] = x_default[i];
-            for (int i = 2; i < 14; ++i) x_jitter[i] += jitter(rng);  // jitter y-coords only
+            double x_jitter[KF_NPAR_TOTAL];
+            for (int i = 0; i < KF_NPAR_TOTAL; ++i) x_jitter[i] = x_default[i];
+            for (int i = 2; i < KF_NPAR_TOTAL; ++i) x_jitter[i] += jitter(rng);  // jitter y-coords only
             ++n_passes_run;
             pick_better(best, snapshot(migrad_only(x_jitter), priors_swapped, /*pass=*/6));
             if (converged(best.status)) break;
@@ -634,11 +699,12 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.n_passes_run   = n_passes_run;
     result.priors_swapped = best.swapped ? 1 : 0;
     result.edm            = static_cast<float>(best.edm);
-    int n_par    = fit_gW ? 14 : KF_NDIM;
+    int n_par    = fit_gW ? KF_NPAR_TOTAL : KF_NDIM;
     // +1 constraint from the gW Gaussian prior when fit_gW=true.
     int n_constr = KF_N_CONSTR + (fit_gW ? 1 : 0);
     result.chi2_ndof = (n_constr > n_par) ? result.chi2 / float(n_constr - n_par) : -1.0f;
-    result.mW = x_final[0]; result.gW = x_final[1];
+    result.mW = static_cast<float>(KF_MW_INIT  + KF_MW_PHYS_SIGMA  * x_final[0]);
+    result.gW = static_cast<float>(KF_GW_FIXED + KF_GW_PRIOR_SIGMA * x_final[1]);
     result.s1 = _y2x(x_final[2],  p_jet1_p_resp);
     result.s2 = _y2x(x_final[3],  p_jet2_p_resp);
     result.sl = _y2x(x_final[4],  kf_lep_p_resp);
@@ -651,6 +717,8 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.pn = _y2x(x_final[11], kf_met_phi_resol);
     result.tl = _y2x(x_final[12], kf_lep_theta_resol);
     result.pl = _y2x(x_final[13], kf_lep_phi_resol);
+    result.bes_m_minus_ecm = static_cast<float>(_y2x(x_final[14], kf_ee_m_minus_ecm));
+    result.bes_pz          = static_cast<float>(_y2x(x_final[15], kf_ee_pz));
 
     // Post-fit kinematics (shared — uses result fields filled above)
     TLorentzVector j1f = _vec_spherical(jet1_p/result.s1,    jet1_theta    - result.t1, jet1_phi    - result.p1);

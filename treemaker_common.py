@@ -353,6 +353,7 @@ def run_kinfit(df, free_gw=False):
                 "s1","s2","sl","sn",
                 "t1","t2","tn","tl",
                 "p1","p2","pn","pl",
+                "bes_m_minus_ecm","bes_pz",
                 "chi2","chi2_ndof","valid","valid_loose","status","edm",
                 "winner_pass","n_passes_run","priors_swapped"]:
         df = df.Define(f"kinfit_{tag}", f"kinfit.{tag}")
