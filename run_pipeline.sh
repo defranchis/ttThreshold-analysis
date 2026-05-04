@@ -27,6 +27,9 @@ if [ $fail -ne 0 ]; then
     exit 1
 fi
 
+echo "=== Diagnostics: kinfit summary ==="
+python3 kinfit_diagnostics.py
+
 echo "=== Plot: kinfit results (mW overlays + kinfit vars) ==="
 python3 plot_kinfit_results.py
 
