@@ -296,9 +296,9 @@ static constexpr double KF_M_LOSS_BARRIER_SIGMA = 0.010;
 // from a converged one (matched chi²/ndof distributions; verified 2026-05-04).
 static constexpr double KF_LOOSE_EDM_MAX = 1e-2;
 
-// Random-restart 6th pass. After the 5-pass cascade has failed, re-run Migrad
-// from up to N draws of x_default jittered by 0.5σ in y-space. Seeded from the
-// event's reco kinematics → reproducible across runs.
+// Random-restart pass. After the earlier passes have failed, re-run
+// Simplex+Migrad from up to N draws of x_default jittered by 0.5σ in y-space.
+// Seeded from the event's reco kinematics → reproducible across runs.
 static constexpr int    KF_RESTART_N      = 2;
 static constexpr double KF_RESTART_SIGMA  = 0.5;
 
@@ -327,12 +327,10 @@ struct KinFitResult {
                             //   decade of tolerance. Empirically clean (~57-61% of
                             //   status=3 events; no chi²/ndof tail vs strict valid).
     // Diagnostics: which pass won and how many actually ran.
-    //   winner_pass: 1=Migrad-natural, 2=Migrad-swapped,
-    //                3=Simplex+Migrad-natural, 4=Simplex+Migrad-swapped,
-    //                5=Hesse-refresh, 6=random-restart Migrad,
-    //                7=Minimize-method-natural (Combined: Migrad→Simplex→Migrad),
-    //                8=Minimize-method-swapped.
-    //   n_passes_run: total passes executed before stopping (1..8+restarts).
+    //   winner_pass: 1=Simplex+Migrad-natural, 2=Simplex+Migrad-swapped,
+    //                3=Hesse-refresh + Simplex+Migrad,
+    //                4=random-restart Simplex+Migrad.
+    //   n_passes_run: total passes executed before stopping (1..3+restarts).
     //   priors_swapped: 1 if the winning pass used jet1↔jet2-swapped priors.
     int   winner_pass;
     int   n_passes_run;
@@ -772,17 +770,13 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         ROOT::Math::Factory::CreateMinimizer("Minuit2", "Migrad")
     );
 
-    // Two minimizer "modes": cheap Migrad-only, and Simplex pre-pass + Migrad.
-    // Status 0 = minimum found; 1 = covariance forced positive-definite (still
-    // valid postfit); 3 = EDM > tol (the dominant residual failure). Tolerance
-    // was loosened from 1e-6 to 1e-3 (Migrad default). The Simplex pre-pass
-    // helps descend through non-quadratic regions at ~2× cost.
-    auto migrad_only = [&](const double* x_init) {
-        configure(minimizer.get(), x_init, /*with_strategy=*/true);
-        minimizer->Minimize();
-        minimizer->Minimize();
-        return minimizer->Status();
-    };
+    // Single minimizer "mode": Simplex pre-pass + Migrad. Status 0 = minimum
+    // found; 1 = covariance forced positive-definite (still valid postfit);
+    // 3 = EDM > tol (the dominant residual failure). Tolerance was loosened
+    // from 1e-6 to 1e-3 (Migrad default). Simplex (gradient-free) descends
+    // through non-quadratic regions and avoids the Migrad-alone false-minimum
+    // pathology seen at ecm163 (median fitted mW=79.05 with Migrad-alone vs
+    // 80.18 with Simplex+Migrad).
     auto simplex_then_migrad = [&](const double* x_init) {
         std::unique_ptr<ROOT::Math::Minimizer> simplex(
             ROOT::Math::Factory::CreateMinimizer("Minuit2", "Simplex")
@@ -830,39 +824,28 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         if (cand.chi2 < best.chi2) best = cand;
     };
 
-    // Pass order (when swap is enabled, i.e. SEP priors): try cheap Migrad over
-    // both prior orderings before paying the ~2× Simplex cost.
-    //   1. Migrad, natural
-    //   2. Migrad, swapped
-    //   3. Simplex+Migrad, natural
-    //   4. Simplex+Migrad, swapped
-    // Stop as soon as a pass converges. With swap disabled (POOL priors are
-    // jet-symmetric) the swap passes are skipped → Migrad → Simplex+Migrad on
-    // natural priors only.
+    // Pass order: Simplex+Migrad always; cheap-Migrad-first removed because
+    // Migrad-alone reports false success at biased mW basins (median 79.05 GeV
+    // at ecm163 vs 80.18 GeV with Simplex pre-pass). Combined Minuit2
+    // ("Minimize") has the same blindspot — it only falls back to Simplex when
+    // Migrad reports failure, not when it converges to the wrong basin.
+    //   1. Simplex+Migrad, natural priors
+    //   2. Simplex+Migrad, swapped priors (only if kf_jet_swap_enabled)
+    //   3. Hesse-refresh + Simplex+Migrad from best.x
+    //   4. Random-restart Simplex+Migrad with jittered init
     int n_passes_run = 1;
     bool priors_swapped = false;
-    PassResult best = snapshot(migrad_only(x_default), priors_swapped, /*pass=*/1);
+    PassResult best = snapshot(simplex_then_migrad(x_default), priors_swapped, /*pass=*/1);
 
     if (!converged(best.status) && kf_jet_swap_enabled) {
         swap_jet_priors(); priors_swapped = true;
         ++n_passes_run;
-        pick_better(best, snapshot(migrad_only(x_default), priors_swapped, /*pass=*/2));
-    }
-    if (!converged(best.status)) {
-        if (priors_swapped) { swap_jet_priors(); priors_swapped = false; }
-        ++n_passes_run;
-        pick_better(best, snapshot(simplex_then_migrad(x_default), priors_swapped, /*pass=*/3));
-    }
-    if (!converged(best.status) && kf_jet_swap_enabled) {
-        swap_jet_priors(); priors_swapped = true;
-        ++n_passes_run;
-        pick_better(best, snapshot(simplex_then_migrad(x_default), priors_swapped, /*pass=*/4));
+        pick_better(best, snapshot(simplex_then_migrad(x_default), priors_swapped, /*pass=*/2));
     }
 
-    // Pass 5: Hesse + re-Migrad recovery from the best.x found so far. Refreshes
-    // Hessian numerically (breaks stale-Davidon plateaus). Also fires when the
-    // Davidon estimate is NaN/Inf — Hesse recomputes from scratch by finite
-    // differences and doesn't depend on the broken estimate.
+    // Pass 3: Hesse refresh from best.x → Simplex+Migrad. Hesse recomputes the
+    // Hessian numerically (breaks stale-Davidon plateaus and recovers from
+    // NaN/Inf EDM). Then Simplex+Migrad descends from that refreshed point.
     if (!converged(best.status) && (!std::isfinite(best.edm) || best.edm < 1.0)) {
         if (priors_swapped != best.swapped) {
             swap_jet_priors();
@@ -870,15 +853,13 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         }
         configure(minimizer.get(), best.x, /*with_strategy=*/true);
         minimizer->Hesse();
-        minimizer->Minimize();
         ++n_passes_run;
-        pick_better(best, snapshot(minimizer->Status(), priors_swapped, /*pass=*/5));
+        pick_better(best, snapshot(simplex_then_migrad(best.x), priors_swapped, /*pass=*/3));
     }
 
-    // Pass 6: deterministic random-restart Migrad. Catches events the 5-pass
-    // cascade leaves with large or non-finite EDM (the residual ~20% of
-    // status=3 events that pass 5 can't touch). Seed is hashed from event
-    // kinematics so the same event gets the same jitter on re-runs.
+    // Pass 4: deterministic random-restart Simplex+Migrad. Catches events the
+    // earlier passes leave with large or non-finite EDM. Seed is hashed from
+    // event kinematics so the same event gets the same jitter on re-runs.
     if (!converged(best.status)) {
         if (priors_swapped != best.swapped) {
             swap_jet_priors();
@@ -895,33 +876,9 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
             for (int i = 0; i < KF_NPAR_TOTAL; ++i) x_jitter[i] = x_default[i];
             for (int i = 2; i < KF_NPAR_TOTAL; ++i) x_jitter[i] += jitter(rng);  // jitter y-coords only
             ++n_passes_run;
-            pick_better(best, snapshot(migrad_only(x_jitter), priors_swapped, /*pass=*/6));
+            pick_better(best, snapshot(simplex_then_migrad(x_jitter), priors_swapped, /*pass=*/4));
             if (converged(best.status)) break;
         }
-    }
-
-    // Pass 7-8: ROOT's "Minimize" method (Combined: Migrad → Simplex → Migrad)
-    // on natural then swapped priors. Different inner sequencing than our
-    // manual cascade — Minuit2 internally uses different step-size heuristics
-    // and gradient checks when falling back, sometimes catching events all 6
-    // cascade passes missed.
-    auto minimize_method = [&](const double* x_init) {
-        minimizer = std::unique_ptr<ROOT::Math::Minimizer>(
-            ROOT::Math::Factory::CreateMinimizer("Minuit2", "Minimize")
-        );
-        configure(minimizer.get(), x_init, /*with_strategy=*/true);
-        minimizer->Minimize();
-        return minimizer->Status();
-    };
-    if (!converged(best.status)) {
-        if (priors_swapped) { swap_jet_priors(); priors_swapped = false; }
-        ++n_passes_run;
-        pick_better(best, snapshot(minimize_method(x_default), priors_swapped, /*pass=*/7));
-    }
-    if (!converged(best.status) && kf_jet_swap_enabled) {
-        swap_jet_priors(); priors_swapped = true;
-        ++n_passes_run;
-        pick_better(best, snapshot(minimize_method(x_default), priors_swapped, /*pass=*/8));
     }
 
     // Sync in-scope priors to the winner's orientation — result extraction
