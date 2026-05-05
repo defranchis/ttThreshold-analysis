@@ -320,6 +320,14 @@ def dcb_expright_gauss(x, N, mu_c, sigma_c, aL, nL, aR, kR, f_wide, mu_w, sigma_
     wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
     return N * ((1.0 - f_wide) * core + f_wide * wide)
 
+def dcb_expright_3gauss(x, N, mu_c, sigma_c, aL, nL, aR, kR,
+                        f_s, mu_s, sigma_s, f_o, mu_o, sigma_o):
+    core      = _dcb_expright_core((x - mu_c) / sigma_c, aL, nL, aR, kR)
+    shoulder  = np.exp(-0.5 * ((x - mu_s) / sigma_s) ** 2)
+    outlier   = np.exp(-0.5 * ((x - mu_o) / sigma_o) ** 2)
+    f_core    = max(0.0, 1.0 - abs(f_s) - abs(f_o))
+    return N * (f_core * core + abs(f_s) * shoulder + abs(f_o) * outlier)
+
 def dcb_gaussbox(x, N, mu_c, sigma_c, aL, nL, aR, nR, f_wide, p_max, sigma_box):
     from scipy.special import erf as _sp_erf
     core = _dcb_core((x - mu_c) / sigma_c, aL, nL, aR, nR)
@@ -365,6 +373,14 @@ def _make_pdf(p):
         aL, nL, aR, kR = p["aL"], p["nL"], p["aR"], p["kR"]
         fw, mw, sw = p["f_wide"], p["mu_wide"], p["sigma_wide"]
         def fn(x): return norm * dcb_expright_gauss(x, 1.0, mu, sg, aL, nL, aR, kR, fw, mw, sw)
+
+    elif model == "dcber3g":
+        mu, sg = p["mu"], p["sigma"]
+        aL, nL, aR, kR = p["aL"], p["nL"], p["aR"], p["kR"]
+        fs, mus, ss = p["f_s"], p["mu_s"], p["sigma_s"]
+        fo, muo, so = p["f_o"], p["mu_o"], p["sigma_o"]
+        def fn(x): return norm * dcb_expright_3gauss(x, 1.0, mu, sg, aL, nL, aR, kR,
+                                                       fs, mus, ss, fo, muo, so)
 
     elif model == "dcbgb":
         mu, sg = p["mu"], p["sigma"]

@@ -35,8 +35,8 @@ struct KinFitParamSet {
     std::array<double,                KF_NBINS + 1> jet1_p_resp_edges;
     std::array<DcbGaussParams,        KF_NBINS> jet2_p_resp_bins;
     std::array<double,                KF_NBINS + 1> jet2_p_resp_edges;
-    std::array<DcbExpRightGaussParams, KF_NBINS> lep_p_resp_bins;       // dcber2g
-    std::array<double,                 KF_NBINS + 1> lep_p_resp_edges;
+    std::array<DcbExpRight3GaussParams, KF_NBINS> lep_p_resp_bins;      // dcber3g (FSR-dressed)
+    std::array<double,                  KF_NBINS + 1> lep_p_resp_edges;
     DcbParams                                    met_p_resp;
     std::array<DcbGaussParams,        KF_NBINS> jet1_phi_resol_bins;    // dcb2g
     std::array<double,                KF_NBINS + 1> jet1_phi_resol_edges;
@@ -66,7 +66,7 @@ struct KinFitParamSet {
     // Inclusive (kinematics-averaged) variants — used when kf_use_binned_priors=false.
     DcbGaussParams                               jet1_p_resp_incl;
     DcbGaussParams                               jet2_p_resp_incl;
-    DcbExpRightGaussParams                       lep_p_resp_incl;
+    DcbExpRight3GaussParams                      lep_p_resp_incl;
     DcbGaussParams                               jet1_phi_resol_incl;
     DcbGaussParams                               jet1_theta_resol_incl;
     DcbGaussParams                               jet2_phi_resol_incl;
@@ -87,7 +87,7 @@ struct KinFitParamSet {
 #define KF_POOL_BUNDLE(E) \
     DCBG_JET_P_RESP_BINS_##E,        DCBG_JET_P_RESP_EDGES_##E, \
     DCBG_JET_P_RESP_BINS_##E,        DCBG_JET_P_RESP_EDGES_##E, \
-    DCBERG_LEP_P_RESP_BINS_##E,      DCBERG_LEP_P_RESP_EDGES_##E, \
+    DCBER3G_LEP_P_RESP_BINS_##E,      DCBER3G_LEP_P_RESP_EDGES_##E, \
     DCB_MET_P_RESP_##E, \
     DCBG_JET_PHI_RESOL_BINS_##E,     DCBG_JET_PHI_RESOL_EDGES_##E, \
     DCBG_JET_THETA_RESOL_BINS_##E,   DCBG_JET_THETA_RESOL_EDGES_##E, \
@@ -100,7 +100,7 @@ struct KinFitParamSet {
     SDCBG_GEN_ISR_PX_##E, SDCBG_GEN_ISR_PY_##E, SDCBG_GEN_ISR_PZ_##E, \
     DCBERG_GEN_WW_M_MINUS_M_EE_##E, \
     /* inclusive — POOL: jet1 and jet2 share the pooled scalar */ \
-    DCBG_JET_P_RESP_##E, DCBG_JET_P_RESP_##E, DCBERG_LEP_P_RESP_##E, \
+    DCBG_JET_P_RESP_##E, DCBG_JET_P_RESP_##E, DCBER3G_LEP_P_RESP_##E, \
     DCBG_JET_PHI_RESOL_##E, DCBG_JET_THETA_RESOL_##E, \
     DCBG_JET_PHI_RESOL_##E, DCBG_JET_THETA_RESOL_##E, \
     DCBG_LEP_PHI_RESOL_##E, DCBG_LEP_THETA_RESOL_##E
@@ -108,7 +108,7 @@ struct KinFitParamSet {
 #define KF_SEP_BUNDLE(E) \
     DCBG_JET1_P_RESP_BINS_##E,       DCBG_JET1_P_RESP_EDGES_##E, \
     DCBG_JET2_P_RESP_BINS_##E,       DCBG_JET2_P_RESP_EDGES_##E, \
-    DCBERG_LEP_P_RESP_BINS_##E,      DCBERG_LEP_P_RESP_EDGES_##E, \
+    DCBER3G_LEP_P_RESP_BINS_##E,      DCBER3G_LEP_P_RESP_EDGES_##E, \
     DCB_MET_P_RESP_##E, \
     DCBG_JET1_PHI_RESOL_BINS_##E,    DCBG_JET1_PHI_RESOL_EDGES_##E, \
     DCBG_JET1_THETA_RESOL_BINS_##E,  DCBG_JET1_THETA_RESOL_EDGES_##E, \
@@ -121,7 +121,7 @@ struct KinFitParamSet {
     SDCBG_GEN_ISR_PX_##E, SDCBG_GEN_ISR_PY_##E, SDCBG_GEN_ISR_PZ_##E, \
     DCBERG_GEN_WW_M_MINUS_M_EE_##E, \
     /* inclusive — SEP: per-jet scalar */ \
-    DCBG_JET1_P_RESP_##E, DCBG_JET2_P_RESP_##E, DCBERG_LEP_P_RESP_##E, \
+    DCBG_JET1_P_RESP_##E, DCBG_JET2_P_RESP_##E, DCBER3G_LEP_P_RESP_##E, \
     DCBG_JET1_PHI_RESOL_##E, DCBG_JET1_THETA_RESOL_##E, \
     DCBG_JET2_PHI_RESOL_##E, DCBG_JET2_THETA_RESOL_##E, \
     DCBG_LEP_PHI_RESOL_##E, DCBG_LEP_THETA_RESOL_##E
@@ -140,8 +140,8 @@ inline std::array<DcbGaussParams,        KF_NBINS> kf_jet1_p_resp_bins      = DC
 inline std::array<double,                KF_NBINS + 1> kf_jet1_p_resp_edges      = DCBG_JET1_P_RESP_EDGES_160;
 inline std::array<DcbGaussParams,        KF_NBINS> kf_jet2_p_resp_bins      = DCBG_JET2_P_RESP_BINS_160;
 inline std::array<double,                KF_NBINS + 1> kf_jet2_p_resp_edges      = DCBG_JET2_P_RESP_EDGES_160;
-inline std::array<DcbExpRightGaussParams, KF_NBINS> kf_lep_p_resp_bins       = DCBERG_LEP_P_RESP_BINS_160;
-inline std::array<double,                 KF_NBINS + 1> kf_lep_p_resp_edges       = DCBERG_LEP_P_RESP_EDGES_160;
+inline std::array<DcbExpRight3GaussParams, KF_NBINS> kf_lep_p_resp_bins       = DCBER3G_LEP_P_RESP_BINS_160;
+inline std::array<double,                  KF_NBINS + 1> kf_lep_p_resp_edges       = DCBER3G_LEP_P_RESP_EDGES_160;
 inline DcbParams                                    kf_met_p_resp            = DCB_MET_P_RESP_160;
 inline std::array<DcbGaussParams,        KF_NBINS> kf_jet1_phi_resol_bins   = DCBG_JET1_PHI_RESOL_BINS_160;
 inline std::array<double,                KF_NBINS + 1> kf_jet1_phi_resol_edges   = DCBG_JET1_PHI_RESOL_EDGES_160;
@@ -168,7 +168,7 @@ inline DcbExpRightGaussParams                       kf_ww_m_minus_m_ee       = D
 // Same data as the bin arrays would collapse to with one bin spanning all events.
 inline DcbGaussParams         kf_jet1_p_resp_incl      = DCBG_JET1_P_RESP_160;
 inline DcbGaussParams         kf_jet2_p_resp_incl      = DCBG_JET2_P_RESP_160;
-inline DcbExpRightGaussParams kf_lep_p_resp_incl       = DCBERG_LEP_P_RESP_160;
+inline DcbExpRight3GaussParams kf_lep_p_resp_incl      = DCBER3G_LEP_P_RESP_160;
 inline DcbGaussParams         kf_jet1_phi_resol_incl   = DCBG_JET1_PHI_RESOL_160;
 inline DcbGaussParams         kf_jet1_theta_resol_incl = DCBG_JET1_THETA_RESOL_160;
 inline DcbGaussParams         kf_jet2_phi_resol_incl   = DCBG_JET2_PHI_RESOL_160;
@@ -394,7 +394,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         p_jet1_phi_resol_alt   = kf_use_binned_priors ? pick_bin(kf_jet2_phi_resol_bins,   kf_jet2_phi_resol_edges,   j1_acth)  : kf_jet2_phi_resol_incl;
         p_jet2_phi_resol_alt   = kf_use_binned_priors ? pick_bin(kf_jet1_phi_resol_bins,   kf_jet1_phi_resol_edges,   j2_acth)  : kf_jet1_phi_resol_incl;
     }
-    const DcbExpRightGaussParams kf_lep_p_resp    = kf_use_binned_priors ? pick_bin(kf_lep_p_resp_bins,      kf_lep_p_resp_edges,      Isolep_p) : kf_lep_p_resp_incl;
+    const DcbExpRight3GaussParams kf_lep_p_resp   = kf_use_binned_priors ? pick_bin(kf_lep_p_resp_bins,      kf_lep_p_resp_edges,      Isolep_p) : kf_lep_p_resp_incl;
     const DcbGaussParams        kf_lep_theta_resol = kf_use_binned_priors ? pick_bin(kf_lep_theta_resol_bins, kf_lep_theta_resol_edges, Isolep_p) : kf_lep_theta_resol_incl;
     const DcbGaussParams        kf_lep_phi_resol   = kf_use_binned_priors ? pick_bin(kf_lep_phi_resol_bins,   kf_lep_phi_resol_edges,   Isolep_p) : kf_lep_phi_resol_incl;
 
@@ -479,7 +479,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
 
         double scale_pen = dcb_gauss_neg2logpdf(s1, p_jet1_p_resp)
                          + dcb_gauss_neg2logpdf(s2, p_jet2_p_resp)
-                         + dcb_expright_gauss_neg2logpdf(sl, kf_lep_p_resp)
+                         + dcb_expright_3gauss_neg2logpdf(sl, kf_lep_p_resp)
                          + dcb_neg2logpdf(sn, kf_met_p_resp);
 
         double angular = dcb_gauss_neg2logpdf(t1, p_jet1_theta_resol)

@@ -178,6 +178,72 @@ float deltaM(int nIsolep, int nRecoJets,
     return (P_initial - (Wlep + Whad)).M();
 }
 
+
+// ── FSR dressing ─────────────────────────────────────────────────────────────
+// Add nearby reco photons (RPs with type==22) to each isolated lepton, returning
+// a new RVec of dressed RPs. Photons are absorbed if dR(lep, γ) < dR_max and
+// E_γ > E_min. The same-photon-multiple-leptons case is handled by giving the
+// photon to the closest lepton only.
+
+inline ROOT::VecOps::RVec<edm4hep::ReconstructedParticleData>
+dress_isoleps(const ROOT::VecOps::RVec<edm4hep::ReconstructedParticleData>& Isoleps,
+              const ROOT::VecOps::RVec<edm4hep::ReconstructedParticleData>& AllReco,
+              double dR_max, double E_min) {
+    const std::size_t nL = Isoleps.size();
+    ROOT::VecOps::RVec<edm4hep::ReconstructedParticleData> out(Isoleps);
+
+    std::vector<TLorentzVector> lep_p4(nL);
+    for (std::size_t i = 0; i < nL; ++i) {
+        lep_p4[i].SetPxPyPzE(Isoleps[i].momentum.x, Isoleps[i].momentum.y,
+                             Isoleps[i].momentum.z, Isoleps[i].energy);
+    }
+
+    for (const auto& p : AllReco) {
+        if (p.type != 22) continue;
+        if (p.energy < E_min) continue;
+        TLorentzVector ph;
+        ph.SetPxPyPzE(p.momentum.x, p.momentum.y, p.momentum.z, p.energy);
+
+        int best = -1; double best_dr = dR_max;
+        for (std::size_t i = 0; i < nL; ++i) {
+            const double dr = lep_p4[i].DeltaR(ph);
+            if (dr < best_dr) { best_dr = dr; best = (int)i; }
+        }
+        if (best < 0) continue;
+        out[best].momentum.x += p.momentum.x;
+        out[best].momentum.y += p.momentum.y;
+        out[best].momentum.z += p.momentum.z;
+        out[best].energy     += p.energy;
+    }
+    return out;
+}
+
+// Return the photons that were absorbed by dress_isoleps, for removal from the
+// jet input collection (avoids double-counting FSR γ in the hadronic side).
+inline ROOT::VecOps::RVec<edm4hep::ReconstructedParticleData>
+dressed_photons(const ROOT::VecOps::RVec<edm4hep::ReconstructedParticleData>& Isoleps,
+                const ROOT::VecOps::RVec<edm4hep::ReconstructedParticleData>& AllReco,
+                double dR_max, double E_min) {
+    ROOT::VecOps::RVec<edm4hep::ReconstructedParticleData> out;
+
+    std::vector<TLorentzVector> lep_p4(Isoleps.size());
+    for (std::size_t i = 0; i < Isoleps.size(); ++i) {
+        lep_p4[i].SetPxPyPzE(Isoleps[i].momentum.x, Isoleps[i].momentum.y,
+                             Isoleps[i].momentum.z, Isoleps[i].energy);
+    }
+
+    for (const auto& p : AllReco) {
+        if (p.type != 22) continue;
+        if (p.energy < E_min) continue;
+        TLorentzVector ph;
+        ph.SetPxPyPzE(p.momentum.x, p.momentum.y, p.momentum.z, p.energy);
+        for (const auto& lp : lep_p4) {
+            if (lp.DeltaR(ph) < dR_max) { out.push_back(p); break; }
+        }
+    }
+    return out;
+}
+
 }}  // namespace FCCAnalyses::WWFunctions
 
 #endif

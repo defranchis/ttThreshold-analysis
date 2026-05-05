@@ -103,7 +103,7 @@ BRANCH_CONFIG = {
     # Lepton p response: narrow detector core + heavy power-law left tail (FSR)
     # + sharp exponential right cutoff at 1 (kinematic ceiling). dcber2g —
     # mirror-image of expleft2g; physically motivated and fits ~2× better.
-    "lep_p_resp":           {"clip": (0.1, 99.9),  "nbins": 300, "model": "dcber2g"},
+    "lep_p_resp":           {"clip": (0.1, 99.9),  "nbins": 300, "model": "dcber3g"},
     # Lepton angular resolutions: tight detector core + wide-angle FSR tails → DCB+G.
     "lep_theta_resol":      {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
     "lep_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
@@ -258,6 +258,19 @@ def dcb_expright_gauss(x, N, mu_c, sigma_c, aL, nL, aR, kR, f_wide, mu_w, sigma_
     core = _dcb_expright_core((x - mu_c) / sigma_c, aL, nL, aR, kR)
     wide = np.exp(-0.5 * ((x - mu_w) / sigma_w) ** 2)
     return N * ((1.0 - f_wide) * core + f_wide * wide)
+
+
+def dcb_expright_3gauss(x, N, mu_c, sigma_c, aL, nL, aR, kR,
+                        f_s, mu_s, sigma_s, f_o, mu_o, sigma_o):
+    """3-component lep_p_resp model: dcber core + shoulder Gaussian + outlier Gaussian.
+    Core captures tracker resolution + soft FSR; shoulder Gaussian (~0.94, σ~0.03) the
+    intermediate hard-FSR plateau; outlier Gaussian the deep-radiative tail. Sums to
+    N when integrated over x. f_core = 1 - f_s - f_o (clamped ≥ 0)."""
+    core      = _dcb_expright_core((x - mu_c) / sigma_c, aL, nL, aR, kR)
+    shoulder  = np.exp(-0.5 * ((x - mu_s) / sigma_s) ** 2)
+    outlier   = np.exp(-0.5 * ((x - mu_o) / sigma_o) ** 2)
+    f_core    = max(0.0, 1.0 - abs(f_s) - abs(f_o))
+    return N * (f_core * core + abs(f_s) * shoulder + abs(f_o) * outlier)
 
 
 def gauss(x, N, mu, sigma):
@@ -739,6 +752,81 @@ def fit_dcb_expright2g_iminuit(centers, counts, mu0, sig0):
     return best_popt, None, True, best_chi2
 
 
+def fit_dcb_expright3g_iminuit(centers, counts, mu0, sig0):
+    """Poisson NLL iminuit fit: dcber core + shoulder Gaussian + outlier Gaussian.
+    13 free parameters. Designed for lep_p_resp on FSR-dressed data."""
+    from iminuit import Minuit
+    N0   = float(counts.max())
+    errs = np.maximum(np.sqrt(counts), 1.0)
+    x_right_span = max(float(centers[-1]) - mu0, 0.5)
+    s = max(x_right_span * 0.40, 0.15)
+
+    def nll(N, mu_c, sc, aL, nL, aR, kR, f_s, mu_s, sigma_s, f_o, mu_o, sigma_o):
+        if (sc <= 0 or nL < 1.0 or aL <= 0 or aR <= 0 or kR <= 0
+            or sigma_s <= 0 or sigma_o <= 0):
+            return 1e15
+        if abs(f_s) + abs(f_o) > 0.95:
+            return 1e15
+        pred = dcb_expright_3gauss(centers, abs(N), mu_c, abs(sc),
+                                    abs(aL), abs(nL), abs(aR), abs(kR),
+                                    abs(f_s), mu_s, abs(sigma_s),
+                                    abs(f_o), mu_o, abs(sigma_o))
+        pred = np.maximum(pred, 1e-300)
+        return 2.0 * float(np.sum(pred - counts * np.log(pred)))
+
+    # Shoulder seed: ~0.94 with σ ~ 0.025 (3σ_core scale, matches the visible bump).
+    # Outlier seed: ~0.7 with σ ~ 0.15 (deep-radiative tail).
+    starts = [
+        # N, mu_c,  sc,    aL,  nL,  aR,  kR,    f_s, mu_s, sigma_s, f_o, mu_o, sigma_o
+        [N0, mu0, s,       0.5, 2.0, 1.5,  5.0, 0.10, mu0 - 0.05, 0.025, 0.03, mu0 - 0.30, 0.15],
+        [N0, mu0, s*0.7,   0.4, 1.5, 1.5,  5.0, 0.05, mu0 - 0.05, 0.030, 0.05, mu0 - 0.25, 0.10],
+        [N0, mu0, s,       0.6, 2.5, 2.0,  8.0, 0.15, mu0 - 0.06, 0.020, 0.03, mu0 - 0.30, 0.20],
+        [N0, mu0, s*0.5,   0.3, 1.2, 1.0,  3.0, 0.12, mu0 - 0.04, 0.025, 0.05, mu0 - 0.25, 0.12],
+        [N0, mu0, s,       0.5, 2.0, 2.5, 10.0, 0.08, mu0 - 0.05, 0.030, 0.04, mu0 - 0.30, 0.18],
+        [N0, mu0, s*1.5,   0.5, 2.0, 1.5,  5.0, 0.20, mu0 - 0.05, 0.025, 0.02, mu0 - 0.20, 0.15],
+    ]
+    # mu_c stays near the histogram peak; mu_s and mu_o are bounded to the data range.
+    x_lo = float(centers[0]); x_hi = float(centers[-1])
+    limits = [(1e-3, None),
+              (mu0 - 0.05, mu0 + 0.02),     # mu_c
+              (1e-6, x_hi - x_lo),          # sigma_c
+              (0.05, 5.), (1.01, 50.), (0.1, 10.), (0.05, 100.),
+              (0.0, 0.50),                  # f_s
+              (x_lo, mu0),                  # mu_s — left of core peak
+              (1e-4, 0.10),                 # sigma_s
+              (0.0, 0.30),                  # f_o
+              (x_lo, mu0 - 0.05),           # mu_o — left of shoulder
+              (1e-3, 0.5)]                  # sigma_o
+    names  = ['N','mu_c','sc','aL','nL','aR','kR',
+              'f_s','mu_s','sigma_s','f_o','mu_o','sigma_o']
+
+    best_popt, best_chi2 = None, np.inf
+    for p0 in starts:
+        try:
+            m = Minuit(nll, *p0, name=names)
+            for i, (lo_i, hi_i) in enumerate(limits):
+                m.limits[i] = (lo_i, hi_i)
+            m.migrad()
+            if not m.valid:
+                m.migrad()
+            if m.valid:
+                popt = list(m.values)
+                pred = dcb_expright_3gauss(
+                    centers, abs(popt[0]), popt[1], abs(popt[2]),
+                    abs(popt[3]), abs(popt[4]), abs(popt[5]), abs(popt[6]),
+                    abs(popt[7]), popt[8], abs(popt[9]),
+                    abs(popt[10]), popt[11], abs(popt[12]))
+                chi2 = float(np.sum(((counts - pred) / errs) ** 2))
+                if chi2 < best_chi2:
+                    best_chi2, best_popt = chi2, popt
+        except Exception:
+            pass
+
+    if best_popt is None:
+        return None, None, False, np.inf
+    return best_popt, None, True, best_chi2
+
+
 def _flatten_raw(raw):
     arr = np.asarray(raw)
     if arr.dtype == object:
@@ -830,6 +918,9 @@ def _fit_one(bname, vals_in, ecm):
             if popt2 is not None and (popt is None or chi2_2 < chi2):
                 popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
         nparams = 10
+    elif model == "dcber3g":
+        popt, pcov, fit_ok, chi2 = fit_dcb_expright3g_iminuit(centers[mask], counts[mask], mu0, sig0)
+        nparams = 13
     elif model == "dcbgb":
         popt, pcov, fit_ok, chi2 = fit_dcb_gaussbox_iminuit(centers[mask], counts[mask], mu0, sig0)
         _ndof_est = max(int(mask.sum()) - 10, 1)
@@ -870,6 +961,10 @@ def _fit_one(bname, vals_in, ecm):
         if model == "dcber2g":
             _s = max((float(centers[-1]) - mu0) * 0.4, 0.15)
             popt = [float(counts.max()), mu0, _s, 0.5, 2.0, 1.5, 5.0, 0.05, mu0 - 4*_s, 6*_s]
+        elif model == "dcber3g":
+            _s = max((float(centers[-1]) - mu0) * 0.4, 0.15)
+            popt = [float(counts.max()), mu0, _s, 0.5, 2.0, 1.5, 5.0,
+                    0.10, mu0 - 0.05, 0.025, 0.03, mu0 - 0.30, 0.15]
         elif model == "dcbgb":
             x_span = 0.5 * (centers[-1] - centers[0])
             popt += [0.01, x_span * 0.8, sig0 * 0.2]
@@ -886,6 +981,16 @@ def _fit_one(bname, vals_in, ecm):
                    f_wide=float(fw), mu_wide=float(muw), sigma_wide=float(sw))
         yfn = lambda x, _N=N_f, _mc=float(mu_c), _sc=float(sc), _aL=float(aL), _nL=float(nL), _aR=float(aR), _kR=float(kR), _fw=float(fw), _mw=float(muw), _sw=float(sw): \
             dcb_expright_gauss(x, _N, _mc, _sc, _aL, _nL, _aR, _kR, _fw, _mw, _sw)
+    elif model == "dcber3g":
+        N_f, mu_c, sc, aL, nL, aR, kR, fs, mus, ss, fo, muo, so = popt
+        N_f, sc, aL, nL, aR, kR = abs(N_f), abs(sc), abs(aL), abs(nL), abs(aR), abs(kR)
+        fs, ss, fo, so = abs(fs), abs(ss), abs(fo), abs(so)
+        res = dict(model="dcber3g", mu=float(mu_c), sigma=float(sc),
+                   aL=float(aL), nL=float(nL), aR=float(aR), kR=float(kR),
+                   f_s=float(fs), mu_s=float(mus), sigma_s=float(ss),
+                   f_o=float(fo), mu_o=float(muo), sigma_o=float(so))
+        yfn = lambda x, _N=N_f, _mc=float(mu_c), _sc=float(sc), _aL=float(aL), _nL=float(nL), _aR=float(aR), _kR=float(kR), _fs=float(fs), _ms=float(mus), _ss=float(ss), _fo=float(fo), _mo=float(muo), _so=float(so): \
+            dcb_expright_3gauss(x, _N, _mc, _sc, _aL, _nL, _aR, _kR, _fs, _ms, _ss, _fo, _mo, _so)
     elif model == "dcbgb":
         N_f, mu_c, sc, aL, nL, aR, nR, fw, p_max, sb = popt
         N_f, sc, aL, nL, aR, nR, fw, p_max, sb = abs(N_f), abs(sc), abs(aL), abs(nL), abs(aR), abs(nR), abs(fw), abs(p_max), abs(sb)
@@ -1031,6 +1136,10 @@ def process_ecm(ecm):
                 if popt2 is not None and (popt is None or chi2_2 < chi2):
                     popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
             nparams = 10
+        elif model == "dcber3g":
+            popt, pcov, fit_ok, chi2 = fit_dcb_expright3g_iminuit(
+                centers[mask], counts[mask], mu0, sig0)
+            nparams = 13
         elif model == "dcbgb":
             # Poisson NLL primary: correctly weights spike peak vs flat plateau.
             # chi² over-weights plateau bins (small sigma), forcing N down and undershooting peak.
@@ -1085,6 +1194,11 @@ def process_ecm(ecm):
                     _s = max((float(centers[-1]) - mu0) * 0.4, 0.15)
                     popt = [float(counts.max()), mu0, _s, 0.5, 2.0, 1.5, 5.0, 0.05,
                             mu0 - 4*_s, 6*_s]
+                elif model == "dcber3g":
+                    _s = max((float(centers[-1]) - mu0) * 0.4, 0.15)
+                    popt = [float(counts.max()), mu0, _s, 0.5, 2.0, 1.5, 5.0,
+                            0.10, mu0 - 0.05, 0.025,
+                            0.03, mu0 - 0.30, 0.15]
                 elif model == "dcbgb":
                     x_span = 0.5 * (centers[-1] - centers[0])
                     popt += [0.01, x_span * 0.8, sig0 * 0.2]
@@ -1117,6 +1231,33 @@ def process_ecm(ecm):
                    rf"$\sigma_c$={sc:.3g}, $\alpha_L$={aL:.2f}, $n_L$={nL:.2f}, $k_R$={kR:.3g}"
                    "\n"
                    rf"$f_w$={fw:.3f}, $\mu_w$={muw:.3g}, $\sigma_w$={sw:.3g}"
+                   rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
+        elif model == "dcber3g":
+            N_f, mu_c, sc, aL, nL, aR, kR, fs, mus, ss, fo, muo, so = popt
+            mu_c = float(mu_c);  sc  = abs(float(sc))
+            aL   = abs(float(aL)); nL = abs(float(nL))
+            aR   = abs(float(aR)); kR = abs(float(kR))
+            fs   = abs(float(fs)); mus = float(mus); ss = abs(float(ss))
+            fo   = abs(float(fo)); muo = float(muo); so = abs(float(so))
+            N_f  = abs(float(N_f))
+            results[bname] = dict(
+                model="dcber3g",
+                mu=mu_c, sigma=sc, aL=aL, nL=nL, aR=aR, kR=kR,
+                f_s=fs, mu_s=mus, sigma_s=ss,
+                f_o=fo, mu_o=muo, sigma_o=so,
+                chi2_ndof=round(float(chi2_ndof), 3), fit_ok=bool(fit_ok),
+            )
+            def yfn(x, _N=N_f, _mc=mu_c, _sc=sc, _aL=aL, _nL=nL, _aR=aR, _kR=kR,
+                    _fs=fs, _ms=mus, _ss=ss, _fo=fo, _mo=muo, _so=so):
+                return dcb_expright_3gauss(x, _N, _mc, _sc, _aL, _nL, _aR, _kR,
+                                            _fs, _ms, _ss, _fo, _mo, _so)
+            lbl = (rf"DCBExpRight+G+G: $\mu_c$={mu_c:+.3g}, $\sigma_c$={sc:.3g}"
+                   "\n"
+                   rf"$\alpha_L$={aL:.2f}, $n_L$={nL:.2f}, $k_R$={kR:.3g}"
+                   "\n"
+                   rf"$f_s$={fs:.3f}, $\mu_s$={mus:.3g}, $\sigma_s$={ss:.3g}"
+                   "\n"
+                   rf"$f_o$={fo:.3f}, $\mu_o$={muo:.3g}, $\sigma_o$={so:.3g}"
                    rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
         elif model == "dcbgb":
             N_f, mu_c, sc, aL, nL, aR, nR, fw, p_max, sb = popt
@@ -1462,6 +1603,7 @@ def _cpp_struct_for_model(model):
     if model == "dcb2g":     return ("DcbGaussParams",         "DCBG")
     if model == "expleft2g": return ("DcbExpLeftGaussParams",  "DCBELG")
     if model == "dcber2g":   return ("DcbExpRightGaussParams", "DCBERG")
+    if model == "dcber3g":   return ("DcbExpRight3GaussParams","DCBER3G")
     if model == "gauss":     return ("GaussParams",            "GAUSS")
     if model == "spike_dcb2g": return ("SpikeDcbGaussParams",  "SDCBG")
     return ("DcbParams", "DCB")
@@ -1486,6 +1628,12 @@ def _cpp_struct_initializer(p):
         return (f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
                 f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['kR']:.6f}, "
                 f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}, "
+                f"{p['norm']:.10e}")
+    if p["model"] == "dcber3g":
+        return (f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
+                f"{p['aL']:.6f}, {p['nL']:.6f}, {p['aR']:.6f}, {p['kR']:.6f}, "
+                f"{p['f_s']:.6f}, {p['mu_s']:+.6f}, {p['sigma_s']:.6f}, "
+                f"{p['f_o']:.6f}, {p['mu_o']:+.6f}, {p['sigma_o']:.6f}, "
                 f"{p['norm']:.10e}")
     if p["model"] == "gauss":
         return f"{p['mu']:+.6f}, {p['sigma']:.6f}"
@@ -1579,6 +1727,14 @@ def write_combined_header(all_results):
         "    double mu, sigma, aL, nL;              // power-law left tail (ISR heavy tail)",
         "    double aR, kR;                         // exponential right tail: exp(-kR*(t-aR))",
         "    double f_wide, mu_wide, sigma_wide;    // broad Gaussian component",
+        "    double norm;                           // 1/integral, shape integrates to 1",
+        "};",
+        "",
+        "struct DcbExpRight3GaussParams {",
+        "    double mu, sigma, aL, nL;              // dcber core (tracker + soft FSR)",
+        "    double aR, kR;                         // exponential right cutoff",
+        "    double f_s, mu_s, sigma_s;             // shoulder Gaussian (intermediate FSR)",
+        "    double f_o, mu_o, sigma_o;             // outlier Gaussian (deep radiative tail)",
         "    double norm;                           // 1/integral, shape integrates to 1",
         "};",
         "",
@@ -1677,6 +1833,25 @@ def write_combined_header(all_results):
         "    }",
         "    double wide = std::exp(-0.5 * std::pow((x - p.mu_wide)/p.sigma_wide, 2));",
         "    double f    = (1.0 - p.f_wide) * core + p.f_wide * wide;",
+        "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
+        "}",
+        "",
+        "inline double dcb_expright_3gauss_neg2logpdf(double x, const DcbExpRight3GaussParams& p) {",
+        "    double t    = (x - p.mu) / p.sigma;",
+        "    double core;",
+        "    if (t < -p.aL) {",
+        "        double AL = std::pow(p.nL/p.aL, p.nL) * std::exp(-0.5*p.aL*p.aL);",
+        "        double BL = p.nL/p.aL - p.aL;",
+        "        core = AL * std::pow(std::max(BL - t, 1e-10), -p.nL);",
+        "    } else if (t > p.aR) {",
+        "        core = std::exp(-0.5*p.aR*p.aR - p.kR*(t - p.aR));",
+        "    } else {",
+        "        core = std::exp(-0.5*t*t);",
+        "    }",
+        "    double shoulder = std::exp(-0.5 * std::pow((x - p.mu_s)/p.sigma_s, 2));",
+        "    double outlier  = std::exp(-0.5 * std::pow((x - p.mu_o)/p.sigma_o, 2));",
+        "    double f_core   = std::max(0.0, 1.0 - p.f_s - p.f_o);",
+        "    double f        = f_core * core + p.f_s * shoulder + p.f_o * outlier;",
         "    return -2.0 * (std::log(std::max(f, 1e-300)) + std::log(p.norm));",
         "}",
         "",

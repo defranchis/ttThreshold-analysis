@@ -8,6 +8,13 @@ from addons.FastJet.jetClusteringHelper import ExclusiveJetClusteringHelper
 
 AVAILABLE_ECM = ['157', '160', '163']
 
+# FSR dressing parameters (see project_lep_p_resp_fsr_dressing.md).
+# Tuned 2026-05-05 from photon-investigation analysis: dR<0.1 around the iso
+# lepton, E_γ>0.5 GeV. Recovers ~30% of deep-tail (lep_p_resp<0.88) events
+# with negligible core impact and 0.1-0.2% overshoot rate.
+FSR_DRESS_DR_MAX = 0.1
+FSR_DRESS_E_MIN  = 0.5
+
 def parse_ecm(name):
     m = re.search(r'_ecm(\d+)', name)
     if not m:
@@ -53,17 +60,31 @@ def apply_channel_filter(df, channel):
         df = df.Filter("muons_sel_iso.size() + electrons_sel_iso.size() == 2",
                        "channel: 2 isolated leptons (lep)")
 
-    df = df.Define("Isoleps", "ROOT::VecOps::Concatenate(muons_sel_iso, electrons_sel_iso)")
+    df = df.Define("Isoleps_bare", "ROOT::VecOps::Concatenate(muons_sel_iso, electrons_sel_iso)")
+
+    # FSR dressing: absorb nearby photons (RPs with type==22) into each iso
+    # lepton; the same photons must be removed from the jet input.
+    df = df.Define("Isoleps",
+        f"FCCAnalyses::WWFunctions::dress_isoleps(Isoleps_bare, ReconstructedParticles, "
+        f"{FSR_DRESS_DR_MAX}, {FSR_DRESS_E_MIN})")
+    df = df.Define("FSR_photons",
+        f"FCCAnalyses::WWFunctions::dressed_photons(Isoleps_bare, ReconstructedParticles, "
+        f"{FSR_DRESS_DR_MAX}, {FSR_DRESS_E_MIN})")
+
     df = df.Define("ReconstructedParticlesNoMuons",
         "FCCAnalyses::ReconstructedParticle::remove(ReconstructedParticles, muons_sel_iso)")
     df = df.Define("ReconstructedParticlesNoMuNoEl",
         "FCCAnalyses::ReconstructedParticle::remove(ReconstructedParticlesNoMuons, electrons_sel_iso)")
+    df = df.Define("ReconstructedParticlesNoMuNoElNoFSR",
+        "FCCAnalyses::ReconstructedParticle::remove(ReconstructedParticlesNoMuNoEl, FSR_photons)")
     return df
 
 
 def cluster_jets(df, channel):
     nJets = 2 if channel == "semihad" else 4
-    helper = ExclusiveJetClusteringHelper("ReconstructedParticlesNoMuNoEl", nJets)
+    # Cluster on the FSR-dressed reduced collection so absorbed photons don't
+    # double-count on the hadronic side.
+    helper = ExclusiveJetClusteringHelper("ReconstructedParticlesNoMuNoElNoFSR", nJets)
     df = helper.define(df)
     df = df.Define("jets_p4",
         f"JetConstituentsUtils::compute_tlv_jets({helper.jets})")
