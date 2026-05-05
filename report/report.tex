@@ -33,9 +33,15 @@
 
 % Tolerant include — falls back to a placeholder when the file is missing,
 % so the report compiles even if a step2 ECM hasn't finished.
+% \IfFileExists doesn't honor \graphicspath, so probe the same prefixes
+% explicitly. Keep this list in sync with \graphicspath above.
 \newcommand{\maybeincl}[2][\linewidth]{%
-  \IfFileExists{#2}{\includegraphics[width=#1]{#2}}%
-  {\fbox{\parbox[c][3.5cm]{0.8\linewidth}{\centering\small\ttfamily plot pending}}}}
+  \IfFileExists{../outputs/#2}{\includegraphics[width=#1]{#2}}{%
+  \IfFileExists{../outputs/plots/#2}{\includegraphics[width=#1]{#2}}{%
+  \IfFileExists{../outputs/response/plots/#2}{\includegraphics[width=#1]{#2}}{%
+  \IfFileExists{#2}{\includegraphics[width=#1]{#2}}{%
+  \fbox{\parbox[c][3.5cm]{0.8\linewidth}{\centering\small\ttfamily plot pending}}%
+  }}}}}
 
 % Three-ECM panel of the same plot (resolution priors).
 \newcommand{\threecm}[2][0.32]{%
