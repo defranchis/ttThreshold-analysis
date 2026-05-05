@@ -37,12 +37,14 @@ ECM_COLORS  = {157: "tab:purple", 160: "tab:orange", 163: "tab:cyan"}
 
 MW_OUTDIR = "outputs/plots/lnuqq/allbranches"
 
+# Last column is_kinfit: branches that respect the kinfit_valid mask in the
+# `_valid` variant. Pre-fit reco branches are unfiltered in both variants.
 MW_HISTS_CFG = [
     ("reco_Wlep_m",   "Wlep reco (pre-fit)", "tab:blue",  ":",  False),
     ("reco_Whad_m",   "Whad reco (pre-fit)", "tab:green", ":",  False),
-    ("kinfit_Wlep_m", "Wlep (kinfit)",       "tab:blue",  "--", False),
-    ("kinfit_Whad_m", "Whad (kinfit)",       "tab:green", "--", False),
-    ("kinfit_mW",     "W (kinfit combined)", "tab:red",   "-",  False),
+    ("kinfit_Wlep_m", "Wlep (kinfit)",       "tab:blue",  "--", True),
+    ("kinfit_Whad_m", "Whad (kinfit)",       "tab:green", "--", True),
+    ("kinfit_mW",     "W (kinfit combined)", "tab:red",   "-",  True),
 ]
 
 MW_REF   = 80.419
@@ -50,36 +52,41 @@ MW_XLIM  = (50, 100)
 MW_NBINS = 100
 
 
-def _mw_load(t, branch, require_valid):
+def _mw_load(t, branch, valid_only, is_kinfit):
+    """Load mW histogram. valid_only masks kinfit branches by kinfit_valid;
+    pre-fit reco branches are never masked (no validity concept)."""
     if branch not in t.keys():
-        return None, None
-    if require_valid:
+        return None, None, 0
+    if valid_only and is_kinfit:
         arrs = t.arrays([branch, "kinfit_valid"], library="np")
         vals = arrs[branch][arrs["kinfit_valid"].astype(bool)]
     else:
         vals = t[branch].array(library="np")
     counts, edges = np.histogram(vals, bins=MW_NBINS, range=MW_XLIM)
     centers = 0.5 * (edges[:-1] + edges[1:])
-    norm = counts.sum()
+    norm = int(counts.sum())  # N entries in histogram range
     c = counts.astype(float)
     if norm > 0:
         c = c / norm
-    return centers, c
+    return centers, c, norm
 
 
-def plot_mW_overlay_per_ecm(ecm, t):
-    """One plot showing all mW histogram variants for a single ECM."""
+def plot_mW_overlay_per_ecm(ecm, t, variant):
+    """One plot showing all mW histogram variants for a single ECM.
+    variant is 'valid' or 'all' — controls kinfit_valid filtering."""
+    valid_only = (variant == "valid")
     fig, ax = plt.subplots(figsize=(8, 6))
-    for branch, label, color, ls, require_valid in MW_HISTS_CFG:
-        x, c = _mw_load(t, branch, require_valid)
+    for branch, label, color, ls, is_kinfit in MW_HISTS_CFG:
+        x, c, n = _mw_load(t, branch, valid_only, is_kinfit)
         if x is None:
             print(f"  WARNING [{ecm}]: {branch} not found")
             continue
-        ax.step(x, c, where="mid", color=color, linestyle=ls, linewidth=2, label=label)
+        ax.step(x, c, where="mid", color=color, linestyle=ls, linewidth=2,
+                label=f"{label}  (N={n})")
 
     ax.axvline(MW_REF, color="grey", linestyle="-", linewidth=1.5,
                label=f"$m_W$ = {MW_REF:.3f} GeV")
-    ax.set_title(rf"$\sqrt{{s}}$ = {ecm} GeV", fontsize=13)
+    ax.set_title(rf"$\sqrt{{s}}$ = {ecm} GeV  —  kinfit {variant}", fontsize=13)
     ax.set_xlabel(r"$m_W$ [GeV]", fontsize=13)
     ax.set_ylabel("A.U.", fontsize=13)
     ax.set_xlim(MW_XLIM)
@@ -87,24 +94,26 @@ def plot_mW_overlay_per_ecm(ecm, t):
     ax.legend(frameon=False, fontsize=11, loc="upper left")
     fig.tight_layout()
     for fmt in ("png", "pdf"):
-        fig.savefig(f"{MW_OUTDIR}/mW_overlay_ecm{ecm}.{fmt}", dpi=150)
+        fig.savefig(f"{MW_OUTDIR}/mW_overlay_ecm{ecm}_{variant}.{fmt}", dpi=150)
     plt.close(fig)
 
 
-def plot_mW_ecm_comparison(trees):
-    """One plot per histogram showing all ECMs overlaid."""
-    for branch, label, _, _, require_valid in MW_HISTS_CFG:
+def plot_mW_ecm_comparison(trees, variant):
+    """One plot per histogram showing all ECMs overlaid.
+    variant is 'valid' or 'all'."""
+    valid_only = (variant == "valid")
+    for branch, label, _, _, is_kinfit in MW_HISTS_CFG:
         fig, ax = plt.subplots(figsize=(8, 6))
         plotted = False
         for ecm, t in trees.items():
             if t is None:
                 continue
-            x, c = _mw_load(t, branch, require_valid)
+            x, c, n = _mw_load(t, branch, valid_only, is_kinfit)
             if x is None:
                 print(f"  WARNING [{ecm}]: {branch} not found")
                 continue
             ax.step(x, c, where="mid", color=ECM_COLORS[ecm], linewidth=2,
-                    label=rf"$\sqrt{{s}}$ = {ecm} GeV")
+                    label=rf"$\sqrt{{s}}$ = {ecm} GeV  (N={n})")
             plotted = True
 
         if not plotted:
@@ -113,7 +122,7 @@ def plot_mW_ecm_comparison(trees):
 
         ax.axvline(MW_REF, color="grey", linestyle="-", linewidth=1.5,
                    label=f"$m_W$ = {MW_REF:.3f} GeV")
-        ax.set_title(label, fontsize=13)
+        ax.set_title(f"{label}  —  kinfit {variant}", fontsize=13)
         ax.set_xlabel(r"$m_W$ [GeV]", fontsize=13)
         ax.set_ylabel("A.U.", fontsize=13)
         ax.set_xlim(MW_XLIM)
@@ -121,7 +130,7 @@ def plot_mW_ecm_comparison(trees):
         ax.legend(frameon=False, fontsize=11, loc="upper left")
         fig.tight_layout()
         for fmt in ("png", "pdf"):
-            fig.savefig(f"{MW_OUTDIR}/ecm_comparison_{branch}.{fmt}", dpi=150)
+            fig.savefig(f"{MW_OUTDIR}/ecm_comparison_{branch}_{variant}.{fmt}", dpi=150)
         plt.close(fig)
 
 
@@ -136,13 +145,14 @@ def run_mW_overlay():
             continue
         trees[ecm] = uproot.open(path)[TREE_NAME]
 
-    for ecm, t in trees.items():
-        if t is not None:
-            plot_mW_overlay_per_ecm(ecm, t)
-            print(f"Saved mW_overlay_ecm{ecm}.[png|pdf]")
+    for variant in ("valid", "all"):
+        for ecm, t in trees.items():
+            if t is not None:
+                plot_mW_overlay_per_ecm(ecm, t, variant)
+                print(f"Saved mW_overlay_ecm{ecm}_{variant}.[png|pdf]")
+        plot_mW_ecm_comparison(trees, variant)
+        print(f"Saved ecm_comparison_*_{variant}.[png|pdf]  →  {MW_OUTDIR}/")
 
-    plot_mW_ecm_comparison(trees)
-    print(f"Saved ecm_comparison_*.[png|pdf]  →  {MW_OUTDIR}/")
     publish(MW_OUTDIR, os.environ.get("MW_PUBSUB", "mW_overlay"))
 
 
@@ -631,12 +641,13 @@ def plot_chi2_slices(ecm, raw_arrays, json_results):
 # Migrad status codes (see WWKinReco.h: KinFitResult::status):
 #   0 = OK, 1 = PD-forced cov, 2 = Hesse failed, 3 = EDM>tol,
 #   4 = max calls, 5 = other, −1 = early-return (invalid input).
-# Only status 1 and 3 are plotted: status 0 dominates and crushes the rest;
-# status 3 (EDM>tol) is the dominant residual failure with this fit.
+# Two buckets shown: converged (0|1) vs EDM>tol (3). Codes 4/5 sit below 0.05 %
+# at all ECMs and are dropped. Pull branches and other branches go to separate
+# subdirectories (by_status/pulls/ and by_status/other/).
 
 _STATUS_BUCKETS = [
-    (lambda s: s == 1, "status=1 (PD-forced cov)", "tab:blue"),
-    (lambda s: s == 3, "status=3 (EDM>tol)",       "tab:red"),
+    (lambda s: (s == 0) | (s == 1), "status=0|1 (converged)", "tab:blue"),
+    (lambda s: s == 3,              "status=3 (EDM>tol)",     "tab:red"),
 ]
 
 
@@ -646,8 +657,9 @@ def plot_by_status(ecm, raw_arrays):
         print(f"  [ecm{ecm}]  kinfit_status missing — skipping by-status plots")
         return
 
-    out_dir = f"{KINFIT_OUTDIR}/ecm{ecm}/by_status"
-    os.makedirs(out_dir, exist_ok=True)
+    base = f"{KINFIT_OUTDIR}/ecm{ecm}/by_status"
+    os.makedirs(f"{base}/pulls", exist_ok=True)
+    os.makedirs(f"{base}/other", exist_ok=True)
 
     status = np.asarray(status, dtype=int)
 
@@ -687,11 +699,12 @@ def plot_by_status(ecm, raw_arrays):
         ax.set_ylim(bottom=0)
         ax.legend(fontsize=9, frameon=False)
 
+        sub = "pulls" if bname in _PULL_BRANCHES else "other"
         for fmt in ("png", "pdf"):
-            fig.savefig(f"{out_dir}/{bname}.{fmt}", dpi=150)
+            fig.savefig(f"{base}/{sub}/{bname}.{fmt}", dpi=150)
         plt.close(fig)
 
-    print(f"  [ecm{ecm}]  by-status plots → {out_dir}/")
+    print(f"  [ecm{ecm}]  by-status plots → {base}/{{pulls,other}}/")
 
 
 # ── ECM comparison plots ──────────────────────────────────────────────────────
