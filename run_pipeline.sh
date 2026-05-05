@@ -9,6 +9,9 @@ fccanalysis run treemaker_lnuqq_step1.py --ncores 12
 echo "=== Fits: resolution parametrization ==="
 python3 fit_resolutions.py
 
+echo "=== Build log Z table for kinfit BW normalization ==="
+tools/ensure_logz_table.sh
+
 echo "=== Step 2: treemaker + kinfit (3 ECMs in parallel) ==="
 mkdir -p logs
 pids=()

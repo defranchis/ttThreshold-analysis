@@ -10,9 +10,9 @@ v2 improvements over v1:
     that show a narrow core + secondary shoulder
 
 Outputs (per ECM)
-  outputs/response/plots/ecm<N>/<branch>.{png,pdf}    one plot per branch with data + fit
-  outputs/response/functions/dcb_params_ecm<N>.h      C++ header with evaluators + constexpr params
-  outputs/response/functions/dcb_results_ecm<N>.json  full numerical fit results
+  outputs/response/plots/ecm<N>/<branch>.{png,pdf}   diagnostic plot per branch
+  kinfit_inputs/dcb_params.h                         C++ header consumed by WWKinReco.h
+  kinfit_inputs/dcb_results_ecm<N>.json              numerical fit results (for diagnostics)
 """
 
 import os, json, math, warnings
@@ -37,11 +37,14 @@ _SQRT2   = math.sqrt(2.0)
 _LOG_MAX = math.log(np.finfo(np.float64).max)   # max safe float64 exponent ≈ 709.78
 _LOG_MIN = -_LOG_MAX
 
-# Output prefix is configurable via FIT_OUT_PREFIX so multiple fit_resolutions
-# invocations can run in parallel (each writing to its own subtree).
+# Output prefix for diagnostic plots is configurable via FIT_OUT_PREFIX so
+# multiple fit_resolutions invocations can run in parallel.
 OUT_PREFIX = os.environ.get("FIT_OUT_PREFIX", "outputs/response")
-FUNC_DIR   = f"{OUT_PREFIX}/functions"
 PLOTS_DIR  = f"{OUT_PREFIX}/plots"
+# Kinfit inputs (dcb_params.h + dcb_results_*.json) live OUTSIDE the regularly
+# cleaned outputs/ tree — they're consumed by the kinfit at compile/run time
+# alongside logz_table.bin, see WWFunctions/WWKinReco.h.
+FUNC_DIR   = os.environ.get("KINFIT_INPUT_DIR", "kinfit_inputs")
 os.makedirs(FUNC_DIR, exist_ok=True)
 
 ECM_LIST    = [157, 160, 163]
@@ -1687,7 +1690,7 @@ def _cpp_param_line(bname, p, ecm):
 
 def write_combined_header(all_results):
     """
-    Generate outputs/response/functions/dcb_params.h — a single self-contained header
+    Generate kinfit_inputs/dcb_params.h — a single self-contained header
     with structs, evaluators, and fitted parameters for all ECMs.
     all_results: dict  ecm -> {bname: params_dict}
     """

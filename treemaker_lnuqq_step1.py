@@ -1,7 +1,8 @@
 # Step 1 of 2 — produce only the branches needed by fit_dcb_resolutions.py.
 # Run fit_dcb_resolutions.py on the output before running treemaker_lnuqq_step2.py.
-# Does NOT include WWKinReco.h / outputs/response/functions/, so it builds
-# without DCB params headers.
+# Does NOT include WWKinReco.h / kinfit_inputs/, so it builds without the
+# DCB params headers.
+import os
 import ROOT
 import treemaker_common as tc
 
@@ -17,7 +18,11 @@ if channel not in ["lep", "semihad", "had"]:
 print(channel)
 
 prodTag      = "FCCee/winter2023/IDEA/"
-outputDir    = "outputs/treemaker/lnuqq/step1/{}".format(channel)
+# Optional WW_TAG env var → suffixes the output directory so parallel tests
+# don't collide and side-by-side comparison stays trivial.
+_tag = os.environ.get("WW_TAG", "").strip()
+_suffix = "_{}".format(_tag) if _tag else ""
+outputDir    = "outputs/treemaker/lnuqq/step1/{}{}".format(channel, _suffix)
 includePaths = ["examples/functions.h", "WWFunctions/WWFunctions.h"]
 
 # Branches consumed by fit_resolutions.py + matching/diagnostic branches
@@ -30,6 +35,8 @@ all_branches = [
     "met_theta_resol", "met_phi_resol",
     "gen_WW_px", "gen_WW_py", "gen_WW_pz",
     "gen_WW_m", "gen_WW_m_minus_ecm",
+    # Per-W gen masses for BW-term gen-level closure tests.
+    "gen_Whad_m", "gen_Wlep_m",
     "jet1_matched_q_dR", "jet2_matched_q_dR",
     # Beam-energy-spread proxies on the post-BES e+e- (depth=1):
     #   m−ECM ∝ (δE+ + δE−) sum component;  pz ∝ (δE+ − δE−) asymmetry.

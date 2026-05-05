@@ -12,7 +12,7 @@ Reads step2 outputs (one ROOT file per ECM) and the fit_resolutions JSONs
   - ISR-via-balance posteriors (μ, robust σ).
 
 Default I/O: reads `outputs/treemaker/lnuqq/step2/semihad/wzp6_*_ecm{ECM}.root`
-and JSON `outputs/response/functions/dcb_results_ecm{ECM}.json`; writes
+and JSON `kinfit_inputs/dcb_results_ecm{ECM}.json`; writes
 `outputs/diagnostics/kinfit_diagnostics.md`. Override via CLI:
 
     python3 kinfit_diagnostics.py [--indir DIR] [--out FILE]
@@ -235,7 +235,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--indir", default="outputs/treemaker/lnuqq/step2/semihad",
                    help="step2 output directory (default: production path)")
-    p.add_argument("--json", default="outputs/response/functions/dcb_results_ecm{ecm}.json",
+    p.add_argument("--json", default="kinfit_inputs/dcb_results_ecm{ecm}.json",
                    help="JSON template with {ecm} placeholder")
     p.add_argument("--out", default="outputs/diagnostics/kinfit_diagnostics.md",
                    help="markdown output path")

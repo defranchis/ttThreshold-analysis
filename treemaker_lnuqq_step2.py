@@ -1,5 +1,7 @@
 # Step 2 of 2 — runs kinematic fit using DCB params from fit_dcb_resolutions.py.
-# Requires outputs/response/functions/dcb_params*.h to exist before compiling.
+# Requires kinfit_inputs/dcb_params.h + kinfit_inputs/logz_table.bin to exist
+# before compiling/running (produced by fit_resolutions.py and
+# tools/build_logz_table respectively).
 import os, urllib, ROOT
 import treemaker_common as tc
 
@@ -43,8 +45,13 @@ if channel not in ["lep", "semihad", "had"]:
 print(channel)
 
 prodTag      = "FCCee/winter2023/IDEA/"
-outputDir    = os.environ.get("STEP2_OUTDIR",
-                              "outputs/treemaker/lnuqq/step2/{}".format(channel))
+# Output dir resolution:
+#   1. STEP2_OUTDIR (full path override) — legacy
+#   2. WW_TAG (suffix only) — preferred, dedicated-dir convention
+#   3. default = outputs/treemaker/lnuqq/step2/<channel>/
+_tag = os.environ.get("WW_TAG", "").strip()
+_default = "outputs/treemaker/lnuqq/step2/{}{}".format(channel, "_" + _tag if _tag else "")
+outputDir    = os.environ.get("STEP2_OUTDIR", _default)
 includePaths = ["examples/functions.h", "WWFunctions/WWFunctions.h", "WWFunctions/WWKinReco.h"]
 
 all_branches = [

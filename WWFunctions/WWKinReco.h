@@ -8,10 +8,15 @@
 #include <functional>
 #include <random>
 #include <string>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include "Math/Minimizer.h"
 #include "Math/Factory.h"
 #include "Math/Functor.h"
-#include "outputs/response/functions/dcb_params.h"
+#include "kinfit_inputs/dcb_params.h"
 #include "WWFunctions/WWFunctions.h"
 
 namespace FCCAnalyses { namespace WWFunctions {
@@ -185,6 +190,12 @@ inline bool kf_jet_swap_enabled = false;
 // False → use the inclusive (kinematics-averaged) scalar priors.
 inline bool kf_use_binned_priors = true;
 
+// Forward-decl: setKinFitParams calls kf_init_logz_table() (defined below
+// alongside the LogZTable definition) to allocate the precomputed log-Z grid.
+// The init runs on the main thread before any RDataFrame workers exist, so
+// no race; subsequent calls are no-ops.
+static void kf_init_logz_table();
+
 inline void setKinFitParams(int ecm, const std::string& jet_mode = "swap",
                              bool use_binned = true) {
     ECM = static_cast<float>(ecm);
@@ -234,6 +245,10 @@ inline void setKinFitParams(int ecm, const std::string& jet_mode = "swap",
     kf_jet2_theta_resol_incl  = p->jet2_theta_resol_incl;
     kf_lep_phi_resol_incl     = p->lep_phi_resol_incl;
     kf_lep_theta_resol_incl   = p->lep_theta_resol_incl;
+    // Allocate the 3D log Z table on the heap if not yet built. Definition is
+    // below the LogZTable / kf_build_logz_table block so we go through this
+    // forward-declared init function.
+    kf_init_logz_table();
 }
 
 // ── kinematic fit ──────────────────────────────────────────────────────────
@@ -350,6 +365,222 @@ static TLorentzVector _vec_spherical(double p, double theta, double phi) {
 template<typename PdfT>
 static inline double _y2x(double y, const PdfT& p) { return p.mu + p.sigma * y; }
 
+// Gauss-Legendre nodes / weights on [-1,1] (machine-precision). N=24 chosen
+// from the gen-level convergence study (2026-05-05): max quadrature error on
+// the log-Z integral is ≲30 MeV at all 3 ECMs (ecm157 27 MeV vs asymptotic).
+// At N=24 with sym+branchless inner loop the helper costs ~½ of the N=32
+// version — the speed/accuracy sweet spot for the inclusive m_W fit. Bump
+// KF_GL_N to 32 if the running-width / Coulomb additions push us into a
+// regime where ~30 MeV quadrature error matters.
+static constexpr int KF_GL_N = 24;
+static constexpr std::array<double, KF_GL_N> KF_GL24_X = {{
+    -9.9518721999702131e-01, -9.7472855597130947e-01, -9.3827455200273280e-01, -8.8641552700440096e-01,
+    -8.2000198597390295e-01, -7.4012419157855436e-01, -6.4809365193697555e-01, -5.4542147138883956e-01,
+    -4.3379350762604513e-01, -3.1504267969616340e-01, -1.9111886747361631e-01, -6.4056892862605630e-02,
+    +6.4056892862605630e-02, +1.9111886747361631e-01, +3.1504267969616340e-01, +4.3379350762604513e-01,
+    +5.4542147138883956e-01, +6.4809365193697555e-01, +7.4012419157855436e-01, +8.2000198597390295e-01,
+    +8.8641552700440096e-01, +9.3827455200273280e-01, +9.7472855597130947e-01, +9.9518721999702131e-01,
+}};
+static constexpr std::array<double, KF_GL_N> KF_GL24_W = {{
+    +1.2341229799987091e-02, +2.8531388628933743e-02, +4.4277438817419551e-02, +5.9298584915436742e-02,
+    +7.3346481411080411e-02, +8.6190161531953288e-02, +9.7618652104114065e-02, +1.0744427011596561e-01,
+    +1.1550566805372561e-01, +1.2167047292780342e-01, +1.2583745634682830e-01, +1.2793819534675221e-01,
+    +1.2793819534675221e-01, +1.2583745634682830e-01, +1.2167047292780342e-01, +1.1550566805372561e-01,
+    +1.0744427011596561e-01, +9.7618652104114065e-02, +8.6190161531953288e-02, +7.3346481411080411e-02,
+    +5.9298584915436742e-02, +4.4277438817419551e-02, +2.8531388628933743e-02, +1.2341229799987091e-02,
+}};
+
+// log Z(mW, gW, m_WW) — normalization integral of the BW × BW × √λ/s_WW joint
+// PDF on the kinematic triangle {m_h+m_l < m_WW, m_h,m_l > 0}, as a function of
+// the floating mW (and floating gW when fit_gW=true).
+//
+// Substitution t_i = atan((m_i² − mW²) / (mW·gW)) makes BW(m_i²) dm_i² = dt_i,
+// so the BW peaks become uniform in t. Per-W limits:
+//   t_min = atan(−mW / gW)            (m_i = 0)
+//   t_max = atan((m_WW² − mW²) / (mW·gW))   (m_i = m_WW)
+// At each (t_h, t_l) recover m_h, m_l = √(mW² + mW·gW · tan(t_i)). The integrand
+// reduces to √λ / (4·m_h·m_l·s_WW) with the kinematic mask m_h+m_l < m_WW.
+//
+// Used by the BW chi² block to ADD 2·log Z to the un-normalized
+// −2·log[BW·BW·√λ/s_WW] term, removing the mW-bias measured at gen level
+// (~−1 GeV at ecm160) — see project_kinfit_bw_normalization.md.
+//
+// _ontf: direct on-the-fly evaluator. Used to BUILD the 3D table below; the
+// kinfit chi² goes through the public log_Z_bw_phasespace which interpolates
+// the table (50-100× faster per call). Available directly for debugging /
+// validation against the table.
+static inline double log_Z_bw_phasespace_ontf(double m_WW, double mW, double gW) {
+    const double mwgw  = mW * gW;
+    const double mW2   = mW * mW;
+    const double s_ww  = m_WW * m_WW;
+    const double t_min = std::atan(-mW2 / mwgw);
+    const double t_max = std::atan((s_ww - mW2) / mwgw);
+    const double half_d = 0.5 * (t_max - t_min);
+    const double half_s = 0.5 * (t_max + t_min);
+
+    // Precompute m and 1/m at each t-node (1D, shared between t_h and t_l axes).
+    // Floor m² at 1e-12 to keep 1/m finite — the integrand is integrable at the
+    // lower endpoint but the summand isn't (GL nodes are interior so this never
+    // triggers in practice; defensive only).
+    std::array<double, KF_GL_N> m_node, inv_m_node;
+    for (int i = 0; i < KF_GL_N; ++i) {
+        const double t  = half_d * KF_GL24_X[i] + half_s;
+        const double m2 = mW2 + mwgw * std::tan(t);
+        m_node[i]     = std::sqrt(std::max(m2, 1e-12));
+        inv_m_node[i] = 1.0 / m_node[i];
+    }
+
+    // Integrand is symmetric under m_h ↔ m_l, so only sum the upper triangle
+    // (i ≤ j) and double-count the off-diagonal. The kinematic mask is
+    // equivalent to λ ≥ 0, so √λ via std::max keeps the inner loop branchless
+    // and auto-vectorisable.
+    double Z = 0.0;
+    for (int i = 0; i < KF_GL_N; ++i) {
+        const double m_h  = m_node[i];
+        const double w_h  = KF_GL24_W[i];
+        const double inv_mh_4sww = inv_m_node[i] / (4.0 * s_ww);
+        // Diagonal i==j (single weight): dif=0, so λ = (s_ww − 4·m_h²)·s_ww.
+        {
+            const double sum2 = 4.0 * m_h * m_h;
+            const double lam  = (s_ww - sum2) * s_ww;
+            Z += w_h * w_h * std::sqrt(std::max(lam, 0.0)) * inv_mh_4sww * inv_m_node[i];
+        }
+        // Off-diagonal j > i (counted twice by symmetry)
+        for (int j = i + 1; j < KF_GL_N; ++j) {
+            const double m_l = m_node[j];
+            const double sum2 = (m_h + m_l) * (m_h + m_l);
+            const double dif2 = (m_h - m_l) * (m_h - m_l);
+            const double lam  = (s_ww - sum2) * (s_ww - dif2);
+            Z += 2.0 * w_h * KF_GL24_W[j] * std::sqrt(std::max(lam, 0.0))
+                 * inv_mh_4sww * inv_m_node[j];
+        }
+    }
+    Z *= half_d * half_d;                            // [t_min,t_max]² Jacobian
+    return std::log(Z > 0.0 ? Z : 1e-300);
+}
+
+// ── 3D precompute table of log Z over (mW, gW, m_WW) ──────────────────────
+//
+// At ~1.8 µs per on-the-fly call, log_Z dominates the kinfit chi² (the rest
+// of the chi² body is ~26 ns). Trilinear interpolation on a precomputed grid
+// drops the per-call cost to ~13 ns — restoring v8 wall time. Out-of-grid
+// values clamp to the nearest edge (graceful but biased near the boundary;
+// Migrad never goes far from the grid in normal operation, see ranges below).
+//
+// Grid (chosen 2026-05-05). Trilinear interp error sub-MeV vs on-the-fly at
+// gen-level (well below the ~30 MeV quadrature noise floor of the underlying
+// GL24 rule). Range chosen wide enough to cover any plausible Migrad excursion
+// without out-of-grid clamping:
+//   mW  ∈ [50, 100]  GeV, 501 nodes (0.10 GeV)  — covers any per-event mW peak
+//   gW  ∈ [1.95, 2.15] GeV, 21 nodes (0.01 GeV)  — covers ±5σ_prior of gW
+//   mWW ∈ [100, 170] GeV, 281 nodes (0.25 GeV) — spans any plausible step1 m_WW
+// Footprint: 2.96M doubles ≈ 23.6 MB. Build ~5 s (one-time, magic static).
+static constexpr double KF_LOGZ_GRID_MW_LO  = 50.0,  KF_LOGZ_GRID_MW_HI  = 100.0;
+static constexpr int    KF_LOGZ_GRID_N_MW   = 501;
+static constexpr double KF_LOGZ_GRID_GW_LO  = 1.95,  KF_LOGZ_GRID_GW_HI  = 2.15;
+static constexpr int    KF_LOGZ_GRID_N_GW   = 21;
+static constexpr double KF_LOGZ_GRID_MWW_LO = 100.0, KF_LOGZ_GRID_MWW_HI = 170.0;
+static constexpr int    KF_LOGZ_GRID_N_MWW  = 281;
+
+struct LogZTable {
+    double dmW, dgW, dmWW;
+    double inv_dmW, inv_dgW, inv_dmWW;
+    const double* data;  // mmap'd, row-major (mW, gW, m_WW); ((i*n_gW)+k)*n_mWW+j
+};
+
+// Magic number for the binary table file (must match tools/build_logz_table.cxx).
+static constexpr uint64_t KF_LOGZ_TABLE_MAGIC = 0x4C5A544256303031ULL; // "LZTBV001"
+static constexpr const char* KF_LOGZ_TABLE_PATH =
+    "/afs/cern.ch/work/m/mdefranc/private/WW/WW_reco/kinfit_inputs/logz_table.bin";
+
+// Global pointer, zero-initialized. setKinFitParams() mmaps the precomputed
+// table file on first call (main thread, before RDataFrame spawns workers).
+// Worker threads later dereference via log_Z_bw_phasespace. Plain pointer +
+// kernel-managed mmap region avoids cling-JIT trouble with static-init of
+// large objects (which segfaulted both magic-static and inline-global
+// approaches earlier).
+inline LogZTable* kf_logz_table_ptr = nullptr;
+
+static void kf_init_logz_table() {
+    if (kf_logz_table_ptr) return;
+    int fd = ::open(KF_LOGZ_TABLE_PATH, O_RDONLY);
+    if (fd < 0) {
+        std::fprintf(stderr, "[kinfit] cannot open log Z table %s: %s\n",
+                     KF_LOGZ_TABLE_PATH, std::strerror(errno));
+        return;
+    }
+    struct stat st;
+    if (::fstat(fd, &st) != 0) { ::close(fd); return; }
+    void* mmap_base = ::mmap(nullptr, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    ::close(fd);
+    if (mmap_base == MAP_FAILED) {
+        std::fprintf(stderr, "[kinfit] mmap of log Z table failed: %s\n", std::strerror(errno));
+        return;
+    }
+    // Validate header: magic + dimensions match compile-time constants.
+    const char*   base  = static_cast<const char*>(mmap_base);
+    uint64_t      magic;          std::memcpy(&magic,  base + 0,  sizeof(magic));
+    int32_t       hdr_n[4];       std::memcpy(hdr_n,   base + 8,  sizeof(hdr_n));
+    if (magic != KF_LOGZ_TABLE_MAGIC ||
+        hdr_n[0] != KF_LOGZ_GRID_N_MW || hdr_n[1] != KF_LOGZ_GRID_N_GW ||
+        hdr_n[2] != KF_LOGZ_GRID_N_MWW) {
+        std::fprintf(stderr, "[kinfit] log Z table header mismatch (rebuild via tools/build_logz_table)\n");
+        ::munmap(mmap_base, st.st_size);
+        return;
+    }
+    LogZTable* T = new LogZTable;
+    T->dmW  = (KF_LOGZ_GRID_MW_HI  - KF_LOGZ_GRID_MW_LO ) / (KF_LOGZ_GRID_N_MW  - 1);
+    T->dgW  = (KF_LOGZ_GRID_GW_HI  - KF_LOGZ_GRID_GW_LO ) / (KF_LOGZ_GRID_N_GW  - 1);
+    T->dmWW = (KF_LOGZ_GRID_MWW_HI - KF_LOGZ_GRID_MWW_LO) / (KF_LOGZ_GRID_N_MWW - 1);
+    T->inv_dmW  = 1.0 / T->dmW;
+    T->inv_dgW  = 1.0 / T->dgW;
+    T->inv_dmWW = 1.0 / T->dmWW;
+    // Header layout: 8 (magic) + 16 (4 int32) + 48 (6 doubles) = 72 bytes.
+    T->data = reinterpret_cast<const double*>(base + 72);
+    kf_logz_table_ptr = T;
+    std::printf("[kinfit] log Z table mmap'd from %s (%ld bytes)\n",
+                KF_LOGZ_TABLE_PATH, (long)st.st_size);
+}
+
+// DIAGNOSTIC 2026-05-05: print kf_logz_table_ptr seen by each worker thread
+// once and abort. Tells us whether the value is null (fallback should engage),
+// the correct heap address (lookup itself is broken), or garbage (cross-TU
+// sharing failed — explains why fallback doesn't engage).
+static inline double log_Z_bw_phasespace(double m_WW, double mW, double gW) {
+    if (!kf_logz_table_ptr) return log_Z_bw_phasespace_ontf(m_WW, mW, gW);
+    // NaN guard: Migrad's gradient probing can produce m_WW = sqrt(M2 < 0) = NaN.
+    // Without this guard, (int)NaN below is UB and yields INT_MIN, making the
+    // pointer arithmetic spray off the end of the mmap'd region → segfault.
+    // Fall back to the on-the-fly evaluator (which propagates NaN cleanly).
+    if (!std::isfinite(m_WW) || !std::isfinite(mW) || !std::isfinite(gW))
+        return log_Z_bw_phasespace_ontf(m_WW, mW, gW);
+    const LogZTable& T = *kf_logz_table_ptr;
+    double fmW  = (mW   - KF_LOGZ_GRID_MW_LO ) * T.inv_dmW;
+    double fgW  = (gW   - KF_LOGZ_GRID_GW_LO ) * T.inv_dgW;
+    double fmWW = (m_WW - KF_LOGZ_GRID_MWW_LO) * T.inv_dmWW;
+    if (fmW  < 0) fmW  = 0; else if (fmW  > KF_LOGZ_GRID_N_MW  - 1) fmW  = KF_LOGZ_GRID_N_MW  - 1;
+    if (fgW  < 0) fgW  = 0; else if (fgW  > KF_LOGZ_GRID_N_GW  - 1) fgW  = KF_LOGZ_GRID_N_GW  - 1;
+    if (fmWW < 0) fmWW = 0; else if (fmWW > KF_LOGZ_GRID_N_MWW - 1) fmWW = KF_LOGZ_GRID_N_MWW - 1;
+    int i = (int)fmW;   if (i >= KF_LOGZ_GRID_N_MW  - 1) i = KF_LOGZ_GRID_N_MW  - 2;
+    int k = (int)fgW;   if (k >= KF_LOGZ_GRID_N_GW  - 1) k = KF_LOGZ_GRID_N_GW  - 2;
+    int j = (int)fmWW;  if (j >= KF_LOGZ_GRID_N_MWW - 1) j = KF_LOGZ_GRID_N_MWW - 2;
+    const double wx = fmW - i, wy = fgW - k, wz = fmWW - j;
+    const size_t row   = KF_LOGZ_GRID_N_MWW;
+    const size_t plane = (size_t)KF_LOGZ_GRID_N_GW * KF_LOGZ_GRID_N_MWW;
+    const double* p = T.data + (size_t)i * plane + (size_t)k * row + j;
+    const double c000 = p[0],            c001 = p[1];
+    const double c010 = p[row],          c011 = p[row + 1];
+    const double c100 = p[plane],        c101 = p[plane + 1];
+    const double c110 = p[plane + row],  c111 = p[plane + row + 1];
+    const double c00 = (1-wz)*c000 + wz*c001;
+    const double c01 = (1-wz)*c010 + wz*c011;
+    const double c10 = (1-wz)*c100 + wz*c101;
+    const double c11 = (1-wz)*c110 + wz*c111;
+    const double c0 = (1-wy)*c00 + wy*c01;
+    const double c1 = (1-wy)*c10 + wy*c11;
+    return (1-wx)*c0 + wx*c1;
+}
+
 
 KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                     float jet2_p,    float jet2_theta,    float jet2_phi,
@@ -447,9 +678,15 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         // Floor lam to keep -log(lam) finite and gradient smooth across the boundary.
         lam = std::sqrt(lam*lam + 1e-24);  // smooth |λ| floor — derivative continuous through 0
         // Joint BW × phase-space PDF (BW_norm = BW/π; phase space ∝ √λ/s_WW).
+        // The PDF must be normalized over the kinematic triangle {m_h+m_l < m_WW}
+        // for the per-event mW to be unbiased — see project_kinfit_bw_normalization.
+        // Add 2·log Z(mW, gW, m_WW) where Z is the joint-PDF normalization
+        // integral. Lookup is trilinear interpolation on a precomputed 3D table
+        // (KF_LOGZ_GRID_*); table is built once via on-the-fly GL24 quadrature.
         double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l))
                        + 4.0 * std::log(M_PI)
-                       - std::log(lam) + 2.0 * std::log(s_ww);
+                       - std::log(lam) + 2.0 * std::log(s_ww)
+                       + 2.0 * log_Z_bw_phasespace(std::sqrt(s_ww), mW, gW);
 
         // BES nuisance priors (Gaussian).
         double bes_term = gauss_neg2logpdf(bes_m,  kf_ee_m_minus_ecm)

@@ -26,7 +26,7 @@ from eos_publish import publish
 ECM_LIST    = [157, 160, 163]
 INDIR       = os.environ.get("STEP2_INDIR", "outputs/treemaker/lnuqq/step2/semihad")
 INFILE_TMPL = INDIR + "/wzp6_ee_munumuqq_noCut_ecm{ecm}.root"
-JSON_TMPL   = "outputs/response/functions/dcb_results_ecm{ecm}.json"
+JSON_TMPL   = "kinfit_inputs/dcb_results_ecm{ecm}.json"
 TREE_NAME   = "events"
 ECM_COLORS  = {157: "tab:purple", 160: "tab:orange", 163: "tab:cyan"}
 
