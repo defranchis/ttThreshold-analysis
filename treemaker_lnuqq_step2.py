@@ -85,6 +85,11 @@ all_branches = [
     "gen_WW_m",    "gen_WW_m_minus_ecm",    "gen_WW_px",    "gen_WW_py",    "gen_WW_pz",    "gen_WW_p_imbalance_tot",
     "kinfit_WW_m", "kinfit_WW_m_minus_ecm", "kinfit_WW_px", "kinfit_WW_py", "kinfit_WW_pz", "kinfit_WW_p_imbalance_tot",
 
+    # ── beam / ISR gen-level (for pull-plot truth) ─────────────────────
+    "gen_ee_m_minus_ecm", "gen_ee_pz",
+    "gen_WW_m_minus_m_ee",
+    "gen_isr_px", "gen_isr_py", "gen_isr_pz",
+
     # ── resolutions / responses (cross-level by construction) ──────────
     "jet1_p_resp", "jet1_theta_resol", "jet1_phi_resol", "jet1_eta_resol", "jet1_costheta_resol",
     "jet2_p_resp", "jet2_theta_resol", "jet2_phi_resol", "jet2_eta_resol", "jet2_costheta_resol",
@@ -183,6 +188,7 @@ class RDFanalysis:
 
         df = tc.select_gen_fromele(df)
         df = tc.define_gen_kinematics(df)
+        df = tc.define_beam_kinematics(df)
 
         df = tc.define_reco_W_WW(df)
         df = tc.match_jets_to_quarks(df)
