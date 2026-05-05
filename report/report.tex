@@ -31,23 +31,29 @@
 \newcommand{\chitext}{\ensuremath{\chi^2}\xspace}
 \newcommand{\chisq}{\ensuremath{\chi^2}\xspace}
 
+% Tolerant include — falls back to a placeholder when the file is missing,
+% so the report compiles even if a step2 ECM hasn't finished.
+\newcommand{\maybeincl}[2][\linewidth]{%
+  \IfFileExists{#2}{\includegraphics[width=#1]{#2}}%
+  {\fbox{\parbox[c][3.5cm]{0.8\linewidth}{\centering\small\ttfamily plot pending}}}}
+
 % Three-ECM panel of the same plot (resolution priors).
 \newcommand{\threecm}[2][0.32]{%
   \begin{subfigure}[b]{#1\linewidth}\centering
-    \includegraphics[width=\linewidth]{ecm157/#2}\caption*{\sqs=157~GeV}\end{subfigure}\hfill
+    \maybeincl{ecm157/#2}\caption*{\sqs=157~GeV}\end{subfigure}\hfill
   \begin{subfigure}[b]{#1\linewidth}\centering
-    \includegraphics[width=\linewidth]{ecm160/#2}\caption*{\sqs=160~GeV}\end{subfigure}\hfill
+    \maybeincl{ecm160/#2}\caption*{\sqs=160~GeV}\end{subfigure}\hfill
   \begin{subfigure}[b]{#1\linewidth}\centering
-    \includegraphics[width=\linewidth]{ecm163/#2}\caption*{\sqs=163~GeV}\end{subfigure}}
+    \maybeincl{ecm163/#2}\caption*{\sqs=163~GeV}\end{subfigure}}
 
 % Three-ECM panel of a kinfit_vars subdir plot.
 \newcommand{\threecmkin}[2][0.32]{%
   \begin{subfigure}[b]{#1\linewidth}\centering
-    \includegraphics[width=\linewidth]{kinfit_vars/ecm157/#2}\caption*{\sqs=157~GeV}\end{subfigure}\hfill
+    \maybeincl{kinfit_vars/ecm157/#2}\caption*{\sqs=157~GeV}\end{subfigure}\hfill
   \begin{subfigure}[b]{#1\linewidth}\centering
-    \includegraphics[width=\linewidth]{kinfit_vars/ecm160/#2}\caption*{\sqs=160~GeV}\end{subfigure}\hfill
+    \maybeincl{kinfit_vars/ecm160/#2}\caption*{\sqs=160~GeV}\end{subfigure}\hfill
   \begin{subfigure}[b]{#1\linewidth}\centering
-    \includegraphics[width=\linewidth]{kinfit_vars/ecm163/#2}\caption*{\sqs=163~GeV}\end{subfigure}}
+    \maybeincl{kinfit_vars/ecm163/#2}\caption*{\sqs=163~GeV}\end{subfigure}}
 
 \title{\WW kinematic-fit reconstruction at the FCC-ee\\threshold scan}
 \author{M.\ Defranchis}
@@ -228,8 +234,10 @@ The model families are:
   \item \emph{dcb2g} (DCB $+$ wide Gaussian) for jet $p$-response and
         all jet and lepton angular resolutions;
   \item \emph{dcber2g} (DCB with power-law left tail and exponential
-        right tail) for the lepton $p$-response (post-update;
-        cf.~Sec.~\ref{sec:lep-p-resp}) and for $m(\WW)-m(e^+e^-)$;
+        right tail) for $m(\WW)-m(e^+e^-)$;
+  \item \emph{dcber3g} (\emph{dcber2g} core $+$ shoulder Gaussian $+$
+        outlier Gaussian) for the lepton $p$-response
+        (cf.~Sec.~\ref{sec:lep-p-resp});
   \item \emph{dcb} (single DCB) for the three MET priors;
   \item \emph{gauss} for the two BES priors;
   \item \emph{spike\_dcb2g} (composite delta-spike $+$ DCB+Gauss) for
@@ -407,28 +415,32 @@ hard boundary, which is then enforced explicitly in the fit
   \label{fig:mwwm}
 \end{figure}
 
-\subsection{Lepton $p$-response: model swap}\label{sec:lep-p-resp}
+\subsection{Lepton $p$-response: model evolution}\label{sec:lep-p-resp}
 
 The \codename{lep\_p\_resp} distribution exhibits a long power-law left
 tail (FSR loss extending to $p_\text{reco}/p_\text{gen}\sim 0.5$) and a
 sharp exponential right cutoff at the kinematic ceiling
-$p_\text{reco}/p_\text{gen}\le 1$. The pre-update model was
-\codename{expleft2g} (exp-left tail $+$ power-law right), the
-\emph{mirror} of the physical asymmetry. Switching to \codename{dcber2g}
-(power-left $+$ exp-right) reduces the inclusive \chitndf from
-$\{3.7, 3.5, 3.5\}$ to $\{2.0, 2.2, 2.1\}$ at the three energies, with
-visibly flatter pull distributions
-(Fig.~\ref{fig:lep-p-resp-compare}).
-
-\begin{figure}[ht]
-  \centering
-  \includegraphics[width=0.97\linewidth]{lep_p_resp_compare.png}
-  \caption{Lepton $p$-response fit at \sqs=160~GeV: legacy
-    \codename{expleft2g} (left) vs.\ updated \codename{dcber2g} (right).
-    \chitndf improves from 3.5 to 2.2 and the structured pull pattern
-    around the peak is removed.}
-  \label{fig:lep-p-resp-compare}
-\end{figure}
+$p_\text{reco}/p_\text{gen}\le 1$. Two model swaps were applied in
+sequence:
+\begin{itemize}[leftmargin=*]
+  \item \codename{expleft2g}$\to$\codename{dcber2g}: the legacy model
+        \codename{expleft2g} (exp-left tail $+$ power-law right) is the
+        \emph{mirror} of the physical asymmetry. Switching to
+        \codename{dcber2g} (power-left $+$ exp-right) reduces the
+        inclusive \chitndf from $\{3.7, 3.5, 3.5\}$ to
+        $\{2.0, 2.2, 2.1\}$ at the three energies.
+  \item \codename{dcber2g}$\to$\codename{dcber3g}: a residual shoulder
+        in the $0.92$--$0.96$ range was not captured by the wide
+        Gaussian alone. Adding a third Gaussian component to make
+        \codename{dcber3g} (\codename{dcber2g} $+$ shoulder $+$ outlier
+        Gaussians) further reduces the inclusive \chitndf to
+        $\{1.31, 1.32, 1.27\}$. The shoulder is associated with FSR
+        photon emission collinear with the muon; collinear-FSR dressing
+        in step~1 (cone $\Delta R<0.1$, $E_\gamma>0.5$~GeV) recovers
+        $\sim 30\%$ of the deep-tail events but does not flatten the
+        shoulder, motivating the explicit third component.
+\end{itemize}
+The current per-energy fit plots are in App.~\ref{app:resol-fits}.
 
 \subsection{Retired priors}\label{sec:retired}
 
@@ -528,7 +540,16 @@ smooth, monotone restoring force when a step crosses the boundary.
 Joint BW on $m(qq)$ and $m(\ell\nu)$, multiplied by the phase-space
 factor $\sqrt{\lambda(s, m_h^2, m_\ell^2)}/s$. The radical is smoothed
 via $\sqrt{\lambda^2+\epsilon^2}$ to keep the gradient continuous
-through $\lambda=0$.
+through $\lambda=0$. The joint PDF is properly normalised by
+$\log Z(m_W,\Gamma_W,m_{\WW})$, the integral of
+$\text{BW}(m_h)\,\text{BW}(m_\ell)\,\sqrt{\lambda}/s$ over the kinematic
+triangle $\{m_h+m_\ell < m_{\WW}\}$. The integral is precomputed on a
+3D grid (501 points in $m_W$ from 50 to 100~GeV; 21 points in $\Gamma_W$
+from 1.5 to 2.5~GeV; 281 points in $m_{\WW}$ from 100 to 170~GeV;
+22.6~MB total) and trilinearly interpolated at fit time. The unnormalised
+chi$^2$ biased the per-event $m_W$ low by $\sim$0.9--1.0~GeV at threshold
+energies; with normalisation the gen-level closure is $+14$~MeV at
+\sqs=163~GeV with a $\sim$32-point Gauss--Legendre quadrature.
 
 \paragraph{(vi) Optional $g_W$ prior --- 1 term.}
 Active only when $\text{fit\_gW=true}$; in $y$-space this is
@@ -540,23 +561,28 @@ giving $20-15 = 5$ effective degrees of freedom (or 6 with $g_W$ free).
 
 \subsection{Convergence cascade}\label{sec:cascade}
 
-Each event is fitted with up to 8 sequential passes of Minuit2, each
+Each event is fitted with up to 4 sequential passes of Minuit2, each
 seeded from the running best minimum, and the cascade stops as soon as
 a pass returns Migrad status $\in\{0,1\}$:
 \begin{enumerate}[label=(\arabic*),leftmargin=*]
-  \item Migrad with the natural jet-prior assignment;
-  \item Migrad with the jet1$\leftrightarrow$jet2 priors swapped
-        (hedges against the prior fit's $p_T$ ordering disagreeing
-        with the event's);
-  \item Simplex pre-pass plus Migrad on natural priors;
-  \item Simplex plus Migrad on swapped priors;
-  \item Hesse refresh plus Migrad continuation (recovers from a
-        numerically broken Davidon Hessian);
-  \item Random-restart Migrad (deterministically seeded from the event
-        kinematics, two random draws of jittered initial point);
-  \item Combined ``Minimize'' method (Migrad$\to$Simplex$\to$Migrad);
-  \item Combined ``Minimize'', swapped.
+  \item Simplex pre-pass plus Migrad with the natural jet-prior
+        assignment;
+  \item Simplex plus Migrad with the jet1$\leftrightarrow$jet2 priors
+        swapped (hedges against the prior fit's $p_T$ ordering
+        disagreeing with the event's);
+  \item Hesse refresh on the running-best $\bm{x}$, then Simplex plus
+        Migrad continuation (recovers from a numerically broken
+        Davidon Hessian or a nearly-converged plateau);
+  \item Random-restart Simplex plus Migrad (deterministically seeded
+        from the event kinematics, two random draws of jittered initial
+        point).
 \end{enumerate}
+The cheap Migrad-only entry passes used by previous versions were
+removed: Migrad-alone reports false-minimum convergence at biased
+$m_W$ basins (median fitted $m_W=79.05$~GeV at \sqs=163~GeV with
+Migrad-alone vs.\ $80.18$~GeV with a Simplex pre-pass), and Combined
+(``Minimize'') fallback only tries Simplex when Migrad reports failure
+--- so it inherits the same blind spot.
 
 A loose-valid criterion (\codename{kinfit\_valid\_loose}) accepts
 status-3 events (EDM exceeded the tolerance) if their EDM is finite
@@ -566,24 +592,26 @@ distributions indistinguishable from strict-valid events.
 
 \section{Performance}\label{sec:results}
 
-The current pipeline state (commits up to \codename{f1c3a36} plus the
-lep $p$-response model swap and the Migrad-step refinement) is
-benchmarked on a 92k-event subset per energy point. The strict and
-loose valid fractions are reported in Tab.~\ref{tab:valid}; closure
-of the kinfit-derived $W$-mass against truth is reported in
-Tab.~\ref{tab:closure}, and key plots in
+The current pipeline state (commits up to \codename{9833fd3}, including
+the BW joint-PDF normalisation, the FSR-dressing prior refit, and the
+4-pass Simplex-led cascade) is benchmarked on a 92k-event subset per
+energy point. The strict and loose valid fractions are reported in
+Tab.~\ref{tab:valid}; closure of the kinfit-derived $W$-mass against
+truth is reported in Tab.~\ref{tab:closure}, and key plots in
 Fig.~\ref{fig:mw-overlay-summary}. The full per-energy diagnostic
 plots appear in Apps.~\ref{app:resol-fits}--\ref{app:postfit-kinem}.
 
 \begin{table}[ht]
   \centering\small
   \caption{Strict (\codename{kinfit\_valid}) and loose
-    (\codename{kinfit\_valid\_loose}) convergence fractions.}
+    (\codename{kinfit\_valid\_loose}) convergence fractions, last
+    measured before the cascade refactor (commit \codename{20364b2});
+    the Simplex-led cascade rerun is pending.}
   \label{tab:valid}
   \begin{tabular}{lccc}\toprule
     & \sqs=157~GeV & \sqs=160~GeV & \sqs=163~GeV \\\midrule
-    valid (strict) [\%] & 89.70 & 82.28 & 58.16 \\
-    valid (loose)  [\%] & 95.37 & 93.19 & 86.34 \\
+    valid (strict) [\%] & 91.05 & 83.34 & --- \\
+    valid (loose)  [\%] & 93.78 & 88.93 & --- \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -608,18 +636,19 @@ plots appear in Apps.~\ref{app:resol-fits}--\ref{app:postfit-kinem}.
 \begin{figure}[ht]
   \centering
   \begin{subfigure}[b]{0.32\linewidth}\centering
-    \includegraphics[width=\linewidth]{lnuqq/allbranches/mW_overlay_ecm157.png}
+    \maybeincl{lnuqq/allbranches/mW_overlay_ecm157_valid.png}
     \caption*{\sqs=157~GeV}\end{subfigure}\hfill
   \begin{subfigure}[b]{0.32\linewidth}\centering
-    \includegraphics[width=\linewidth]{lnuqq/allbranches/mW_overlay_ecm160.png}
+    \maybeincl{lnuqq/allbranches/mW_overlay_ecm160_valid.png}
     \caption*{\sqs=160~GeV}\end{subfigure}\hfill
   \begin{subfigure}[b]{0.32\linewidth}\centering
-    \includegraphics[width=\linewidth]{lnuqq/allbranches/mW_overlay_ecm163.png}
+    \maybeincl{lnuqq/allbranches/mW_overlay_ecm163_valid.png}
     \caption*{\sqs=163~GeV}\end{subfigure}
-  \caption{$W$-mass overlay at the three centre-of-mass energies.
-    Solid red is the per-event kinfit-combined $W$ mass; dashed
-    blue/green are the post-fit individual leptonic and hadronic $W$
-    masses; dotted lines are the pre-fit (reco) values.}
+  \caption{$W$-mass overlay at the three centre-of-mass energies (events
+    passing strict \codename{kinfit\_valid}). Solid red is the per-event
+    kinfit-combined $W$ mass; dashed blue/green are the post-fit
+    individual leptonic and hadronic $W$ masses; dotted lines are the
+    pre-fit (reco) values.}
   \label{fig:mw-overlay-summary}
 \end{figure}
 
@@ -643,19 +672,21 @@ Sec.~\ref{sec:open}.
         ($\sigma_\text{core}=5$~MeV), and the
         \codename{spike\_dcb2g} smoothing scale
         $\sigma_\text{res}=1$~MeV. Both are amenable to relaxation.
-  \item \textbf{Lepton $\phi$-shift (\codename{kinfit\_pl})
-        pathology.} The lepton-$\phi$ post-fit distribution is
-        $\sim 19\times$ wider than the prior core, the only nuisance
-        that pulls into the prior tails. The likely root cause is an
-        over-tight prior that the kinematic balance does not constrain
-        sufficiently.
-  \item \textbf{Lepton $\theta$-shift (\codename{kinfit\_tl})
-        double-peak.} A small fraction of events ($\sim 18\%$ of the
-        valid sample) cluster on two preferred \codename{tl} values.
-        The structure is invariant under the lepton $p$-response model
-        swap, suggesting it is intrinsic to the kinematic-balance
-        topology. Likely shares root cause with the
-        \codename{kinfit\_pl} pathology.
+  \item \textbf{Lepton angular nuisances pinned to per-bin prior
+        means.} Post-fit \codename{kinfit\_tl} and \codename{kinfit\_pl}
+        cluster on a small set of discrete values that match the per-
+        $p_\text{lep}$-bin $\mu$'s of the underlying \codename{dcb2g}
+        priors (3--5 spikes per ECM, depending on how many bin means
+        coincide). The lepton angular resolution
+        ($\sigma\sim$few~$\mu$rad) is much finer than the lever arm
+        provided by the kinematic-balance and BW constraints
+        ($\sim$mrad scale), so Migrad parks each event at the $\mu$ of
+        its $p_\text{lep}$ bin --- correct Bayesian behaviour given the
+        priors, but the two degrees of freedom are essentially frozen
+        and do not contribute information. Two open options: fix the
+        lepton angles to their reco values (drop the 2~DoFs entirely),
+        or recentre the per-bin priors at $\mu=0$ (cosmetic, same
+        physics).
   \item \textbf{ISR copula on $(p_z^\text{ISR}, m(\WW)-m(ee))$.}
         Signed correlation is $\sim 0$ due to ISR $\pm z$ sign mixing,
         but the magnitudes are tightly coupled via the photon
@@ -708,81 +739,146 @@ all jet and lepton branches but not reproduced here; they live alongside
 the inclusive ones in
 \codename{outputs/response/plots/ecm\{157,160,163\}/}.
 
+\clearpage
 \subsection{Jet 1 / 2 momentum response}
 \begin{figure}[ht]\centering\threecm{jet1_p_resp.png}\caption{\codename{jet1\_p\_resp} (dcb2g).}\end{figure}
 \begin{figure}[ht]\centering\threecm{jet2_p_resp.png}\caption{\codename{jet2\_p\_resp} (dcb2g).}\end{figure}
 
+\clearpage
 \subsection{Jet angular resolutions}
 \begin{figure}[ht]\centering\threecm{jet1_theta_resol.png}\caption{\codename{jet1\_theta\_resol} (dcb2g).}\end{figure}
 \begin{figure}[ht]\centering\threecm{jet2_theta_resol.png}\caption{\codename{jet2\_theta\_resol} (dcb2g).}\end{figure}
 \begin{figure}[ht]\centering\threecm{jet1_phi_resol.png}\caption{\codename{jet1\_phi\_resol} (dcb2g).}\end{figure}
 \begin{figure}[ht]\centering\threecm{jet2_phi_resol.png}\caption{\codename{jet2\_phi\_resol} (dcb2g).}\end{figure}
 
+\clearpage
 \subsection{Lepton response and resolutions}
-\begin{figure}[ht]\centering\threecm{lep_p_resp.png}\caption{\codename{lep\_p\_resp} (dcber2g, post-update).}\end{figure}
+\begin{figure}[ht]\centering\threecm{lep_p_resp.png}\caption{\codename{lep\_p\_resp} (dcber3g, post-update).}\end{figure}
 \begin{figure}[ht]\centering\threecm{lep_theta_resol.png}\caption{\codename{lep\_theta\_resol} (dcb2g).}\end{figure}
 \begin{figure}[ht]\centering\threecm{lep_phi_resol.png}\caption{\codename{lep\_phi\_resol} (dcb2g).}\end{figure}
 
+\clearpage
 \subsection{MET response and resolutions}
 \begin{figure}[ht]\centering\threecm{met_p_resp.png}\caption{\codename{met\_p\_resp} (dcb).}\end{figure}
 \begin{figure}[ht]\centering\threecm{met_theta_resol.png}\caption{\codename{met\_theta\_resol} (dcb).}\end{figure}
 \begin{figure}[ht]\centering\threecm{met_phi_resol.png}\caption{\codename{met\_phi\_resol} (dcb).}\end{figure}
 
-\subsection{Lepton $p$-response: model comparison}
-\begin{figure}[ht]
-  \centering
-  \includegraphics[width=0.97\linewidth]{lep_p_resp_dcber2g_all.png}
-  \caption{Updated \codename{dcber2g} fit at all three ECMs.
-    \chitndf $\in \{1.99, 2.16, 2.08\}$ vs.\ the previous
-    \codename{expleft2g} $\{3.67, 3.52, 3.52\}$.}
-\end{figure}
-
 
 \section{BES, ISR, and \WW system priors}\label{app:bes-isr-fits}
 
+\clearpage
 \subsection{BES proxies}
 \begin{figure}[ht]\centering\threecm{gen_ee_m_minus_ecm.png}\caption{$\Delta_m=m(ee)-\sqs$ (gauss).}\end{figure}
 \begin{figure}[ht]\centering\threecm{gen_ee_pz.png}\caption{$P_z=p_z(ee)$ (gauss).}\end{figure}
 
+\clearpage
 \subsection{ISR 3-momentum components}
 \begin{figure}[ht]\centering\threecm{gen_isr_px.png}\caption{\codename{gen\_isr\_px} (spike\_dcb2g).}\end{figure}
 \begin{figure}[ht]\centering\threecm{gen_isr_py.png}\caption{\codename{gen\_isr\_py} (spike\_dcb2g).}\end{figure}
 \begin{figure}[ht]\centering\threecm{gen_isr_pz.png}\caption{\codename{gen\_isr\_pz} (spike\_dcb2g).}\end{figure}
 \begin{figure}[ht]\centering\threecm{gen_isr_pz_zoom.png}\caption{\codename{gen\_isr\_pz} zoom on the ISR-event tail.}\end{figure}
 
+\clearpage
 \subsection{\WW invariant-mass residuals}
 \begin{figure}[ht]\centering\threecm{gen_WW_m_minus_m_ee.png}\caption{$m(\WW)-m(ee)$ (dcber2g).}\end{figure}
 \begin{figure}[ht]\centering\threecm{gen_WW_m_minus_ecm.png}\caption{Legacy $m(\WW)-\sqs$ (dcber2g) for reference.}\end{figure}
 
 
-\section{Post-fit nuisance pulls}\label{app:postfit}
+\section{Post-fit nuisance posteriors}\label{app:postfit}
 
-The 16 free parameters of the kinematic fit have well-defined
-posteriors that we plot per energy point with the corresponding input
-prior PDF (red curve) overlaid. The green histogram is the post-fit
-distribution of the named branch.
+For each free parameter we plot the histogram of post-fit MAP estimates
+across events (green) overlaid with the corresponding input prior PDF
+(red curve), both in physical units. Whether the green distribution is
+narrower than, equal to, or wider than the red prior tells how
+informative the data is for that nuisance: narrower than prior means
+the prior dominates per event (Bayesian shrinkage of MAPs toward the
+prior peak); matching shape means the constraints recover each event's
+truth; wider would indicate a fit pathology. A complementary
+\emph{normalised pull} view, $(x_\text{fit}-x_\text{gen})/\sigma_\text{prior}$
+with the prior PDF overlaid in $z$-space, is in
+App.~\ref{app:postfit-pulls}.
 
+\clearpage
 \subsection{BES nuisances}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_bes_m_minus_ecm.png}\caption{\codename{kinfit\_bes\_m\_minus\_ecm} ($\Delta_{m,\text{fit}}$).}\end{figure}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_bes_pz.png}\caption{\codename{kinfit\_bes\_pz} ($P_{z,\text{fit}}$).}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_bes_m_minus_ecm.png}\caption{\codename{kinfit\_bes\_m\_minus\_ecm} ($\Delta_{m,\text{fit}}$).}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_bes_pz.png}\caption{\codename{kinfit\_bes\_pz} ($P_{z,\text{fit}}$).}\end{figure}
 
+\clearpage
 \subsection{Momentum scales}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_s1.png}\caption{Jet 1 momentum scale.}\end{figure}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_s2.png}\caption{Jet 2 momentum scale.}\end{figure}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_sl.png}\caption{Lepton momentum scale.}\end{figure}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_sn.png}\caption{MET (neutrino) momentum scale.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_s1.png}\caption{Jet 1 momentum scale.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_s2.png}\caption{Jet 2 momentum scale.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_sl.png}\caption{Lepton momentum scale.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_sn.png}\caption{MET (neutrino) momentum scale.}\end{figure}
 
+\clearpage
 \subsection{Polar-angle shifts}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_t1.png}\caption{Jet 1 $\theta$ shift.}\end{figure}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_t2.png}\caption{Jet 2 $\theta$ shift.}\end{figure}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_tl.png}\caption{Lepton $\theta$ shift (double-peak structure under investigation).}\end{figure}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_tn.png}\caption{MET $\theta$ shift.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_t1.png}\caption{Jet 1 $\theta$ shift.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_t2.png}\caption{Jet 2 $\theta$ shift.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_tl.png}\caption{Lepton $\theta$ shift (per-$p_\text{lep}$-bin $\mu$ pinning --- see Sec.~\ref{sec:open}).}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_tn.png}\caption{MET $\theta$ shift.}\end{figure}
 
+\clearpage
 \subsection{Azimuthal-angle shifts}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_p1.png}\caption{Jet 1 $\phi$ shift.}\end{figure}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_p2.png}\caption{Jet 2 $\phi$ shift.}\end{figure}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_pl.png}\caption{Lepton $\phi$ shift (pathologically wide vs.\ prior --- see Sec.~\ref{sec:open}).}\end{figure}
-\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_pn.png}\caption{MET $\phi$ shift.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_p1.png}\caption{Jet 1 $\phi$ shift.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_p2.png}\caption{Jet 2 $\phi$ shift.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_pl.png}\caption{Lepton $\phi$ shift (per-$p_\text{lep}$-bin $\mu$ pinning --- see Sec.~\ref{sec:open}).}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_pn.png}\caption{MET $\phi$ shift.}\end{figure}
+
+\clearpage
+\subsection{Derived: ISR mass loss and 3-momentum}
+The four constraint terms applied to derived quantities (\WW
+mass-loss residual and ISR 3-momentum balance) are plotted here using
+the same convention. They are computed at plot time from the saved
+\codename{kinfit\_WW\_*} and \codename{kinfit\_bes\_*} branches.
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_m_loss.png}\caption{$m(\WW)_\text{fit}-m_{ee,\text{fit}}$ (\emph{dcber2g}).}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_isr_px.png}\caption{Recovered ISR $p_x = -p_x^{\WW,\text{fit}}$ (\emph{spike\_dcb2g}).}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_isr_py.png}\caption{Recovered ISR $p_y = -p_y^{\WW,\text{fit}}$ (\emph{spike\_dcb2g}).}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{posteriors/kinfit_isr_pz.png}\caption{Recovered ISR $p_z = P_{z,\text{fit}} - p_z^{\WW,\text{fit}}$ (\emph{spike\_dcb2g}).}\end{figure}
+
+
+\section{Normalised post-fit pulls}\label{app:postfit-pulls}
+
+For each free parameter (and the four derived quantities of
+App.~\ref{app:postfit}) we form the per-event normalised pull
+\[
+  z = \frac{x_\text{fit} - x_\text{gen}}{\sigma_\text{prior}(\text{bin})},
+\]
+where $\sigma_\text{prior}$ is taken per event from the matching
+$p$-bin of the prior fit (or the inclusive prior $\sigma$ for the
+un-binned BES, ISR, and mass-loss priors). The overlay (red) is the
+prior PDF transformed to the same $z$ axis (mirrored about $0$ so it
+aligns with the pull-shape definition), bin-averaged by the actual
+event population. Reading the plots: pull narrower than the overlay
+$\Rightarrow$ the kinematic-balance constraints add information beyond
+the prior alone (Bayesian shrinkage, $\sigma_\text{post}<\sigma_\text{prior}$);
+pull matching the overlay shape $\Rightarrow$ prior dominates per event;
+pull \emph{wider} than the overlay $\Rightarrow$ unhandled tail or
+bias outliers. Title diagnostics: $\langle z\rangle$ (per-event bias)
+and $\sigma_z$ (population spread).
+
+\clearpage
+\subsection{Detector nuisances}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_s1.png}\caption{Jet 1 momentum scale pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_s2.png}\caption{Jet 2 momentum scale pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_sl.png}\caption{Lepton momentum scale pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_sn.png}\caption{MET momentum scale pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_t1.png}\caption{Jet 1 $\theta$-shift pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_t2.png}\caption{Jet 2 $\theta$-shift pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_tl.png}\caption{Lepton $\theta$-shift pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_tn.png}\caption{MET $\theta$-shift pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_p1.png}\caption{Jet 1 $\phi$-shift pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_p2.png}\caption{Jet 2 $\phi$-shift pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_pl.png}\caption{Lepton $\phi$-shift pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_pn.png}\caption{MET $\phi$-shift pull.}\end{figure}
+
+\clearpage
+\subsection{BES, ISR and mass-loss}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_bes_m_minus_ecm.png}\caption{BES $\Delta_m$ pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_bes_pz.png}\caption{BES $P_z$ pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_m_loss.png}\caption{$m(\WW)-m(ee)$ residual pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_isr_px.png}\caption{ISR $p_x$ pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_isr_py.png}\caption{ISR $p_y$ pull.}\end{figure}
+\begin{figure}[ht]\centering\threecmkin{pulls/kinfit_isr_pz.png}\caption{ISR $p_z$ pull.}\end{figure}
 
 
 \section{Post-fit kinematics: fit vs.\ reco vs.\ gen}\label{app:postfit-kinem}
@@ -791,16 +887,19 @@ For each post-fit physical quantity below, the green histogram is the
 kinfit value, the orange line is the gen-level truth, and the
 light-blue shaded bars are the pre-fit reco values.
 
+\clearpage
 \subsection{$W$ mass}
 \begin{figure}[ht]\centering\threecmkin{fit_vs_reco_gen/kinfit_Wlep_m.png}\caption{Leptonic $W$ mass.}\end{figure}
 \begin{figure}[ht]\centering\threecmkin{fit_vs_reco_gen/kinfit_Whad_m.png}\caption{Hadronic $W$ mass.}\end{figure}
 
+\clearpage
 \subsection{Constituent momenta}
 \begin{figure}[ht]\centering\threecmkin{fit_vs_reco_gen/kinfit_jet1_p.png}\caption{Jet 1 momentum.}\end{figure}
 \begin{figure}[ht]\centering\threecmkin{fit_vs_reco_gen/kinfit_jet2_p.png}\caption{Jet 2 momentum.}\end{figure}
 \begin{figure}[ht]\centering\threecmkin{fit_vs_reco_gen/kinfit_lep_p.png}\caption{Lepton momentum.}\end{figure}
 \begin{figure}[ht]\centering\threecmkin{fit_vs_reco_gen/kinfit_nu_p.png}\caption{Neutrino momentum (post-fit only at gen level).}\end{figure}
 
+\clearpage
 \subsection{\WW system}
 \begin{figure}[ht]\centering\threecmkin{fit_vs_reco_gen/kinfit_WW_m.png}\caption{\WW invariant mass.}\end{figure}
 \begin{figure}[ht]\centering\threecmkin{fit_vs_reco_gen/kinfit_WW_pz.png}\caption{\WW longitudinal momentum.}\end{figure}
@@ -812,8 +911,8 @@ The ECM-comparison plots overlay the three energy points for the same
 branch, with the corresponding prior PDF curve in the matching colour.
 
 \begin{figure}[ht]\centering
-  \includegraphics[width=0.48\linewidth]{kinfit_vars/ecm_comparison/pulls/kinfit_bes_m_minus_ecm.png}
-  \includegraphics[width=0.48\linewidth]{kinfit_vars/ecm_comparison/pulls/kinfit_bes_pz.png}
+  \includegraphics[width=0.48\linewidth]{kinfit_vars/ecm_comparison/posteriors/kinfit_bes_m_minus_ecm.png}
+  \includegraphics[width=0.48\linewidth]{kinfit_vars/ecm_comparison/posteriors/kinfit_bes_pz.png}
   \caption{Post-fit BES nuisances overlaid for the three energies.}
 \end{figure}
 
