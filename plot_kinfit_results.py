@@ -399,6 +399,58 @@ def _make_pdf(p):
         def fn(x): return norm_g * np.exp(-0.5 * ((x - mu) * inv_sg) ** 2)
         return fn
 
+    if model == "asymgauss":
+        mu  = float(p["mu"])
+        sL  = abs(float(p["sigma_L"]))
+        sR  = abs(float(p["sigma_R"]))
+        # Normalised PDF: f(x) = sqrt(2/π) / (σ_L+σ_R) · exp(-z²/2)
+        norm = math.sqrt(2.0 / math.pi) / (sL + sR)
+        def fn(x):
+            xa = np.asarray(x, dtype=float)
+            sigma = np.where(xa < mu, sL, sR)
+            z = (xa - mu) / sigma
+            return norm * np.exp(-0.5 * z * z)
+        return fn
+
+    if model == "asymgauss2g":
+        mu   = float(p["mu"])
+        sL   = abs(float(p["sigma_L"]))
+        sR   = abs(float(p["sigma_R"]))
+        fw   = float(p["f_wide"])
+        muw  = float(p["mu_wide"])
+        sw   = abs(float(p["sigma_wide"]))
+        n_core = math.sqrt(2.0 / math.pi) / (sL + sR)
+        n_wide = 1.0 / (sw * math.sqrt(2.0 * math.pi))
+        def fn(x):
+            xa = np.asarray(x, dtype=float)
+            sigma = np.where(xa < mu, sL, sR)
+            z_core = (xa - mu) / sigma
+            core = n_core * np.exp(-0.5 * z_core * z_core)
+            z_wide = (xa - muw) / sw
+            wide = n_wide * np.exp(-0.5 * z_wide * z_wide)
+            return (1.0 - fw) * core + fw * wide
+        return fn
+
+    if model == "asymgauss3g":
+        mu   = float(p["mu"])
+        sL   = abs(float(p["sigma_L"]))
+        sR   = abs(float(p["sigma_R"]))
+        fs   = float(p["f_s"]); mus = float(p["mu_s"]); ss = abs(float(p["sigma_s"]))
+        fo   = float(p["f_o"]); muo = float(p["mu_o"]); so = abs(float(p["sigma_o"]))
+        n_core = math.sqrt(2.0 / math.pi) / (sL + sR)
+        n_s    = 1.0 / (ss * math.sqrt(2.0 * math.pi))
+        n_o    = 1.0 / (so * math.sqrt(2.0 * math.pi))
+        f_core = max(0.0, 1.0 - fs - fo)
+        def fn(x):
+            xa = np.asarray(x, dtype=float)
+            sigma = np.where(xa < mu, sL, sR)
+            z_core = (xa - mu) / sigma
+            core = n_core * np.exp(-0.5 * z_core * z_core)
+            z_s = (xa - mus) / ss; shldr = n_s * np.exp(-0.5 * z_s * z_s)
+            z_o = (xa - muo) / so; outl  = n_o * np.exp(-0.5 * z_o * z_o)
+            return f_core * core + fs * shldr + fo * outl
+        return fn
+
     norm = p["norm"]
     if model == "dcb":
         mu, sg = p["mu"], p["sigma"]
@@ -448,6 +500,19 @@ def _make_pdf(p):
         def fn(x):
             spike = f_d * norm_g * np.exp(-0.5 * (x * inv_sr) ** 2)
             cont  = (1.0 - f_d) * dcb_gauss(x, 1.0, mu, sg, aL, nL, aR, nR, fw, mw, sw)
+            return norm * (spike + cont)
+
+    elif model == "spike_dcber2g":
+        # f_delta · N(spike_center, sig_res²) + (1−f_delta) · dcber2g(...)
+        f_d, sr, sc_loc = p["f_delta"], abs(p["sig_res"]), p["spike_center"]
+        mu, sg          = p["mu"], p["sigma"]
+        aL, nL, aR, kR  = p["aL"], p["nL"], p["aR"], p["kR"]
+        fw, mw, sw      = p["f_wide"], p["mu_wide"], p["sigma_wide"]
+        inv_sr = 1.0 / sr
+        norm_g = inv_sr / math.sqrt(2.0 * math.pi)
+        def fn(x):
+            spike = f_d * norm_g * np.exp(-0.5 * ((x - sc_loc) * inv_sr) ** 2)
+            cont  = (1.0 - f_d) * dcb_expright_gauss(x, 1.0, mu, sg, aL, nL, aR, kR, fw, mw, sw)
             return norm * (spike + cont)
 
     else:
@@ -948,18 +1013,27 @@ _STATUS_BUCKETS = [
 ]
 
 
-def plot_by_status(ecm, raw_arrays):
+def plot_by_status(ecm, raw_arrays, json_results):
+    """Per-branch histograms split by Migrad status, three subdirs:
+    - by_status/posteriors/ : MAP histograms in physical units, prior PDF
+                              overlay (only for nuisances with priors).
+    - by_status/pulls/      : (kinfit_X − gen_X)/σ_prior split by status,
+                              with prior PDF in z-space mirrored about 0.
+    - by_status/other/      : non-prior branches (kinematics, chi², …).
+    """
     status = raw_arrays.get("kinfit_status")
     if status is None:
         print(f"  [ecm{ecm}]  kinfit_status missing — skipping by-status plots")
         return
 
     base = f"{KINFIT_OUTDIR}/ecm{ecm}/by_status"
-    os.makedirs(f"{base}/pulls", exist_ok=True)
-    os.makedirs(f"{base}/other", exist_ok=True)
+    os.makedirs(f"{base}/posteriors", exist_ok=True)
+    os.makedirs(f"{base}/pulls",      exist_ok=True)
+    os.makedirs(f"{base}/other",      exist_ok=True)
 
     status = np.asarray(status, dtype=int)
 
+    # ── Posteriors and "other" branches: physical units, prior PDF overlay ──
     for bname in KINFIT_BRANCHES:
         if bname in ("kinfit_status", "kinfit_valid"):
             continue
@@ -972,7 +1046,12 @@ def plot_by_status(ecm, raw_arrays):
         if active.sum() < 30:
             continue
 
-        nbins, xlo, xhi = _binning(bname, vals[active])
+        is_posterior = bname in _PULL_BRANCHES
+        resol_name   = KINFIT_TO_RESOL.get(bname) if is_posterior else None
+        pdf_params   = json_results.get(resol_name) if resol_name else None
+        pdf_fn       = _make_pdf(pdf_params) if pdf_params else None
+
+        nbins, xlo, xhi = _binning(bname, vals[active], pdf_params=pdf_params)
 
         fig, ax = plt.subplots(figsize=(8, 5), layout="constrained")
         for pred, lbl, clr in _STATUS_BUCKETS:
@@ -989,6 +1068,13 @@ def plot_by_status(ecm, raw_arrays):
             ax.step(centers, density, where="mid", color=clr, lw=2,
                     label=f"{lbl}  (N={n})")
 
+        if pdf_fn is not None:
+            xfine = np.linspace(xlo, xhi, 600)
+            yfine = pdf_fn(xfine)
+            integ = float(np.trapz(yfine, xfine))
+            yfine = yfine / max(integ, 1e-300)
+            ax.plot(xfine, yfine, color="crimson", lw=1.8, label="prior PDF")
+
         ax.set_xlabel(bname, fontsize=11)
         ax.set_ylabel("Probability density", fontsize=11)
         ax.set_title(f"{bname}  [ecm{ecm}]  — split by Migrad status", fontsize=10)
@@ -996,12 +1082,85 @@ def plot_by_status(ecm, raw_arrays):
         ax.set_ylim(bottom=0)
         ax.legend(fontsize=9, frameon=False)
 
-        sub = "pulls" if bname in _PULL_BRANCHES else "other"
+        sub = "posteriors" if is_posterior else "other"
         for fmt in ("png", "pdf"):
             fig.savefig(f"{base}/{sub}/{bname}.{fmt}", dpi=150)
         plt.close(fig)
 
-    print(f"  [ecm{ecm}]  by-status plots → {base}/{{pulls,other}}/")
+    # ── Normalised pulls split by status, prior overlay in z-space ──
+    NB = 100
+    Q_LO, Q_HI = 0.005, 0.995
+    PAD_FRAC   = 0.05
+    CAP        = 20.0
+
+    for bname, (gen_bname, bin_var) in PULL_TRUTH.items():
+        if bname not in raw_arrays or gen_bname not in raw_arrays:
+            continue
+        prior_name = KINFIT_TO_RESOL.get(bname)
+        if prior_name is None or prior_name not in json_results:
+            continue
+        prior_params = json_results[prior_name]
+
+        fit_arr = np.asarray(raw_arrays[bname],     dtype=float).ravel()
+        gen_arr = np.asarray(raw_arrays[gen_bname], dtype=float).ravel()
+        if bin_var and bin_var in raw_arrays:
+            bin_arr = np.asarray(raw_arrays[bin_var], dtype=float).ravel()
+            sigma   = _per_event_prior_sigma(prior_params, bin_arr)
+        else:
+            bin_arr = None
+            sigma   = _per_event_prior_sigma(prior_params, None)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            pull = (fit_arr - gen_arr) / sigma
+        valid = np.isfinite(pull) & (status >= 0)
+        if valid.sum() < 30:
+            continue
+
+        # Range from the full active sample so both status buckets share the axis.
+        pull_active = pull[valid]
+        q_lo_v, q_hi_v = float(np.quantile(pull_active, Q_LO)), float(np.quantile(pull_active, Q_HI))
+        if q_hi_v <= q_lo_v:
+            q_lo_v, q_hi_v = -1.0, 1.0
+        span = q_hi_v - q_lo_v
+        XLO  = max(q_lo_v - PAD_FRAC * span, -CAP)
+        XHI  = min(q_hi_v + PAD_FRAC * span,  CAP)
+        edges   = np.linspace(XLO, XHI, NB + 1)
+        centres = 0.5 * (edges[:-1] + edges[1:])
+        bw      = edges[1] - edges[0]
+
+        fig, ax = plt.subplots(figsize=(8, 5), layout="constrained")
+        for pred, lbl, clr in _STATUS_BUCKETS:
+            m = pred(status) & valid
+            n = int(m.sum())
+            if n < 1:
+                continue
+            p_in = pull[m]
+            p_in = p_in[(p_in >= XLO) & (p_in <= XHI)]
+            sd_p = float(np.std(p_in)) if p_in.size else float("nan")
+            counts, _ = np.histogram(pull[m], bins=edges)
+            density   = counts / max(counts.sum() * bw, 1.0)
+            ax.step(edges[:-1], density, where="post", color=clr, lw=1.5,
+                    label=f"{lbl}  (N={n}, σ_pull={sd_p:.2f})")
+
+        ref_pdf = _prior_z_pdf(prior_params, bin_arr[valid] if bin_arr is not None else None, centres)
+        if ref_pdf is not None:
+            label = f"prior in z-space ({prior_params['model']})"
+            if bin_var:
+                label += "  [bin-avg]"
+            ax.plot(centres, ref_pdf, color="crimson", lw=1.8, label=label)
+
+        ax.axvline(0.0, color="0.5", lw=0.8, ls="--")
+        ax.set_xlim(XLO, XHI)
+        ax.set_ylim(bottom=0)
+        ax.set_xlabel(f"({bname} − {gen_bname}) / σ_prior", fontsize=11)
+        ax.set_ylabel("Probability density", fontsize=11)
+        ax.set_title(f"{bname} pull  [ecm{ecm}]  — split by Migrad status", fontsize=10)
+        ax.legend(fontsize=9, frameon=False, loc="upper right")
+        for fmt in ("png", "pdf"):
+            fig.savefig(f"{base}/pulls/{bname}.{fmt}", dpi=150)
+        plt.close(fig)
+
+    print(f"  [ecm{ecm}]  by-status plots → {base}/{{posteriors,pulls,other}}/")
 
 
 # ── ECM comparison plots ──────────────────────────────────────────────────────
@@ -1101,7 +1260,7 @@ def _load_ecm(ecm):
     with f:
         available = set(tree.keys())
         to_load    = [b for b in KINFIT_BRANCHES if b in available]
-        missing    = [b for b in KINFIT_BRANCHES if b not in available]
+        missing    = [b for b in KINFIT_BRANCHES if b not in available and b not in _DERIVED_PULLS]
         extra_load = [b for b in EXTRA_BRANCHES  if b in available and b not in set(to_load)]
         extra_miss = [b for b in EXTRA_BRANCHES  if b not in available]
         if missing:
@@ -1155,7 +1314,7 @@ def _plot_phase(args):
     elif phase == "chi2_slices":
         plot_chi2_slices(ecm, raw_data, json_dict)
     elif phase == "by_status":
-        plot_by_status(ecm, raw_data)
+        plot_by_status(ecm, raw_data, json_dict)
     return ecm, phase
 
 
