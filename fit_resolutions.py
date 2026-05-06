@@ -93,27 +93,31 @@ BIN_CONFIG = {
 # ── Per-branch configuration overrides ─────────────────────────────────────
 BRANCH_CONFIG = {
     # Jet p response: detector core + wide-radiation tail → DCB+G.
-    "jet1_p_resp":          {"clip": (0.2, 99.8),  "nbins": 150, "model": "dcb2g"},
-    "jet2_p_resp":          {"clip": (0.2, 99.8),  "nbins": 150, "model": "dcb2g"},
-    "jet_p_resp":           {"clip": (0.2, 99.8),  "nbins": 150, "model": "dcb2g"},
-    # Jet angular resolutions: detector core + wide-radiation tails.
-    "jet1_theta_resol":     {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
-    "jet2_theta_resol":     {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
-    "jet_theta_resol":      {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
-    "jet1_phi_resol":       {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
-    "jet2_phi_resol":       {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
-    "jet_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
+    # f_wide_max=0.5 enforces "core = bulk" — otherwise some bins land in a
+    # degenerate basin where the wide-Gauss takes the bulk and dcb-core tracks
+    # an outlier population, faking a second peak in the kinfit pull.
+    "jet1_p_resp":          {"clip": (0.2, 99.8),  "nbins": 150, "model": "dcb2g", "f_wide_max": 0.5},
+    "jet2_p_resp":          {"clip": (0.2, 99.8),  "nbins": 150, "model": "dcb2g", "f_wide_max": 0.5},
+    "jet_p_resp":           {"clip": (0.2, 99.8),  "nbins": 150, "model": "dcb2g", "f_wide_max": 0.5},
+    "jet1_theta_resol":     {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g", "f_wide_max": 0.5},
+    "jet2_theta_resol":     {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g", "f_wide_max": 0.5},
+    "jet_theta_resol":      {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g", "f_wide_max": 0.5},
+    "jet1_phi_resol":       {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g", "f_wide_max": 0.5},
+    "jet2_phi_resol":       {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g", "f_wide_max": 0.5},
+    "jet_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g", "f_wide_max": 0.5},
     # Lepton p response: narrow detector core + heavy power-law left tail (FSR)
-    # + sharp exponential right cutoff at 1 (kinematic ceiling). dcber2g —
+    # + sharp exponential right cutoff at 1 (kinematic ceiling). dcber3g —
     # mirror-image of expleft2g; physically motivated and fits ~2× better.
     "lep_p_resp":           {"clip": (0.1, 99.9),  "nbins": 300, "model": "dcber3g"},
     # Lepton angular resolutions: tight detector core + wide-angle FSR tails → DCB+G.
-    "lep_theta_resol":      {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
-    "lep_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g"},
-    # MET (well-measured) → single DCB.
-    "met_p_resp":           {"clip": (0.5, 99.5),  "nbins": 150},
-    "met_theta_resol":      {"clip": (0.5, 99.5),  "nbins": 150},
-    "met_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150},
+    "lep_theta_resol":      {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g", "f_wide_max": 0.5},
+    "lep_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150, "model": "dcb2g", "f_wide_max": 0.5},
+    # MET: asymmetric core + shoulder + outlier Gaussians (asymgauss3g, smooth
+    # everywhere). Two-Gauss variant left χ²/ndf ~25 — single wide-Gauss can't
+    # span both the shoulder and the far tail.
+    "met_p_resp":           {"clip": (0.5, 99.5),  "nbins": 150, "model": "asymgauss3g"},
+    "met_theta_resol":      {"clip": (0.5, 99.5),  "nbins": 150, "model": "asymgauss3g"},
+    "met_phi_resol":        {"clip": (0.5, 99.5),  "nbins": 150, "model": "asymgauss3g"},
     # Gen-level total momenta: ~85% of events have collinear (or no) ISR → spike at 0
     # narrower than any reasonable bin; the rest form a smooth ISR tail.
     # dcb2g (narrow DCB core + wide Gaussian) handles the unresolved spike + smooth
@@ -127,10 +131,10 @@ BRANCH_CONFIG = {
                              "zoom_xlim": (-3.0, 3.0)},
     # Gen WW invariant mass minus ECM. Peak just below 0 (ISR), hard boundary at 0.
     "gen_WW_m_minus_ecm": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber2g"},
-    # m(WW) − m(ee) — pure ISR mass-loss, BES variance subtracted off. Same
-    # right-boundary-at-0 + heavy-left-tail shape as gen_WW_m_minus_ecm but the
-    # peak/right-edge should be tighter (no BES smearing).
-    "gen_WW_m_minus_m_ee": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber2g"},
+    # m(WW) − m(ee) — pure ISR mass-loss, BES variance subtracted off. Three
+    # physical scales (narrow FSR cone-cut peak, ISR slope, hard-ISR tail) →
+    # dcber3g (mirror of lep_p_resp).
+    "gen_WW_m_minus_m_ee": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber3g"},
     # m(e+e-) − ECM at depth=1 in the e± chain (post-BES, pre-ISR). Symmetric
     # Gaussian smearing of the beam energies — single Gauss is sufficient.
     "gen_ee_m_minus_ecm":  {"clip": (0.1, 99.9),  "nbins": 100, "model": "gauss"},
@@ -147,7 +151,14 @@ BRANCH_CONFIG = {
     "gen_isr_py":         {"clip": (0.5, 99.5),  "nbins": 200,  "model": "spike_dcb2g",
                              "delta_threshold": 0.001, "sig_res": 0.001,
                              "zoom_xlim": (-2.0, 2.0)},
+    # f_wide_max=0.45: at ecm160 the unconstrained fit lands at f_wide=0.82
+    # with σ_wide(47 MeV) < σ_core(61 MeV) — wide-Gauss/dcb-core roles swap,
+    # σ_core blows up by 7× vs the other ECMs, and the kinfit's effective
+    # ISR-pz prior shape becomes ECM-inconsistent. Cap f_wide so the dcb_core
+    # is always the dominant component (px/py already have f_wide≈0.01,
+    # unaffected by the cap).
     "gen_isr_pz":         {"clip": (0.5, 99.5),  "nbins": 200,  "model": "spike_dcb2g",
+                             "f_wide_max": 0.45,
                              "delta_threshold": 0.001, "sig_res": 0.001,
                              "zoom_xlim": (-10.0, 10.0)},
 }
@@ -297,6 +308,114 @@ def fit_gauss(centers, counts, mu0, sig0):
         return None, None, False, float("inf")
 
 
+def asymgauss(x, N, mu, sigma_L, sigma_R):
+    """Asymmetric (split) Gaussian: σ_L for x<µ, σ_R for x≥µ. C¹-continuous
+    at x=µ (value and gradient match; second derivative is discontinuous).
+    Area-normalised to N: ∫ asymgauss dx = N."""
+    sigma_L = max(abs(sigma_L), 1e-300)
+    sigma_R = max(abs(sigma_R), 1e-300)
+    sigma   = np.where(x < mu, sigma_L, sigma_R)
+    z       = (x - mu) / sigma
+    norm    = math.sqrt(2.0 / math.pi) / (sigma_L + sigma_R)
+    return N * norm * np.exp(-0.5 * z * z)
+
+
+def fit_asymgauss(centers, counts, mu0, sig0):
+    """Asymmetric-Gaussian fit. Returns (popt=(N,mu,sigma_L,sigma_R), pcov,
+    fit_ok, chi2). Multiple starts to avoid σ_L≈σ_R degeneracies."""
+    N0 = float(counts.sum()) * float(centers[1] - centers[0]) if len(centers) > 1 else float(counts.sum())
+    lo = [0.0,    -np.inf,   1e-9, 1e-9]
+    hi = [np.inf,  np.inf,   np.inf, np.inf]
+    starts = [
+        [N0, mu0, sig0,        sig0],            # symmetric (same as a single Gauss)
+        [N0, mu0, sig0 * 0.5,  sig0 * 1.5],      # narrow-left, broad-right
+        [N0, mu0, sig0 * 1.5,  sig0 * 0.5],      # broad-left, narrow-right
+        [N0, mu0, sig0 * 0.3,  sig0 * 2.0],      # very asymmetric
+        [N0, mu0, sig0 * 2.0,  sig0 * 0.3],
+    ]
+    return _best_fit(asymgauss, centers, counts, starts, lo, hi)
+
+
+def asymgauss2g(x, N, mu, sigma_L, sigma_R, f_wide, mu_w, sigma_w):
+    """Asymmetric Gaussian core + wide Gaussian. Both individually normalised
+    so the convex sum (1−f_wide)·core + f_wide·wide is also normalised.
+    Smooth everywhere (C¹ at x=µ for the core; C∞ for the wide), no piecewise
+    handoff cliffs."""
+    sigma_L = max(abs(sigma_L), 1e-300)
+    sigma_R = max(abs(sigma_R), 1e-300)
+    sigma_w = max(abs(sigma_w), 1e-300)
+    sigma_x = np.where(x < mu, sigma_L, sigma_R)
+    z_core  = (x - mu) / sigma_x
+    norm_core = math.sqrt(2.0 / math.pi) / (sigma_L + sigma_R)
+    core    = norm_core * np.exp(-0.5 * z_core * z_core)
+    z_wide  = (x - mu_w) / sigma_w
+    norm_wide = 1.0 / (sigma_w * math.sqrt(2.0 * math.pi))
+    wide    = norm_wide * np.exp(-0.5 * z_wide * z_wide)
+    return N * ((1.0 - f_wide) * core + f_wide * wide)
+
+
+def fit_asymgauss2g(centers, counts, mu0, sig0, f_wide_max=0.5):
+    """Asymmetric-Gaussian + wide-Gauss fit. Returns popt=(N,mu,σ_L,σ_R,
+    f_wide,µ_w,σ_w)."""
+    N0 = float(counts.sum()) * float(centers[1] - centers[0]) if len(centers) > 1 else float(counts.sum())
+    # params: N, mu, sigma_L, sigma_R, f_wide, mu_w, sigma_w
+    lo = [0.0,    -np.inf, 1e-9, 1e-9, 0.001, -np.inf, 1e-6]
+    hi = [np.inf,  np.inf, np.inf, np.inf, float(f_wide_max), np.inf, np.inf]
+    starts = [
+        [N0, mu0, sig0,        sig0,        0.05, mu0,             sig0 * 5],
+        [N0, mu0, sig0 * 0.5,  sig0,        0.10, mu0,             sig0 * 5],
+        [N0, mu0, sig0,        sig0 * 0.5,  0.10, mu0,             sig0 * 5],
+        [N0, mu0, sig0 * 0.3,  sig0 * 1.5,  0.15, mu0,             sig0 * 8],
+        [N0, mu0, sig0 * 1.5,  sig0 * 0.3,  0.15, mu0,             sig0 * 8],
+        [N0, mu0, sig0 * 0.5,  sig0 * 0.5,  0.20, mu0 - 2.0*sig0,  sig0 * 10],
+        [N0, mu0, sig0 * 0.5,  sig0 * 0.5,  0.20, mu0 + 2.0*sig0,  sig0 * 10],
+    ]
+    return _best_fit(asymgauss2g, centers, counts, starts, lo, hi)
+
+
+def asymgauss3g(x, N, mu, sigma_L, sigma_R,
+                f_s, mu_s, sigma_s, f_o, mu_o, sigma_o):
+    """Asymgauss core + 'shoulder' Gaussian + 'outlier' (very wide) Gaussian.
+    Convex sum: (1−f_s−f_o)·core + f_s·shoulder + f_o·outlier. Each component
+    individually normalised. Smooth everywhere."""
+    sigma_L = max(abs(sigma_L), 1e-300)
+    sigma_R = max(abs(sigma_R), 1e-300)
+    sigma_s = max(abs(sigma_s), 1e-300)
+    sigma_o = max(abs(sigma_o), 1e-300)
+    sigma_x = np.where(x < mu, sigma_L, sigma_R)
+    z_core  = (x - mu) / sigma_x
+    norm_core = math.sqrt(2.0 / math.pi) / (sigma_L + sigma_R)
+    core    = norm_core * np.exp(-0.5 * z_core * z_core)
+    z_s     = (x - mu_s) / sigma_s
+    n_s     = 1.0 / (sigma_s * math.sqrt(2.0 * math.pi))
+    shoulder = n_s * np.exp(-0.5 * z_s * z_s)
+    z_o     = (x - mu_o) / sigma_o
+    n_o     = 1.0 / (sigma_o * math.sqrt(2.0 * math.pi))
+    outlier = n_o * np.exp(-0.5 * z_o * z_o)
+    f_core  = max(0.0, 1.0 - abs(f_s) - abs(f_o))
+    return N * (f_core * core + abs(f_s) * shoulder + abs(f_o) * outlier)
+
+
+def fit_asymgauss3g(centers, counts, mu0, sig0):
+    """Asymgauss + 2-Gauss fit. Returns popt=(N,mu,σ_L,σ_R,f_s,µ_s,σ_s,
+    f_o,µ_o,σ_o)."""
+    N0 = float(counts.sum()) * float(centers[1] - centers[0]) if len(centers) > 1 else float(counts.sum())
+    # params: N, mu, sigma_L, sigma_R, f_s, mu_s, sigma_s, f_o, mu_o, sigma_o
+    lo = [0.0,    -np.inf, 1e-9, 1e-9, 0.001, -np.inf, 1e-6, 0.001, -np.inf, 1e-6]
+    hi = [np.inf,  np.inf, np.inf, np.inf, 0.45, np.inf, np.inf, 0.30, np.inf, np.inf]
+    starts = [
+        # symmetric core, modest shoulder, small far-tail outlier
+        [N0, mu0, sig0,        sig0,        0.20, mu0, sig0 * 4,  0.02, mu0, sig0 * 20],
+        [N0, mu0, sig0 * 0.7,  sig0,        0.25, mu0, sig0 * 5,  0.03, mu0, sig0 * 25],
+        [N0, mu0, sig0,        sig0 * 0.7,  0.25, mu0, sig0 * 5,  0.03, mu0, sig0 * 25],
+        [N0, mu0, sig0 * 0.5,  sig0 * 1.2,  0.30, mu0, sig0 * 6,  0.05, mu0, sig0 * 30],
+        [N0, mu0, sig0 * 1.2,  sig0 * 0.5,  0.30, mu0, sig0 * 6,  0.05, mu0, sig0 * 30],
+        [N0, mu0, sig0 * 0.5,  sig0 * 0.5,  0.35, mu0 - sig0, sig0 * 8,  0.05, mu0, sig0 * 40],
+        [N0, mu0, sig0 * 0.5,  sig0 * 0.5,  0.35, mu0 + sig0, sig0 * 8,  0.05, mu0, sig0 * 40],
+    ]
+    return _best_fit(asymgauss3g, centers, counts, starts, lo, hi)
+
+
 def dcb_gaussbox(x, N, mu_c, sigma_c, aL, nL, aR, nR, f_wide, p_max, sigma_box):
     """Narrow DCB core + Gaussian-smeared box wide component.
     Wide: Box(−p_max, p_max) convolved with Gaussian(sigma_box) — flat plateau, fast erf edges.
@@ -313,11 +432,12 @@ def dcb_gaussbox(x, N, mu_c, sigma_c, aL, nL, aR, nR, f_wide, p_max, sigma_box):
 
 # ── Generic multi-start fitter ───────────────────────────────────────────────
 
-def fit_dcb2g_iminuit(centers, counts, mu0, sig0):
+def fit_dcb2g_iminuit(centers, counts, mu0, sig0, f_wide_max=0.95):
     """
     Poisson binned NLL with iminuit for distributions where chi² gets trapped.
     Falls back gracefully if iminuit is not available or converges poorly.
     Returns (popt_list, chi2) in the same convention as _best_fit.
+    `f_wide_max` (default 0.95): see fit_dcb2g.
     """
     from iminuit import Minuit
 
@@ -354,7 +474,7 @@ def fit_dcb2g_iminuit(centers, counts, mu0, sig0):
         [N0, mu0, sig0 * 0.03, 1.5,  7., 1.5,  7., 0.75, mu0, sig0 * 2.5],
     ]
     limits = [(1e-3, None), (None, None), (1e-6, None), (0.3, 8.),
-              (1.01, 200.), (0.3, 8.), (1.01, 200.), (0.01, 0.95),
+              (1.01, 200.), (0.3, 8.), (1.01, 200.), (0.01, float(f_wide_max)),
               (None, None), (1e-4, None)]
     names  = ['N','mu_c','sc','aL','nL','aR','nR','fw','muw','sw']
 
@@ -565,11 +685,15 @@ def fit_dcb(centers, counts, mu0, sig0):
     return _best_fit(dcb, centers, counts, starts, lo, hi)
 
 
-def fit_dcb2g(centers, counts, mu0, sig0):
+def fit_dcb2g(centers, counts, mu0, sig0, f_wide_max=0.95):
+    """`f_wide_max` (default 0.95) caps the wide-Gaussian fraction. For
+    detector-resolution priors where the core should be the bulk, set 0.5
+    via the per-branch BRANCH_CONFIG; loose default is needed for ISR-spike
+    priors where the "core" is genuinely a narrow ~1% spike."""
     N0 = float(counts.max())
     # params: N, mu_c, sigma_c, aL, nL, aR, nR, f_wide, mu_w, sigma_w
     lo = [0, -np.inf, 1e-6, 0.3, 1.01, 0.3, 1.01, 0.01, -np.inf, 1e-4]
-    hi = [np.inf, np.inf, np.inf, 8., 200., 8., 200., 0.95, np.inf, np.inf]
+    hi = [np.inf, np.inf, np.inf, 8., 200., 8., 200., float(f_wide_max), np.inf, np.inf]
     starts = [
         [N0, mu0, sig0,        1.2,  5., 0.8, 3., 0.15, mu0,           5 * sig0],
         [N0, mu0, sig0,        1.5,  8., 0.5, 2., 0.25, mu0 + 2*sig0,  8 * sig0],
@@ -682,7 +806,7 @@ def fit_dcb_expright2g(centers, counts, mu0, sig0):
     # Anchor sigma_c to the narrow right-side width (peak → x_max), not to MAD which is
     # inflated by the heavy ISR left tail.
     x_right_span = max(float(centers[-1]) - mu0, 0.5)
-    s = max(x_right_span * 0.40, 0.15)   # narrow Gaussian core
+    s = max(x_right_span * 0.40, 0.15)
 
     lo = [0, -np.inf, 1e-6, 0.1, 1.01, 0.1, 0.05, 0.0, -np.inf, 1e-4]
     hi = [np.inf, np.inf, np.inf, 5., 50., 10., 100., 0.80, np.inf, np.inf]
@@ -757,12 +881,21 @@ def fit_dcb_expright2g_iminuit(centers, counts, mu0, sig0):
 
 def fit_dcb_expright3g_iminuit(centers, counts, mu0, sig0):
     """Poisson NLL iminuit fit: dcber core + shoulder Gaussian + outlier Gaussian.
-    13 free parameters. Designed for lep_p_resp on FSR-dressed data."""
+    Two seed regimes: fixed-scale (lep_p_resp, σ_c ~0.01, L ~0.5) and
+    sig0/L-scaled (m_loss, σ_c ~MeV, L ~13 GeV)."""
     from iminuit import Minuit
     N0   = float(counts.max())
     errs = np.maximum(np.sqrt(counts), 1.0)
+    x_lo = float(centers[0]); x_hi = float(centers[-1])
+    L    = max(mu0 - x_lo, 1e-3)
+
     x_right_span = max(float(centers[-1]) - mu0, 0.5)
     s = max(x_right_span * 0.40, 0.15)
+
+    sc_n   = max(sig0, 1e-4)
+    sc_t   = max(sig0 * 0.1, 1e-4)
+    ss_n   = max(min(sig0 * 5.0, L * 0.10), 0.02)
+    so_n   = max(L * 0.25, 0.10)
 
     def nll(N, mu_c, sc, aL, nL, aR, kR, f_s, mu_s, sigma_s, f_o, mu_o, sigma_o):
         if (sc <= 0 or nL < 1.0 or aL <= 0 or aR <= 0 or kR <= 0
@@ -777,32 +910,35 @@ def fit_dcb_expright3g_iminuit(centers, counts, mu0, sig0):
         pred = np.maximum(pred, 1e-300)
         return 2.0 * float(np.sum(pred - counts * np.log(pred)))
 
-    # Shoulder seed: ~0.94 with σ ~ 0.025 (3σ_core scale, matches the visible bump).
-    # Outlier seed: ~0.7 with σ ~ 0.15 (deep-radiative tail).
     starts = [
-        # N, mu_c,  sc,    aL,  nL,  aR,  kR,    f_s, mu_s, sigma_s, f_o, mu_o, sigma_o
-        [N0, mu0, s,       0.5, 2.0, 1.5,  5.0, 0.10, mu0 - 0.05, 0.025, 0.03, mu0 - 0.30, 0.15],
-        [N0, mu0, s*0.7,   0.4, 1.5, 1.5,  5.0, 0.05, mu0 - 0.05, 0.030, 0.05, mu0 - 0.25, 0.10],
-        [N0, mu0, s,       0.6, 2.5, 2.0,  8.0, 0.15, mu0 - 0.06, 0.020, 0.03, mu0 - 0.30, 0.20],
-        [N0, mu0, s*0.5,   0.3, 1.2, 1.0,  3.0, 0.12, mu0 - 0.04, 0.025, 0.05, mu0 - 0.25, 0.12],
-        [N0, mu0, s,       0.5, 2.0, 2.5, 10.0, 0.08, mu0 - 0.05, 0.030, 0.04, mu0 - 0.30, 0.18],
-        [N0, mu0, s*1.5,   0.5, 2.0, 1.5,  5.0, 0.20, mu0 - 0.05, 0.025, 0.02, mu0 - 0.20, 0.15],
+        # N, mu_c,  sc,    aL,  nL,  aR,  kR,    f_s, mu_s,         sigma_s, f_o,  mu_o,         sigma_o
+        [N0, mu0, s,       0.5, 2.0, 1.5,  5.0, 0.10, mu0 - 0.05,   0.025,  0.03, mu0 - 0.30,   0.15],
+        [N0, mu0, s*0.7,   0.4, 1.5, 1.5,  5.0, 0.05, mu0 - 0.05,   0.030,  0.05, mu0 - 0.25,   0.10],
+        [N0, mu0, s,       0.6, 2.5, 2.0,  8.0, 0.15, mu0 - 0.06,   0.020,  0.03, mu0 - 0.30,   0.20],
+        [N0, mu0, s*0.5,   0.3, 1.2, 1.0,  3.0, 0.12, mu0 - 0.04,   0.025,  0.05, mu0 - 0.25,   0.12],
+        [N0, mu0, s,       0.5, 2.0, 2.5, 10.0, 0.08, mu0 - 0.05,   0.030,  0.04, mu0 - 0.30,   0.18],
+        [N0, mu0, s*1.5,   0.5, 2.0, 1.5,  5.0, 0.20, mu0 - 0.05,   0.025,  0.02, mu0 - 0.20,   0.15],
+        [N0, mu0, sc_n,    0.5, 2.0, 1.5,  5.0, 0.10, mu0 - L*0.05, ss_n,    0.05, mu0 - L*0.30, so_n],
+        [N0, mu0, sc_t,    0.4, 2.0, 1.5,  5.0, 0.15, mu0 - L*0.05, ss_n,    0.05, mu0 - L*0.30, so_n*0.6],
+        [N0, mu0, sc_t,    0.6, 2.5, 2.0,  8.0, 0.05, mu0 - L*0.03, ss_n*0.5,0.10, mu0 - L*0.40, so_n*1.2],
+        [N0, mu0, sig0 * 3,  0.5, 2.0, 1.5,  5.0, 0.03, mu0 - L*0.10, ss_n*2, 0.05, mu0 - L*0.40, so_n],
+        [N0, mu0, sig0 * 5,  0.6, 2.0, 2.0,  6.0, 0.03, mu0 - L*0.20, ss_n*3, 0.05, mu0 - L*0.50, so_n*1.5],
     ]
-    # mu_c stays near the histogram peak; mu_s and mu_o are bounded to the data range.
-    x_lo = float(centers[0]); x_hi = float(centers[-1])
     limits = [(1e-3, None),
-              (mu0 - 0.05, mu0 + 0.02),     # mu_c
-              (1e-6, x_hi - x_lo),          # sigma_c
+              (mu0 - max(0.05, sig0 * 5),    mu0 + max(0.02, sig0 * 2)),
+              (1e-6, x_hi - x_lo),
               (0.05, 5.), (1.01, 50.), (0.1, 10.), (0.05, 100.),
-              (0.0, 0.50),                  # f_s
-              (x_lo, mu0),                  # mu_s — left of core peak
-              (1e-4, 0.10),                 # sigma_s
-              (0.0, 0.30),                  # f_o
-              (x_lo, mu0 - 0.05),           # mu_o — left of shoulder
-              (1e-3, 0.5)]                  # sigma_o
+              (0.0, 0.50),
+              (x_lo, mu0),
+              (1e-4, max(0.10, L * 0.30)),
+              (0.0, 0.30),
+              (x_lo, mu0 - max(0.05, sig0 * 2)),
+              (1e-3, max(0.5, L))]
     names  = ['N','mu_c','sc','aL','nL','aR','kR',
               'f_s','mu_s','sigma_s','f_o','mu_o','sigma_o']
 
+    # Heavy-tailed dists often have a near-flat direction (small Hessian
+    # eigenvalue ⇒ m.valid=False) but a clean chi² — accept on finite chi².
     best_popt, best_chi2 = None, np.inf
     for p0 in starts:
         try:
@@ -812,16 +948,19 @@ def fit_dcb_expright3g_iminuit(centers, counts, mu0, sig0):
             m.migrad()
             if not m.valid:
                 m.migrad()
-            if m.valid:
-                popt = list(m.values)
-                pred = dcb_expright_3gauss(
-                    centers, abs(popt[0]), popt[1], abs(popt[2]),
-                    abs(popt[3]), abs(popt[4]), abs(popt[5]), abs(popt[6]),
-                    abs(popt[7]), popt[8], abs(popt[9]),
-                    abs(popt[10]), popt[11], abs(popt[12]))
-                chi2 = float(np.sum(((counts - pred) / errs) ** 2))
-                if chi2 < best_chi2:
-                    best_chi2, best_popt = chi2, popt
+            if not np.isfinite(m.fval):
+                continue
+            popt = list(m.values)
+            pred = dcb_expright_3gauss(
+                centers, abs(popt[0]), popt[1], abs(popt[2]),
+                abs(popt[3]), abs(popt[4]), abs(popt[5]), abs(popt[6]),
+                abs(popt[7]), popt[8], abs(popt[9]),
+                abs(popt[10]), popt[11], abs(popt[12]))
+            chi2 = float(np.sum(((counts - pred) / errs) ** 2))
+            if not np.isfinite(chi2):
+                continue
+            if chi2 < best_chi2:
+                best_chi2, best_popt = chi2, popt
         except Exception:
             pass
 
@@ -887,6 +1026,143 @@ def _fit_bin_task(args):
     return bname, ibin, _fit_one(bname, vals_subset, ecm)
 
 
+def _eval_normalised_pdf(p, x):
+    """Return unit-area PDF (∫f dx = 1) at points `x` for the fit-result dict
+    `p` produced by _fit_one. Dispatches by p['model']; multiplies the un-
+    normalised shape by p['norm'] (= 1/integral of yfn/N_f, computed in
+    _fit_one). Used by the binned-plot path to overlay the fitted PDF on the
+    per-bin histogram."""
+    model = p["model"]
+    if model == "gauss":
+        # Already area-normalised; norm should be ≈1 anyway.
+        shape = gauss(x, 1.0, p["mu"], p["sigma"])
+    elif model == "dcb":
+        shape = dcb(x, 1.0, p["mu"], p["sigma"], p["aL"], p["nL"], p["aR"], p["nR"])
+    elif model == "dcb2g":
+        shape = dcb_gauss(x, 1.0, p["mu"], p["sigma"], p["aL"], p["nL"],
+                          p["aR"], p["nR"], p["f_wide"], p["mu_wide"], p["sigma_wide"])
+    elif model == "dcber2g":
+        shape = dcb_expright_gauss(x, 1.0, p["mu"], p["sigma"], p["aL"], p["nL"],
+                                    p["aR"], p["kR"], p["f_wide"], p["mu_wide"], p["sigma_wide"])
+    elif model == "dcber3g":
+        shape = dcb_expright_3gauss(x, 1.0, p["mu"], p["sigma"], p["aL"], p["nL"],
+                                     p["aR"], p["kR"], p["f_s"], p["mu_s"], p["sigma_s"],
+                                     p["f_o"], p["mu_o"], p["sigma_o"])
+    elif model == "expleft2g":
+        shape = dcb_expleft_gauss(x, 1.0, p["mu"], p["sigma"], p["aL"], p["kL"],
+                                   p["aR"], p["nR"], p["f_wide"], p["mu_wide"], p["sigma_wide"])
+    elif model == "dcbgb":
+        shape = dcb_gaussbox(x, 1.0, p["mu"], p["sigma"], p["aL"], p["nL"],
+                              p["aR"], p["nR"], p["f_wide"], p["p_max"], p["sigma_box"])
+    elif model == "asymgauss":
+        shape = asymgauss(x, 1.0, p["mu"], p["sigma_L"], p["sigma_R"])
+    elif model == "asymgauss2g":
+        shape = asymgauss2g(x, 1.0, p["mu"], p["sigma_L"], p["sigma_R"],
+                             p["f_wide"], p["mu_wide"], p["sigma_wide"])
+    elif model == "asymgauss3g":
+        shape = asymgauss3g(x, 1.0, p["mu"], p["sigma_L"], p["sigma_R"],
+                             p["f_s"], p["mu_s"], p["sigma_s"],
+                             p["f_o"], p["mu_o"], p["sigma_o"])
+    elif model == "spike_dcb2g":
+        sc_loc  = p.get("spike_center", 0.0)
+        sr      = abs(p["sig_res"])
+        f_d     = p["f_delta"]
+        delta_pdf = f_d * np.exp(-0.5 * ((x - sc_loc) / sr) ** 2) / (sr * math.sqrt(2.0 * math.pi))
+        body = dcb_gauss(x, 1.0, p["mu"], p["sigma"], p["aL"], p["nL"],
+                         p["aR"], p["nR"], p["f_wide"], p["mu_wide"], p["sigma_wide"])
+        return delta_pdf + (1.0 - f_d) * body * p["norm"]
+    else:
+        raise ValueError(f"_eval_normalised_pdf: unknown model {model!r}")
+    return shape * p["norm"]
+
+
+def _plot_binned(ecm, plot_dir, bname, bins_list, edges_phys, bin_var_label,
+                 vals_per_bin, cfg):
+    """One figure per binned branch, with N_BINS_PRIOR sub-panels — each shows
+    the per-bin histogram with the fitted PDF overlaid (top) and the pull
+    (bottom). Panels are tiled in 2 rows × ⌈N/2⌉ cols; trailing cells are hidden
+    if N is odd. The bin-edge legend in each title locates the bin in physical
+    units of the binning variable."""
+    nbins            = cfg.get("nbins", NBINS_DEF)
+    clip_lo, clip_hi = cfg.get("clip", CLIP_DEF)
+
+    n_rows_panels = 2
+    n_cols_panels = (N_BINS_PRIOR + n_rows_panels - 1) // n_rows_panels
+    # 2 GridSpec rows per panel row: hist+fit on top, pull below.
+    fig, axes = plt.subplots(
+        2 * n_rows_panels, n_cols_panels,
+        figsize=(3.4 * n_cols_panels, 3.8 * n_rows_panels),
+        gridspec_kw={"height_ratios": [3, 1] * n_rows_panels,
+                     "hspace": 0.30, "wspace": 0.25},
+        layout="constrained",
+    )
+    if axes.ndim == 1:
+        axes = axes.reshape(-1, 1)
+    for ibin in range(N_BINS_PRIOR):
+        row_grp = ibin // n_cols_panels
+        col     = ibin % n_cols_panels
+        ax      = axes[2 * row_grp,     col]
+        ax_res  = axes[2 * row_grp + 1, col]
+        p      = bins_list[ibin]
+        vals   = vals_per_bin[ibin] if vals_per_bin else None
+        if p is None or vals is None or len(vals) < 100:
+            ax.set_title(f"bin {ibin}: skip", fontsize=8)
+            ax.set_xticks([]); ax.set_yticks([])
+            ax_res.set_xticks([]); ax_res.set_yticks([])
+            continue
+
+        vals = vals[np.isfinite(vals)]
+        lo_p, hi_p = np.percentile(vals, [clip_lo, clip_hi])
+        vc = vals[(vals >= lo_p) & (vals <= hi_p)]
+        counts, edges_h = np.histogram(vc, bins=nbins)
+        centers = 0.5 * (edges_h[:-1] + edges_h[1:])
+        bw = float(np.diff(edges_h)[0])
+        N_total = float(counts.sum())
+
+        xfine_uniform = np.linspace(edges_h[0], edges_h[-1], 600)
+        _w = max(20.0 * abs(p.get("sigma", abs(p.get("sigma_L", 1.0)))),
+                 5.0 * bw)
+        xfine_peak = np.linspace(max(edges_h[0], p["mu"] - _w),
+                                 min(edges_h[-1], p["mu"] + _w), 1500)
+        xfine = np.unique(np.concatenate([xfine_uniform, xfine_peak]))
+        pdf_norm = _eval_normalised_pdf(p, xfine)
+        yfine = pdf_norm * N_total * bw
+
+        ax.bar(centers, counts, width=bw, color="steelblue", alpha=0.55)
+        ax.plot(xfine, yfine, color="crimson", lw=1.5)
+        ax.set_title(
+            f"bin {ibin}: {edges_phys[ibin]:.2f}-{edges_phys[ibin+1]:.2f}\n"
+            f"N={int(N_total)}  χ²/ndf={p.get('chi2_ndof', 0):.2f}",
+            fontsize=8,
+        )
+        ax.set_ylim(bottom=0)
+        if col == 0:
+            ax.set_ylabel("Entries", fontsize=9)
+
+        pred = _eval_normalised_pdf(p, centers) * N_total * bw
+        with np.errstate(invalid="ignore"):
+            pull = np.where(counts > 0,
+                            (counts - pred) / np.sqrt(np.maximum(counts, 1)),
+                            0)
+        ax_res.bar(centers, pull, width=bw, color="steelblue", alpha=0.6)
+        ax_res.axhline(0, color="crimson", lw=0.5)
+        ax_res.set_ylim(-5, 5)
+        ax_res.set_xlabel(bname, fontsize=8)
+        if col == 0:
+            ax_res.set_ylabel("Pull", fontsize=9)
+
+    for empty in range(N_BINS_PRIOR, n_rows_panels * n_cols_panels):
+        row_grp = empty // n_cols_panels
+        col     = empty % n_cols_panels
+        axes[2 * row_grp,     col].axis("off")
+        axes[2 * row_grp + 1, col].axis("off")
+
+    fig.suptitle(f"{bname}  [ecm{ecm}]   binned by {bin_var_label}", fontsize=10)
+    for fmt in ("png", "pdf"):
+        fig.savefig(f"{plot_dir}/{bname}_binned.{fmt}", dpi=150)
+    plt.close(fig)
+
+
 def _fit_one(bname, vals_in, ecm):
     """Fit a single histogram of `vals_in` for branch `bname` and return a
     params dict with model, parameters, chi2_ndof, fit_ok, norm. No plotting.
@@ -933,12 +1209,15 @@ def _fit_one(bname, vals_in, ecm):
                 popt, pcov, fit_ok, chi2 = popt2, pcov2, fit_ok2, chi2_2
         nparams = 10
     elif model == "dcb2g":
-        popt, pcov, fit_ok, chi2 = fit_dcb2g(centers[mask], counts[mask], mu0, sig0)
+        fwmax = float(cfg.get("f_wide_max", 0.95))
+        popt, pcov, fit_ok, chi2 = fit_dcb2g(centers[mask], counts[mask], mu0, sig0,
+                                             f_wide_max=fwmax)
         _ndof_est = max(int(mask.sum()) - 10, 1)
         # Lower threshold (2.5 vs 5.0) to give iminuit a shot at narrow-core
         # distributions where curve_fit settles in a shallow secondary minimum.
         if popt is None or chi2 / _ndof_est > 2.5:
-            popt2, _, fit_ok2, chi2_2 = fit_dcb2g_iminuit(centers[mask], counts[mask], mu0, sig0)
+            popt2, _, fit_ok2, chi2_2 = fit_dcb2g_iminuit(centers[mask], counts[mask], mu0, sig0,
+                                                          f_wide_max=fwmax)
             if popt2 is not None and chi2_2 < chi2:
                 popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
         nparams = 10
@@ -950,6 +1229,17 @@ def _fit_one(bname, vals_in, ecm):
             popt2, _, fit_ok2, chi2_2 = fit_dcb_expleft2g_iminuit(centers[mask], counts[mask], mu0, sig0, constrain_mu0=constrain_mu0)
             if popt2 is not None and (popt is None or chi2_2 < chi2):
                 popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
+        nparams = 10
+    elif model == "asymgauss":
+        popt, pcov, fit_ok, chi2 = fit_asymgauss(centers[mask], counts[mask], mu0, sig0)
+        nparams = 4
+    elif model == "asymgauss2g":
+        fwmax = float(cfg.get("f_wide_max", 0.5))
+        popt, pcov, fit_ok, chi2 = fit_asymgauss2g(centers[mask], counts[mask], mu0, sig0,
+                                                   f_wide_max=fwmax)
+        nparams = 7
+    elif model == "asymgauss3g":
+        popt, pcov, fit_ok, chi2 = fit_asymgauss3g(centers[mask], counts[mask], mu0, sig0)
         nparams = 10
     else:
         popt, pcov, fit_ok, chi2 = fit_dcb(centers[mask], counts[mask], mu0, sig0)
@@ -1018,6 +1308,36 @@ def _fit_one(bname, vals_in, ecm):
                    f_wide=float(fw), mu_wide=float(muw), sigma_wide=float(sw))
         yfn = lambda x, _N=N_f, _mc=float(mu_c), _sc=float(sc), _aL=float(aL), _kL=float(kL), _aR=float(aR), _nR=float(nR), _fw=float(fw), _mw=float(muw), _sw=float(sw): \
             dcb_expleft_gauss(x, _N, _mc, _sc, _aL, _kL, _aR, _nR, _fw, _mw, _sw)
+    elif model == "asymgauss":
+        N_f, mu_f, sL, sR = popt
+        N_f, sL, sR = abs(N_f), abs(sL), abs(sR)
+        # `sigma` (avg of L,R) is what the kinfit's y-rescaling reads via _y2x;
+        # the asymgauss evaluator itself uses sigma_L and sigma_R per side.
+        res = dict(model="asymgauss", mu=float(mu_f),
+                   sigma=float(0.5 * (sL + sR)),
+                   sigma_L=float(sL), sigma_R=float(sR))
+        yfn = lambda x, _N=N_f, _m=float(mu_f), _sL=float(sL), _sR=float(sR): \
+            asymgauss(x, _N, _m, _sL, _sR)
+    elif model == "asymgauss2g":
+        N_f, mu_f, sL, sR, fw, muw, sw = popt
+        N_f, sL, sR, fw, sw = abs(N_f), abs(sL), abs(sR), abs(fw), abs(sw)
+        res = dict(model="asymgauss2g", mu=float(mu_f),
+                   sigma=float(0.5 * (sL + sR)),
+                   sigma_L=float(sL), sigma_R=float(sR),
+                   f_wide=float(fw), mu_wide=float(muw), sigma_wide=float(sw))
+        yfn = lambda x, _N=N_f, _m=float(mu_f), _sL=float(sL), _sR=float(sR), _fw=float(fw), _mw=float(muw), _sw=float(sw): \
+            asymgauss2g(x, _N, _m, _sL, _sR, _fw, _mw, _sw)
+    elif model == "asymgauss3g":
+        N_f, mu_f, sL, sR, fs, mus, ss, fo, muo, so = popt
+        N_f, sL, sR = abs(N_f), abs(sL), abs(sR)
+        fs, ss, fo, so = abs(fs), abs(ss), abs(fo), abs(so)
+        res = dict(model="asymgauss3g", mu=float(mu_f),
+                   sigma=float(0.5 * (sL + sR)),
+                   sigma_L=float(sL), sigma_R=float(sR),
+                   f_s=float(fs), mu_s=float(mus), sigma_s=float(ss),
+                   f_o=float(fo), mu_o=float(muo), sigma_o=float(so))
+        yfn = lambda x, _N=N_f, _m=float(mu_f), _sL=float(sL), _sR=float(sR), _fs=float(fs), _ms=float(mus), _ss=float(ss), _fo=float(fo), _mo=float(muo), _so=float(so): \
+            asymgauss3g(x, _N, _m, _sL, _sR, _fs, _ms, _ss, _fo, _mo, _so)
     else:
         N_f, mu_f, sf, aL, nL, aR, nR = popt
         N_f, sf, aL, nL, aR, nR = abs(N_f), abs(sf), abs(aL), abs(nL), abs(aR), abs(nR)
@@ -1107,16 +1427,18 @@ def process_ecm(ecm):
         if len(vals) < 100:
             print(f"  [{ecm}]  SKIP {bname}: {len(vals)} entries"); continue
 
-        # spike_dcb2g: split out the no-ISR delta-at-0 events. The dcb2g part
-        # is fitted on the |x|>delta_threshold subset; f_delta is computed from
-        # the full data and stored alongside for the kinfit composite PDF.
-        f_delta = None
-        sig_res = None
+        # spike_dcb2g: split out the narrow-peak spike events. f_delta + sig_res
+        # are fitted on |x| < delta_threshold; the body model is fitted on the
+        # complement. The two pieces compose into the kinfit PDF.
+        f_delta      = None
+        sig_res      = None
+        spike_center = None
         if model == "spike_dcb2g":
             delta_threshold = cfg.get("delta_threshold", 0.001)
             sig_res         = cfg.get("sig_res", 0.001)
-            f_delta = float((np.abs(vals) < delta_threshold).mean())
-            vals = vals[np.abs(vals) >= delta_threshold]
+            spike_center    = float(cfg.get("spike_center", 0.0))
+            f_delta = float((np.abs(vals - spike_center) < delta_threshold).mean())
+            vals = vals[np.abs(vals - spike_center) >= delta_threshold]
             if len(vals) < 100:
                 print(f"  [{ecm}]  SKIP {bname}: {len(vals)} non-delta entries"); continue
 
@@ -1156,13 +1478,15 @@ def process_ecm(ecm):
                     popt, pcov, fit_ok, chi2 = popt2, pcov2, fit_ok2, chi2_2
             nparams = 10
         elif model in ("dcb2g", "spike_dcb2g"):
-            popt, pcov, fit_ok, chi2 = fit_dcb2g(centers[mask], counts[mask], mu0, sig0)
+            fwmax = float(cfg.get("f_wide_max", 0.95))
+            popt, pcov, fit_ok, chi2 = fit_dcb2g(centers[mask], counts[mask], mu0, sig0,
+                                                 f_wide_max=fwmax)
             # Run iminuit fallback once χ²/ndf > 2.5 — narrow-core distributions
             # (lep angular resolutions in extreme p bins) often need it.
             _ndof_est = max(int(mask.sum()) - 10, 1)
             if popt is None or chi2 / _ndof_est > 2.5:
                 popt2, _, fit_ok2, chi2_2 = fit_dcb2g_iminuit(
-                    centers[mask], counts[mask], mu0, sig0)
+                    centers[mask], counts[mask], mu0, sig0, f_wide_max=fwmax)
                 if popt2 is not None and chi2_2 < chi2:
                     popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
             nparams = 10
@@ -1180,6 +1504,17 @@ def process_ecm(ecm):
         elif model == "gauss":
             popt, pcov, fit_ok, chi2 = fit_gauss(centers[mask], counts[mask], mu0, sig0)
             nparams = 3
+        elif model == "asymgauss":
+            popt, pcov, fit_ok, chi2 = fit_asymgauss(centers[mask], counts[mask], mu0, sig0)
+            nparams = 4
+        elif model == "asymgauss2g":
+            fwmax = float(cfg.get("f_wide_max", 0.5))
+            popt, pcov, fit_ok, chi2 = fit_asymgauss2g(centers[mask], counts[mask], mu0, sig0,
+                                                       f_wide_max=fwmax)
+            nparams = 7
+        elif model == "asymgauss3g":
+            popt, pcov, fit_ok, chi2 = fit_asymgauss3g(centers[mask], counts[mask], mu0, sig0)
+            nparams = 10
         else:
             popt, pcov, fit_ok, chi2 = fit_dcb(centers[mask], counts[mask], mu0, sig0)
             nparams = 7
@@ -1191,6 +1526,16 @@ def process_ecm(ecm):
             print(f"  [{ecm}]  FAIL {bname}: all starts failed, using Gaussian-like fallback")
             if model == "gauss":
                 popt = [float(counts.sum()) * float(centers[1] - centers[0]), mu0, sig0]
+            elif model == "asymgauss":
+                popt = [float(counts.sum()) * float(centers[1] - centers[0]), mu0, sig0, sig0]
+            elif model == "asymgauss2g":
+                popt = [float(counts.sum()) * float(centers[1] - centers[0]),
+                        mu0, sig0, sig0, 0.05, mu0, sig0 * 5]
+            elif model == "asymgauss3g":
+                popt = [float(counts.sum()) * float(centers[1] - centers[0]),
+                        mu0, sig0, sig0,
+                        0.20, mu0, sig0 * 5,
+                        0.03, mu0, sig0 * 25]
             else:
                 popt = [float(counts.max()), mu0, sig0, 5., 100., 5., 100.]
                 if model == "dcber2g":
@@ -1369,6 +1714,66 @@ def process_ecm(ecm):
                 return gauss(x, _N, _m, _s)
             lbl = (rf"Gauss: $\mu$={mu_g*1000:+.2f} MeV, $\sigma$={sg*1000:.2f} MeV"
                    rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
+        elif model == "asymgauss":
+            N_f, mu_g, sL, sR = popt
+            N_f  = abs(float(N_f)); mu_g = float(mu_g)
+            sL   = abs(float(sL));  sR   = abs(float(sR))
+            sc   = 0.5 * (sL + sR)  # avg σ for kinfit y-rescaling via _y2x
+            mu_c = mu_g
+            results[bname] = dict(
+                model="asymgauss",
+                mu=mu_g, sigma=sc, sigma_L=sL, sigma_R=sR,
+                chi2_ndof=round(float(chi2_ndof), 3), fit_ok=bool(fit_ok),
+            )
+            def yfn(x, _N=N_f, _m=mu_g, _sL=sL, _sR=sR):
+                return asymgauss(x, _N, _m, _sL, _sR)
+            lbl = (rf"AsymGauss: $\mu$={mu_g:+.3g}, "
+                   rf"$\sigma_L$={sL:.3g}, $\sigma_R$={sR:.3g}"
+                   rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
+        elif model == "asymgauss2g":
+            N_f, mu_g, sL, sR, fw, muw, sw = popt
+            N_f  = abs(float(N_f)); mu_g = float(mu_g)
+            sL   = abs(float(sL));  sR   = abs(float(sR))
+            fw   = abs(float(fw));  muw  = float(muw); sw = abs(float(sw))
+            sc   = 0.5 * (sL + sR)
+            mu_c = mu_g
+            results[bname] = dict(
+                model="asymgauss2g",
+                mu=mu_g, sigma=sc, sigma_L=sL, sigma_R=sR,
+                f_wide=fw, mu_wide=muw, sigma_wide=sw,
+                chi2_ndof=round(float(chi2_ndof), 3), fit_ok=bool(fit_ok),
+            )
+            def yfn(x, _N=N_f, _m=mu_g, _sL=sL, _sR=sR, _fw=fw, _mw=muw, _sw=sw):
+                return asymgauss2g(x, _N, _m, _sL, _sR, _fw, _mw, _sw)
+            lbl = (rf"AsymGauss+G: $\mu$={mu_g:+.3g}, "
+                   rf"$\sigma_L$={sL:.3g}, $\sigma_R$={sR:.3g}"
+                   "\n"
+                   rf"$f_w$={fw:.3f}, $\mu_w$={muw:.3g}, $\sigma_w$={sw:.3g}"
+                   rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
+        elif model == "asymgauss3g":
+            N_f, mu_g, sL, sR, fs, mus, ss, fo, muo, so = popt
+            N_f = abs(float(N_f)); mu_g = float(mu_g)
+            sL  = abs(float(sL));  sR   = abs(float(sR))
+            fs  = abs(float(fs));  ss   = abs(float(ss))
+            fo  = abs(float(fo));  so   = abs(float(so))
+            mus = float(mus);      muo  = float(muo)
+            sc  = 0.5 * (sL + sR)
+            mu_c = mu_g
+            results[bname] = dict(
+                model="asymgauss3g",
+                mu=mu_g, sigma=sc, sigma_L=sL, sigma_R=sR,
+                f_s=fs, mu_s=mus, sigma_s=ss,
+                f_o=fo, mu_o=muo, sigma_o=so,
+                chi2_ndof=round(float(chi2_ndof), 3), fit_ok=bool(fit_ok),
+            )
+            def yfn(x, _N=N_f, _m=mu_g, _sL=sL, _sR=sR, _fs=fs, _ms=mus, _ss=ss, _fo=fo, _mo=muo, _so=so):
+                return asymgauss3g(x, _N, _m, _sL, _sR, _fs, _ms, _ss, _fo, _mo, _so)
+            lbl = (rf"AsymGauss+2G: $\mu$={mu_g:+.3g}, "
+                   rf"$\sigma_L$={sL:.3g}, $\sigma_R$={sR:.3g}"
+                   "\n"
+                   rf"$f_s$={fs:.3f}, $\sigma_s$={ss:.3g}, "
+                   rf"$f_o$={fo:.3f}, $\sigma_o$={so:.3g}"
+                   rf"   $\chi^2$/ndf={chi2_ndof:.2f}")
         else:
             N_f, mu_f, sf, aL, nL, aR, nR = popt
             mu_f = float(mu_f); sf  = abs(float(sf))
@@ -1531,6 +1936,7 @@ def process_ecm(ecm):
     bin_specs = {}    # bname -> (list(bcfg), edges_list)
     bin_tasks = []    # list of (bname, ibin, vals_subset, ecm)
     bin_n     = {}    # (bname, ibin) -> N events
+    bin_vals  = {}    # bname -> list of N_BINS_PRIOR np.ndarrays (kept for binned-plot pass)
     for bname, bcfg in BIN_CONFIG.items():
         if bname not in branches:
             continue
@@ -1546,10 +1952,13 @@ def process_ecm(ecm):
         edges_q[0]  -= 1e-9
         edges_q[-1] += 1e-9
         bin_specs[bname] = (list(bcfg), edges_q.tolist())
+        bin_vals[bname]  = [None] * N_BINS_PRIOR
         for ibin in range(N_BINS_PRIOR):
             m = (v >= edges_q[ibin]) & (v < edges_q[ibin+1])
-            bin_tasks.append((bname, ibin, yvals[m], ecm))
+            sub = yvals[m]
+            bin_tasks.append((bname, ibin, sub, ecm))
             bin_n[(bname, ibin)] = int(m.sum())
+            bin_vals[bname][ibin] = sub
 
     # Inner pool: 8 workers per ECM × 3 ECMs ≈ 24 cores busy on ironic (64 avail).
     # Tasks are independent; worker count is bounded so we don't oversubscribe.
@@ -1578,6 +1987,12 @@ def process_ecm(ecm):
             "edges":   edges,
             "bins":    bins_list,
         }
+        # Per-branch binned plot: 5 sub-panels, one per quantile bin, with the
+        # data histogram, fitted PDF, and pull. Mirrors the inclusive plot's
+        # data+fit+pull layout for visual smoothness checks across the binning.
+        cfg = BRANCH_CONFIG.get(bname, {})
+        _plot_binned(ecm, plot_dir, bname, bins_list, edges,
+                     "+".join(bin_var), bin_vals.get(bname), cfg)
 
     # ── BES correlation diagnostic: ρ(m_ee−ECM, pz_ee) ───────────────────────
     if "gen_ee_m_minus_ecm" in data_all and "gen_ee_pz" in data_all:
@@ -1608,6 +2023,9 @@ def _cpp_struct_for_model(model):
     if model == "dcber2g":   return ("DcbExpRightGaussParams", "DCBERG")
     if model == "dcber3g":   return ("DcbExpRight3GaussParams","DCBER3G")
     if model == "gauss":     return ("GaussParams",            "GAUSS")
+    if model == "asymgauss": return ("AsymGaussParams",        "AG")
+    if model == "asymgauss2g": return ("AsymGauss2GParams",    "AG2G")
+    if model == "asymgauss3g": return ("AsymGauss3GParams",    "AG3G")
     if model == "spike_dcb2g": return ("SpikeDcbGaussParams",  "SDCBG")
     return ("DcbParams", "DCB")
 
@@ -1640,6 +2058,18 @@ def _cpp_struct_initializer(p):
                 f"{p['norm']:.10e}")
     if p["model"] == "gauss":
         return f"{p['mu']:+.6f}, {p['sigma']:.6f}"
+    if p["model"] == "asymgauss":
+        return (f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
+                f"{p['sigma_L']:.6f}, {p['sigma_R']:.6f}")
+    if p["model"] == "asymgauss2g":
+        return (f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
+                f"{p['sigma_L']:.6f}, {p['sigma_R']:.6f}, "
+                f"{p['f_wide']:.6f}, {p['mu_wide']:+.6f}, {p['sigma_wide']:.6f}")
+    if p["model"] == "asymgauss3g":
+        return (f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
+                f"{p['sigma_L']:.6f}, {p['sigma_R']:.6f}, "
+                f"{p['f_s']:.6f}, {p['mu_s']:+.6f}, {p['sigma_s']:.6f}, "
+                f"{p['f_o']:.6f}, {p['mu_o']:+.6f}, {p['sigma_o']:.6f}")
     if p["model"] == "spike_dcb2g":
         return (f"{p['f_delta']:.6f}, {p['sig_res']:.6f}, "
                 f"{p['mu']:+.6f}, {p['sigma']:.6f}, "
@@ -1745,6 +2175,24 @@ def write_combined_header(all_results):
         "    double mu, sigma;                      // single Gaussian (analytically normalised)",
         "};",
         "",
+        "struct AsymGaussParams {",
+        "    double mu, sigma;                      // sigma = (sigma_L+sigma_R)/2, used by _y2x for y-rescaling",
+        "    double sigma_L, sigma_R;               // separate widths each side of mu (C¹ continuous at mu)",
+        "};",
+        "",
+        "struct AsymGauss2GParams {",
+        "    double mu, sigma;                      // sigma = (sigma_L+sigma_R)/2, used by _y2x",
+        "    double sigma_L, sigma_R;               // asymmetric core widths each side of mu",
+        "    double f_wide, mu_wide, sigma_wide;    // wide Gaussian component (heavy tails)",
+        "};",
+        "",
+        "struct AsymGauss3GParams {",
+        "    double mu, sigma;                      // sigma = (sigma_L+sigma_R)/2, used by _y2x",
+        "    double sigma_L, sigma_R;               // asymmetric core widths each side of mu",
+        "    double f_s, mu_s, sigma_s;             // shoulder Gaussian (intermediate-width)",
+        "    double f_o, mu_o, sigma_o;             // outlier Gaussian (very-wide tail)",
+        "};",
+        "",
         "struct SpikeDcbGaussParams {",
         "    double f_delta, sigma_res;             // delta-spike (smoothed Gaussian at 0)",
         "    double mu, sigma, aL, nL, aR, nR;     // smooth narrow DCB core",
@@ -1805,6 +2253,50 @@ def write_combined_header(all_results):
         "inline double gauss_neg2logpdf(double x, const GaussParams& p) {",
         "    double t = (x - p.mu) / p.sigma;",
         "    return t*t + 2.0 * std::log(p.sigma) + std::log(2.0 * M_PI);",
+        "}",
+        "",
+        "inline double asymgauss_neg2logpdf(double x, const AsymGaussParams& p) {",
+        "    // Asymmetric (split) Gaussian: σ_L for x<µ, σ_R for x>=µ. C¹-continuous at µ.",
+        "    // Normalised PDF: f(x) = sqrt(2/π) / (σ_L + σ_R) · exp(-z²/2)",
+        "    //   z = (x - µ) / σ(x),  σ(x) = σ_L if x<µ else σ_R",
+        "    double dx = x - p.mu;",
+        "    double s  = (dx < 0.0) ? p.sigma_L : p.sigma_R;",
+        "    double z  = dx / s;",
+        "    return z*z + 2.0 * std::log(p.sigma_L + p.sigma_R) + std::log(M_PI / 2.0);",
+        "}",
+        "",
+        "inline double asymgauss2g_neg2logpdf(double x, const AsymGauss2GParams& p) {",
+        "    // Asymmetric Gaussian core + wide Gaussian. Both individually normalised,",
+        "    // so the convex sum (1−f_wide)·core + f_wide·wide is also normalised.",
+        "    double dx = x - p.mu;",
+        "    double s_core  = (dx < 0.0) ? p.sigma_L : p.sigma_R;",
+        "    double z_core  = dx / s_core;",
+        "    double n_core  = std::sqrt(2.0 / M_PI) / (p.sigma_L + p.sigma_R);",
+        "    double core    = n_core * std::exp(-0.5 * z_core * z_core);",
+        "    double z_wide  = (x - p.mu_wide) / p.sigma_wide;",
+        "    double n_wide  = 1.0 / (p.sigma_wide * std::sqrt(2.0 * M_PI));",
+        "    double wide    = n_wide * std::exp(-0.5 * z_wide * z_wide);",
+        "    double f       = (1.0 - p.f_wide) * core + p.f_wide * wide;",
+        "    return -2.0 * std::log(std::max(f, 1e-300));",
+        "}",
+        "",
+        "inline double asymgauss3g_neg2logpdf(double x, const AsymGauss3GParams& p) {",
+        "    // Asymmetric core + shoulder Gauss + outlier (very wide) Gauss. All",
+        "    // individually normalised → convex sum is normalised.",
+        "    double dx = x - p.mu;",
+        "    double s_core  = (dx < 0.0) ? p.sigma_L : p.sigma_R;",
+        "    double z_core  = dx / s_core;",
+        "    double n_core  = std::sqrt(2.0 / M_PI) / (p.sigma_L + p.sigma_R);",
+        "    double core    = n_core * std::exp(-0.5 * z_core * z_core);",
+        "    double z_s     = (x - p.mu_s) / p.sigma_s;",
+        "    double n_s     = 1.0 / (p.sigma_s * std::sqrt(2.0 * M_PI));",
+        "    double shldr   = n_s * std::exp(-0.5 * z_s * z_s);",
+        "    double z_o     = (x - p.mu_o) / p.sigma_o;",
+        "    double n_o     = 1.0 / (p.sigma_o * std::sqrt(2.0 * M_PI));",
+        "    double outl    = n_o * std::exp(-0.5 * z_o * z_o);",
+        "    double f_core  = std::max(0.0, 1.0 - p.f_s - p.f_o);",
+        "    double f       = f_core * core + p.f_s * shldr + p.f_o * outl;",
+        "    return -2.0 * std::log(std::max(f, 1e-300));",
         "}",
         "",
         "inline double spike_dcb_gauss_neg2logpdf(double x, const SpikeDcbGaussParams& p) {",

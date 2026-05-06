@@ -42,7 +42,7 @@ struct KinFitParamSet {
     std::array<double,                KF_NBINS + 1> jet2_p_resp_edges;
     std::array<DcbExpRight3GaussParams, KF_NBINS> lep_p_resp_bins;      // dcber3g (FSR-dressed)
     std::array<double,                  KF_NBINS + 1> lep_p_resp_edges;
-    DcbParams                                    met_p_resp;
+    AsymGauss3GParams                            met_p_resp;
     std::array<DcbGaussParams,        KF_NBINS> jet1_phi_resol_bins;    // dcb2g
     std::array<double,                KF_NBINS + 1> jet1_phi_resol_edges;
     std::array<DcbGaussParams,        KF_NBINS> jet1_theta_resol_bins;  // dcb2g
@@ -55,8 +55,8 @@ struct KinFitParamSet {
     std::array<double,                KF_NBINS + 1> lep_phi_resol_edges;
     std::array<DcbGaussParams,        KF_NBINS> lep_theta_resol_bins;   // dcb2g
     std::array<double,                KF_NBINS + 1> lep_theta_resol_edges;
-    DcbParams                                    met_phi_resol;
-    DcbParams                                    met_theta_resol;
+    AsymGauss3GParams                            met_phi_resol;
+    AsymGauss3GParams                            met_theta_resol;
     // BES nuisances (Gaussian) — sum and asymmetry of beam-energy fluctuations.
     GaussParams                                  ee_m_minus_ecm;
     GaussParams                                  ee_pz;
@@ -67,7 +67,10 @@ struct KinFitParamSet {
     SpikeDcbGaussParams                          isr_py;
     SpikeDcbGaussParams                          isr_pz;
     // m(WW) − m(ee) — pure ISR mass-loss with hard right boundary at 0.
-    DcbExpRightGaussParams                       ww_m_minus_m_ee;
+    // dcber3g: DCB power-law-left + Gaussian core + exponential right cutoff +
+    // shoulder Gauss + outlier Gauss (mirror of lep_p_resp). Three smooth
+    // components handle the multi-scale tail without role-swap pathologies.
+    DcbExpRight3GaussParams                      ww_m_minus_m_ee;
     // Inclusive (kinematics-averaged) variants — used when kf_use_binned_priors=false.
     DcbGaussParams                               jet1_p_resp_incl;
     DcbGaussParams                               jet2_p_resp_incl;
@@ -93,17 +96,17 @@ struct KinFitParamSet {
     DCBG_JET_P_RESP_BINS_##E,        DCBG_JET_P_RESP_EDGES_##E, \
     DCBG_JET_P_RESP_BINS_##E,        DCBG_JET_P_RESP_EDGES_##E, \
     DCBER3G_LEP_P_RESP_BINS_##E,      DCBER3G_LEP_P_RESP_EDGES_##E, \
-    DCB_MET_P_RESP_##E, \
+    AG3G_MET_P_RESP_##E, \
     DCBG_JET_PHI_RESOL_BINS_##E,     DCBG_JET_PHI_RESOL_EDGES_##E, \
     DCBG_JET_THETA_RESOL_BINS_##E,   DCBG_JET_THETA_RESOL_EDGES_##E, \
     DCBG_JET_PHI_RESOL_BINS_##E,     DCBG_JET_PHI_RESOL_EDGES_##E, \
     DCBG_JET_THETA_RESOL_BINS_##E,   DCBG_JET_THETA_RESOL_EDGES_##E, \
     DCBG_LEP_PHI_RESOL_BINS_##E,     DCBG_LEP_PHI_RESOL_EDGES_##E, \
     DCBG_LEP_THETA_RESOL_BINS_##E,   DCBG_LEP_THETA_RESOL_EDGES_##E, \
-    DCB_MET_PHI_RESOL_##E,           DCB_MET_THETA_RESOL_##E, \
+    AG3G_MET_PHI_RESOL_##E,          AG3G_MET_THETA_RESOL_##E, \
     GAUSS_GEN_EE_M_MINUS_ECM_##E, GAUSS_GEN_EE_PZ_##E, \
     SDCBG_GEN_ISR_PX_##E, SDCBG_GEN_ISR_PY_##E, SDCBG_GEN_ISR_PZ_##E, \
-    DCBERG_GEN_WW_M_MINUS_M_EE_##E, \
+    DCBER3G_GEN_WW_M_MINUS_M_EE_##E, \
     /* inclusive — POOL: jet1 and jet2 share the pooled scalar */ \
     DCBG_JET_P_RESP_##E, DCBG_JET_P_RESP_##E, DCBER3G_LEP_P_RESP_##E, \
     DCBG_JET_PHI_RESOL_##E, DCBG_JET_THETA_RESOL_##E, \
@@ -114,17 +117,17 @@ struct KinFitParamSet {
     DCBG_JET1_P_RESP_BINS_##E,       DCBG_JET1_P_RESP_EDGES_##E, \
     DCBG_JET2_P_RESP_BINS_##E,       DCBG_JET2_P_RESP_EDGES_##E, \
     DCBER3G_LEP_P_RESP_BINS_##E,      DCBER3G_LEP_P_RESP_EDGES_##E, \
-    DCB_MET_P_RESP_##E, \
+    AG3G_MET_P_RESP_##E, \
     DCBG_JET1_PHI_RESOL_BINS_##E,    DCBG_JET1_PHI_RESOL_EDGES_##E, \
     DCBG_JET1_THETA_RESOL_BINS_##E,  DCBG_JET1_THETA_RESOL_EDGES_##E, \
     DCBG_JET2_PHI_RESOL_BINS_##E,    DCBG_JET2_PHI_RESOL_EDGES_##E, \
     DCBG_JET2_THETA_RESOL_BINS_##E,  DCBG_JET2_THETA_RESOL_EDGES_##E, \
     DCBG_LEP_PHI_RESOL_BINS_##E,     DCBG_LEP_PHI_RESOL_EDGES_##E, \
     DCBG_LEP_THETA_RESOL_BINS_##E,   DCBG_LEP_THETA_RESOL_EDGES_##E, \
-    DCB_MET_PHI_RESOL_##E,           DCB_MET_THETA_RESOL_##E, \
+    AG3G_MET_PHI_RESOL_##E,          AG3G_MET_THETA_RESOL_##E, \
     GAUSS_GEN_EE_M_MINUS_ECM_##E, GAUSS_GEN_EE_PZ_##E, \
     SDCBG_GEN_ISR_PX_##E, SDCBG_GEN_ISR_PY_##E, SDCBG_GEN_ISR_PZ_##E, \
-    DCBERG_GEN_WW_M_MINUS_M_EE_##E, \
+    DCBER3G_GEN_WW_M_MINUS_M_EE_##E, \
     /* inclusive — SEP: per-jet scalar */ \
     DCBG_JET1_P_RESP_##E, DCBG_JET2_P_RESP_##E, DCBER3G_LEP_P_RESP_##E, \
     DCBG_JET1_PHI_RESOL_##E, DCBG_JET1_THETA_RESOL_##E, \
@@ -147,7 +150,7 @@ inline std::array<DcbGaussParams,        KF_NBINS> kf_jet2_p_resp_bins      = DC
 inline std::array<double,                KF_NBINS + 1> kf_jet2_p_resp_edges      = DCBG_JET2_P_RESP_EDGES_160;
 inline std::array<DcbExpRight3GaussParams, KF_NBINS> kf_lep_p_resp_bins       = DCBER3G_LEP_P_RESP_BINS_160;
 inline std::array<double,                  KF_NBINS + 1> kf_lep_p_resp_edges       = DCBER3G_LEP_P_RESP_EDGES_160;
-inline DcbParams                                    kf_met_p_resp            = DCB_MET_P_RESP_160;
+inline AsymGauss3GParams                            kf_met_p_resp            = AG3G_MET_P_RESP_160;
 inline std::array<DcbGaussParams,        KF_NBINS> kf_jet1_phi_resol_bins   = DCBG_JET1_PHI_RESOL_BINS_160;
 inline std::array<double,                KF_NBINS + 1> kf_jet1_phi_resol_edges   = DCBG_JET1_PHI_RESOL_EDGES_160;
 inline std::array<DcbGaussParams,        KF_NBINS> kf_jet1_theta_resol_bins = DCBG_JET1_THETA_RESOL_BINS_160;
@@ -160,14 +163,14 @@ inline std::array<DcbGaussParams,        KF_NBINS> kf_lep_phi_resol_bins    = DC
 inline std::array<double,                KF_NBINS + 1> kf_lep_phi_resol_edges    = DCBG_LEP_PHI_RESOL_EDGES_160;
 inline std::array<DcbGaussParams,        KF_NBINS> kf_lep_theta_resol_bins  = DCBG_LEP_THETA_RESOL_BINS_160;
 inline std::array<double,                KF_NBINS + 1> kf_lep_theta_resol_edges  = DCBG_LEP_THETA_RESOL_EDGES_160;
-inline DcbParams                                    kf_met_phi_resol         = DCB_MET_PHI_RESOL_160;
-inline DcbParams                                    kf_met_theta_resol       = DCB_MET_THETA_RESOL_160;
+inline AsymGauss3GParams                            kf_met_phi_resol         = AG3G_MET_PHI_RESOL_160;
+inline AsymGauss3GParams                            kf_met_theta_resol       = AG3G_MET_THETA_RESOL_160;
 inline GaussParams                                  kf_ee_m_minus_ecm        = GAUSS_GEN_EE_M_MINUS_ECM_160;
 inline GaussParams                                  kf_ee_pz                 = GAUSS_GEN_EE_PZ_160;
 inline SpikeDcbGaussParams                          kf_isr_px                = SDCBG_GEN_ISR_PX_160;
 inline SpikeDcbGaussParams                          kf_isr_py                = SDCBG_GEN_ISR_PY_160;
 inline SpikeDcbGaussParams                          kf_isr_pz                = SDCBG_GEN_ISR_PZ_160;
-inline DcbExpRightGaussParams                       kf_ww_m_minus_m_ee       = DCBERG_GEN_WW_M_MINUS_M_EE_160;
+inline DcbExpRight3GaussParams                      kf_ww_m_minus_m_ee       = DCBER3G_GEN_WW_M_MINUS_M_EE_160;
 
 // Inclusive (kinematics-averaged) scalars — used when kf_use_binned_priors=false.
 // Same data as the bin arrays would collapse to with one bin spanning all events.
@@ -284,12 +287,6 @@ static constexpr int    KF_MIGRAD_STRATEGY    = 2;
 // without spending too many extra evaluations on parameters whose posterior
 // matches the prior.
 static constexpr double KF_INIT_STEP = 0.01;
-
-// Quadratic-barrier scale above the m(WW) ≤ m_ee_fit boundary. Returns finite,
-// smooth penalty when Migrad probes the unphysical region (m_WW > m_ee_fit).
-// Tighter than σ(m_WW − m_ee) (~few GeV) so it's a genuine restoring force,
-// looser than the BES width (~119 MeV) so it doesn't spike the Hessian.
-static constexpr double KF_M_LOSS_BARRIER_SIGMA = 0.010;
 
 // Loose-valid EDM cap. Migrad tolerance is 1e-3 (set in configure); any status=3
 // event with finite EDM under 10× that lands a fit point essentially indistinguishable
@@ -699,31 +696,27 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                         + spike_dcb_gauss_neg2logpdf(isr_py_val, kf_isr_py)
                         + spike_dcb_gauss_neg2logpdf(isr_pz_val, kf_isr_pz);
 
-        // m(WW) − m_ee_fit, with hard right boundary at 0 (m_WW ≤ m_ee always)
-        // enforced by a quadratic barrier above the boundary.
+        // m(WW) − m_ee_fit. The physical boundary m_WW ≤ m_ee at gen is
+        // enforced by dcber3g itself: the right-exp tail of the core decays
+        // super-fast past 0, while the shoulder + outlier Gaussians provide
+        // a smooth finite floor — so neg2logpdf stays bounded for m_loss > 0
+        // without an external barrier. C¹ smooth across the boundary.
         double m_ee_fit = ECM + bes_m;
         double m_loss   = WW.M() - m_ee_fit;
-        double m_loss_term;
-        if (m_loss <= 0.0) {
-            m_loss_term = dcb_expright_gauss_neg2logpdf(m_loss, kf_ww_m_minus_m_ee);
-        } else {
-            const double bnd = dcb_expright_gauss_neg2logpdf(0.0, kf_ww_m_minus_m_ee);
-            const double t   = m_loss / KF_M_LOSS_BARRIER_SIGMA;
-            m_loss_term = bnd + t*t;
-        }
+        double m_loss_term = dcb_expright_3gauss_neg2logpdf(m_loss, kf_ww_m_minus_m_ee);
 
         double scale_pen = dcb_gauss_neg2logpdf(s1, p_jet1_p_resp)
                          + dcb_gauss_neg2logpdf(s2, p_jet2_p_resp)
                          + dcb_expright_3gauss_neg2logpdf(sl, kf_lep_p_resp)
-                         + dcb_neg2logpdf(sn, kf_met_p_resp);
+                         + asymgauss3g_neg2logpdf(sn, kf_met_p_resp);
 
         double angular = dcb_gauss_neg2logpdf(t1, p_jet1_theta_resol)
                        + dcb_gauss_neg2logpdf(t2, p_jet2_theta_resol)
-                       + dcb_neg2logpdf(tn, kf_met_theta_resol)
+                       + asymgauss3g_neg2logpdf(tn, kf_met_theta_resol)
                        + dcb_gauss_neg2logpdf(tl, kf_lep_theta_resol)
                        + dcb_gauss_neg2logpdf(p1, p_jet1_phi_resol)
                        + dcb_gauss_neg2logpdf(p2, p_jet2_phi_resol)
-                       + dcb_neg2logpdf(pn, kf_met_phi_resol)
+                       + asymgauss3g_neg2logpdf(pn, kf_met_phi_resol)
                        + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
 
         // gW prior collapses to y_gW² + log_norm under the y-rescaling.
