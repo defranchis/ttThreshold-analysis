@@ -15,12 +15,16 @@ Outputs (per ECM)
   kinfit_inputs/dcb_results_ecm<N>.json              numerical fit results (for diagnostics)
 """
 
-import os, json, math, warnings
+import os, sys, json, math, warnings
 # Pin BLAS thread pools to 1 BEFORE numpy is imported. The binned-prior pass
 # spawns a 24-process inner×outer pool; without this each worker would also
 # spawn (#cores) BLAS threads → severe oversubscription.
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_v, "1")
+# CLI args (= branch names to fit) routed through WW_FIT_ONLY so worker
+# subprocesses inherit them.
+if len(sys.argv) > 1:
+    os.environ["WW_FIT_ONLY"] = ",".join(sys.argv[1:])
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import uproot
@@ -131,10 +135,15 @@ BRANCH_CONFIG = {
                              "zoom_xlim": (-3.0, 3.0)},
     # Gen WW invariant mass minus ECM. Peak just below 0 (ISR), hard boundary at 0.
     "gen_WW_m_minus_ecm": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber2g"},
-    # m(WW) − m(ee) — pure ISR mass-loss, BES variance subtracted off. Three
-    # physical scales (narrow FSR cone-cut peak, ISR slope, hard-ISR tail) →
-    # dcber3g (mirror of lep_p_resp).
-    "gen_WW_m_minus_m_ee": {"clip": (0.5, 100.0), "nbins": 150, "model": "dcber3g"},
+    # m(WW)−m(ee): bounded ≤0 by physics. Fit symmetrized data with
+    # spike_dcb2g; kinfit adds a barrier on x>0 (see WWKinReco.h).
+    "gen_WW_m_minus_m_ee": {"clip": (0.5, 99.5), "nbins": 200, "model": "spike_dcb2g",
+                             "symmetrize": True,
+                             "delta_threshold": 0.001, "sig_res": 0.001,
+                             "mu_fix": 0.0,
+                             "f_wide_max": 0.45,
+                             "zoom_xlim": (-0.5, 0.5),
+                             "log_y": True},
     # m(e+e-) − ECM at depth=1 in the e± chain (post-BES, pre-ISR). Symmetric
     # Gaussian smearing of the beam energies — single Gauss is sufficient.
     "gen_ee_m_minus_ecm":  {"clip": (0.1, 99.9),  "nbins": 100, "model": "gauss"},
@@ -145,11 +154,15 @@ BRANCH_CONFIG = {
     # the fraction with |x|<delta_threshold (no-ISR), σ_res smooths the delta
     # for kinfit numerical stability, and dcb2g is fitted on the |x|>threshold
     # subset.
+    # mu_fix=0: ISR p{x,y,z} are symmetric around 0 by construction; pin the
+    # body μ_c so the unconstrained fit can't drift to ±10 MeV.
     "gen_isr_px":         {"clip": (0.5, 99.5),  "nbins": 200,  "model": "spike_dcb2g",
                              "delta_threshold": 0.001, "sig_res": 0.001,
+                             "mu_fix": 0.0,
                              "zoom_xlim": (-2.0, 2.0)},
     "gen_isr_py":         {"clip": (0.5, 99.5),  "nbins": 200,  "model": "spike_dcb2g",
                              "delta_threshold": 0.001, "sig_res": 0.001,
+                             "mu_fix": 0.0,
                              "zoom_xlim": (-2.0, 2.0)},
     # f_wide_max=0.45: at ecm160 the unconstrained fit lands at f_wide=0.82
     # with σ_wide(47 MeV) < σ_core(61 MeV) — wide-Gauss/dcb-core roles swap,
@@ -160,6 +173,7 @@ BRANCH_CONFIG = {
     "gen_isr_pz":         {"clip": (0.5, 99.5),  "nbins": 200,  "model": "spike_dcb2g",
                              "f_wide_max": 0.45,
                              "delta_threshold": 0.001, "sig_res": 0.001,
+                             "mu_fix": 0.0,
                              "zoom_xlim": (-10.0, 10.0)},
 }
 
@@ -432,13 +446,10 @@ def dcb_gaussbox(x, N, mu_c, sigma_c, aL, nL, aR, nR, f_wide, p_max, sigma_box):
 
 # ── Generic multi-start fitter ───────────────────────────────────────────────
 
-def fit_dcb2g_iminuit(centers, counts, mu0, sig0, f_wide_max=0.95):
-    """
-    Poisson binned NLL with iminuit for distributions where chi² gets trapped.
-    Falls back gracefully if iminuit is not available or converges poorly.
-    Returns (popt_list, chi2) in the same convention as _best_fit.
-    `f_wide_max` (default 0.95): see fit_dcb2g.
-    """
+def fit_dcb2g_iminuit(centers, counts, mu0, sig0, f_wide_max=0.95, mu_fix=None):
+    """Poisson binned NLL with iminuit for distributions where chi² gets trapped.
+    `f_wide_max`: cap on the wide-Gauss fraction (see fit_dcb2g).
+    `mu_fix`: if set, freezes μ_c (use for physics-symmetric distributions)."""
     from iminuit import Minuit
 
     N0   = float(counts.max())
@@ -480,10 +491,14 @@ def fit_dcb2g_iminuit(centers, counts, mu0, sig0, f_wide_max=0.95):
 
     best_popt, best_chi2 = None, np.inf
     for p0 in starts:
+        if mu_fix is not None:
+            p0 = list(p0); p0[1] = float(mu_fix)
         try:
             m = Minuit(nll, *p0, name=names)
             for i, (lo_i, hi_i) in enumerate(limits):
                 m.limits[i] = (lo_i, hi_i)
+            if mu_fix is not None:
+                m.fixed["mu_c"] = True
             m.migrad()
             if not m.valid:
                 m.migrad()   # second pass
@@ -685,15 +700,19 @@ def fit_dcb(centers, counts, mu0, sig0):
     return _best_fit(dcb, centers, counts, starts, lo, hi)
 
 
-def fit_dcb2g(centers, counts, mu0, sig0, f_wide_max=0.95):
-    """`f_wide_max` (default 0.95) caps the wide-Gaussian fraction. For
-    detector-resolution priors where the core should be the bulk, set 0.5
-    via the per-branch BRANCH_CONFIG; loose default is needed for ISR-spike
-    priors where the "core" is genuinely a narrow ~1% spike."""
+def fit_dcb2g(centers, counts, mu0, sig0, f_wide_max=0.95, mu_fix=None):
+    """`f_wide_max`: cap on wide-Gauss fraction. Set ≤ 0.5 for detector-resolution
+    priors so the dcb-core stays the bulk; default 0.95 lets the spike priors
+    have a narrow ~1% "core". `mu_fix`: clamp μ_c (physics-symmetric data)."""
     N0 = float(counts.max())
     # params: N, mu_c, sigma_c, aL, nL, aR, nR, f_wide, mu_w, sigma_w
-    lo = [0, -np.inf, 1e-6, 0.3, 1.01, 0.3, 1.01, 0.01, -np.inf, 1e-4]
-    hi = [np.inf, np.inf, np.inf, 8., 200., 8., 200., float(f_wide_max), np.inf, np.inf]
+    if mu_fix is not None:
+        mu_lo = float(mu_fix) - 1e-9
+        mu_hi = float(mu_fix) + 1e-9
+    else:
+        mu_lo, mu_hi = -np.inf, np.inf
+    lo = [0, mu_lo, 1e-6, 0.3, 1.01, 0.3, 1.01, 0.01, -np.inf, 1e-4]
+    hi = [np.inf, mu_hi, np.inf, 8., 200., 8., 200., float(f_wide_max), np.inf, np.inf]
     starts = [
         [N0, mu0, sig0,        1.2,  5., 0.8, 3., 0.15, mu0,           5 * sig0],
         [N0, mu0, sig0,        1.5,  8., 0.5, 2., 0.25, mu0 + 2*sig0,  8 * sig0],
@@ -716,6 +735,10 @@ def fit_dcb2g(centers, counts, mu0, sig0, f_wide_max=0.95):
         [N0, mu0, sig0 * 0.01, 1.5,  8., 1.5,  8., 0.88, mu0, sig0 * 1.5],
         [N0, mu0, sig0 * 0.03, 1.5,  7., 1.5,  7., 0.75, mu0, sig0 * 2.5],
     ]
+    if mu_fix is not None:
+        # Seeds must satisfy the tight (mu_fix±eps) bound or curve_fit rejects.
+        for s in starts:
+            s[1] = float(mu_fix)
     return _best_fit(dcb_gauss, centers, counts, starts, lo, hi)
 
 
@@ -879,10 +902,12 @@ def fit_dcb_expright2g_iminuit(centers, counts, mu0, sig0):
     return best_popt, None, True, best_chi2
 
 
-def fit_dcb_expright3g_iminuit(centers, counts, mu0, sig0):
+def fit_dcb_expright3g_iminuit(centers, counts, mu0, sig0, nL_min=1.01, mu_fix=None):
     """Poisson NLL iminuit fit: dcber core + shoulder Gaussian + outlier Gaussian.
-    Two seed regimes: fixed-scale (lep_p_resp, σ_c ~0.01, L ~0.5) and
-    sig0/L-scaled (m_loss, σ_c ~MeV, L ~13 GeV)."""
+    `nL_min`: lower bound on the power-law tail index (raise to constrain the
+    deep-tail mass).
+    `mu_fix`: if set, freezes μ_c at this value (used when physics requires a
+    symmetric or bounded distribution — see BRANCH_CONFIG)."""
     from iminuit import Minuit
     N0   = float(counts.max())
     errs = np.maximum(np.sqrt(counts), 1.0)
@@ -924,16 +949,33 @@ def fit_dcb_expright3g_iminuit(centers, counts, mu0, sig0):
         [N0, mu0, sig0 * 3,  0.5, 2.0, 1.5,  5.0, 0.03, mu0 - L*0.10, ss_n*2, 0.05, mu0 - L*0.40, so_n],
         [N0, mu0, sig0 * 5,  0.6, 2.0, 2.0,  6.0, 0.03, mu0 - L*0.20, ss_n*3, 0.05, mu0 - L*0.50, so_n*1.5],
     ]
+    nL_lo = float(nL_min)
+    if mu_fix is not None:
+        mu_lo = mu_hi = float(mu_fix)
+        # Override seeds: mu_c = mu_fix, mu_s/mu_o anchored to the left
+        # of mu_fix (the data is one-sided below mu_fix for m_loss).
+        for s_ in starts:
+            s_[1] = float(mu_fix)
+            s_[8]  = float(mu_fix) - L * 0.05
+            s_[11] = float(mu_fix) - L * 0.30
+    else:
+        mu_lo = mu0 - max(0.05, sig0 * 5)
+        mu_hi = mu0 + max(0.02, sig0 * 2)
+    mu_s_hi = float(mu_fix) if mu_fix is not None else mu0
+    mu_o_hi = (float(mu_fix) - max(0.05, sig0 * 2)) if mu_fix is not None else (mu0 - max(0.05, sig0 * 2))
     limits = [(1e-3, None),
-              (mu0 - max(0.05, sig0 * 5),    mu0 + max(0.02, sig0 * 2)),
+              (mu_lo, mu_hi),
               (1e-6, x_hi - x_lo),
-              (0.05, 5.), (1.01, 50.), (0.1, 10.), (0.05, 100.),
+              (0.05, 5.), (nL_lo, 50.), (0.1, 10.), (0.05, 100.),
               (0.0, 0.50),
-              (x_lo, mu0),
+              (x_lo, mu_s_hi),
               (1e-4, max(0.10, L * 0.30)),
               (0.0, 0.30),
-              (x_lo, mu0 - max(0.05, sig0 * 2)),
+              (x_lo, mu_o_hi),
               (1e-3, max(0.5, L))]
+    for s in starts:
+        if s[4] < nL_lo:
+            s[4] = nL_lo
     names  = ['N','mu_c','sc','aL','nL','aR','kR',
               'f_s','mu_s','sigma_s','f_o','mu_o','sigma_o']
 
@@ -945,6 +987,8 @@ def fit_dcb_expright3g_iminuit(centers, counts, mu0, sig0):
             m = Minuit(nll, *p0, name=names)
             for i, (lo_i, hi_i) in enumerate(limits):
                 m.limits[i] = (lo_i, hi_i)
+            if mu_fix is not None:
+                m.fixed["mu_c"] = True
             m.migrad()
             if not m.valid:
                 m.migrad()
@@ -1198,7 +1242,10 @@ def _fit_one(bname, vals_in, ecm):
                 popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
         nparams = 10
     elif model == "dcber3g":
-        popt, pcov, fit_ok, chi2 = fit_dcb_expright3g_iminuit(centers[mask], counts[mask], mu0, sig0)
+        popt, pcov, fit_ok, chi2 = fit_dcb_expright3g_iminuit(
+            centers[mask], counts[mask], mu0, sig0,
+            nL_min=float(cfg.get("nL_min", 1.01)),
+            mu_fix=cfg.get("mu_fix", None))
         nparams = 13
     elif model == "dcbgb":
         popt, pcov, fit_ok, chi2 = fit_dcb_gaussbox_iminuit(centers[mask], counts[mask], mu0, sig0)
@@ -1210,14 +1257,15 @@ def _fit_one(bname, vals_in, ecm):
         nparams = 10
     elif model == "dcb2g":
         fwmax = float(cfg.get("f_wide_max", 0.95))
+        mu_fix = cfg.get("mu_fix", None)
         popt, pcov, fit_ok, chi2 = fit_dcb2g(centers[mask], counts[mask], mu0, sig0,
-                                             f_wide_max=fwmax)
+                                             f_wide_max=fwmax, mu_fix=mu_fix)
         _ndof_est = max(int(mask.sum()) - 10, 1)
         # Lower threshold (2.5 vs 5.0) to give iminuit a shot at narrow-core
         # distributions where curve_fit settles in a shallow secondary minimum.
         if popt is None or chi2 / _ndof_est > 2.5:
             popt2, _, fit_ok2, chi2_2 = fit_dcb2g_iminuit(centers[mask], counts[mask], mu0, sig0,
-                                                          f_wide_max=fwmax)
+                                                          f_wide_max=fwmax, mu_fix=mu_fix)
             if popt2 is not None and chi2_2 < chi2:
                 popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
         nparams = 10
@@ -1378,6 +1426,14 @@ def process_ecm(ecm):
         missing  = [b for b in KINFIT_BRANCHES if b not in available]
         if missing:
             print(f"WARNING: {len(missing)} kinfit branch(es) not in tree: {missing}")
+        fit_only = os.environ.get("WW_FIT_ONLY", "").strip()
+        if fit_only:
+            requested = [b.strip() for b in fit_only.split(",") if b.strip()]
+            unknown   = [b for b in requested if b not in branches]
+            if unknown:
+                print(f"WARNING: WW_FIT_ONLY names not in available branches: {unknown}")
+            branches  = [b for b in branches if b in requested]
+            print(f"  [{ecm}]  WW_FIT_ONLY active: {branches}")
         # Read kinfit branches + the dR branches needed for the matching cut +
         # the reco kinematics branches used to drive per-bin priors.
         read_branches = list(branches)
@@ -1427,9 +1483,11 @@ def process_ecm(ecm):
         if len(vals) < 100:
             print(f"  [{ecm}]  SKIP {bname}: {len(vals)} entries"); continue
 
-        # spike_dcb2g: split out the narrow-peak spike events. f_delta + sig_res
-        # are fitted on |x| < delta_threshold; the body model is fitted on the
-        # complement. The two pieces compose into the kinfit PDF.
+        if cfg.get("symmetrize", False):
+            vals = np.concatenate([vals, -vals])
+
+        # spike_dcb2g splits the spike (|x|<delta_threshold) from the body and
+        # fits each separately; the kinfit composes them.
         f_delta      = None
         sig_res      = None
         spike_center = None
@@ -1463,7 +1521,9 @@ def process_ecm(ecm):
             nparams = 10
         elif model == "dcber3g":
             popt, pcov, fit_ok, chi2 = fit_dcb_expright3g_iminuit(
-                centers[mask], counts[mask], mu0, sig0)
+                centers[mask], counts[mask], mu0, sig0,
+                nL_min=float(cfg.get("nL_min", 1.01)),
+                mu_fix=cfg.get("mu_fix", None))
             nparams = 13
         elif model == "dcbgb":
             # Poisson NLL primary: correctly weights spike peak vs flat plateau.
@@ -1479,14 +1539,15 @@ def process_ecm(ecm):
             nparams = 10
         elif model in ("dcb2g", "spike_dcb2g"):
             fwmax = float(cfg.get("f_wide_max", 0.95))
+            mu_fix = cfg.get("mu_fix", None)
             popt, pcov, fit_ok, chi2 = fit_dcb2g(centers[mask], counts[mask], mu0, sig0,
-                                                 f_wide_max=fwmax)
+                                                 f_wide_max=fwmax, mu_fix=mu_fix)
             # Run iminuit fallback once χ²/ndf > 2.5 — narrow-core distributions
             # (lep angular resolutions in extreme p bins) often need it.
             _ndof_est = max(int(mask.sum()) - 10, 1)
             if popt is None or chi2 / _ndof_est > 2.5:
                 popt2, _, fit_ok2, chi2_2 = fit_dcb2g_iminuit(
-                    centers[mask], counts[mask], mu0, sig0, f_wide_max=fwmax)
+                    centers[mask], counts[mask], mu0, sig0, f_wide_max=fwmax, mu_fix=mu_fix)
                 if popt2 is not None and chi2_2 < chi2:
                     popt, pcov, fit_ok, chi2 = popt2, None, fit_ok2, chi2_2
             nparams = 10
@@ -1688,6 +1749,11 @@ def process_ecm(ecm):
                 f_delta=float(f_delta), sig_res=float(sig_res),
                 mu=mu_c, sigma=sc, aL=aL, nL=nL, aR=aR, nR=nR,
                 f_wide=fw, mu_wide=muw, sigma_wide=sw,
+                # Symmetrized priors carry the kinfit barrier σ_b = 0.1·σ_res
+                # for the plotter PDF; must match KF_M_LOSS_BARRIER_SIGMA_FRAC
+                # in WWKinReco.h.
+                barrier_sigma=(float(sig_res) * 0.1
+                               if cfg.get("symmetrize", False) else None),
                 chi2_ndof=round(float(chi2_ndof), 3), fit_ok=bool(fit_ok),
             )
             def yfn(x, _N=N_f, _mc=mu_c, _sc=sc, _aL=aL, _nL=nL, _aR=aR, _nR=nR,
@@ -1836,7 +1902,14 @@ def process_ecm(ecm):
             gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
             layout="constrained",
         )
-        ax.bar(centers, counts, width=bw, color="steelblue", alpha=0.55, label="data")
+        if cfg.get("symmetrize", False):
+            is_orig = centers <= 0
+            ax.bar(centers[is_orig],  counts[is_orig],  width=bw, color="steelblue",
+                   alpha=0.55, label="data (m_loss ≤ 0, physical)")
+            ax.bar(centers[~is_orig], counts[~is_orig], width=bw, color="tab:orange",
+                   alpha=0.55, label="mirror (−m_loss; symmetrized for fit)")
+        else:
+            ax.bar(centers, counts, width=bw, color="steelblue", alpha=0.55, label="data")
         ax.plot(xfine, yfine, color="crimson", lw=2, label=lbl)
 
         if model == "dcber2g":
@@ -1871,7 +1944,14 @@ def process_ecm(ecm):
         ax.set_ylabel("Entries", fontsize=11)
         ax.set_title(f"{bname}  [ecm{ecm}]", fontsize=11)
         ax.legend(fontsize=7.5, frameon=False, loc="upper left")
-        ax.set_ylim(bottom=0)
+        if cfg.get("log_y", False):
+            in_clip = counts > 0
+            if in_clip.any():
+                ax.set_yscale("log")
+                ax.set_ylim(max(0.5, float(counts[in_clip].min()) * 0.5),
+                            float(counts.max()) * 1.5)
+        else:
+            ax.set_ylim(bottom=0)
 
         pull = np.where(counts > 0, (counts - yfn(centers)) / np.sqrt(np.maximum(counts, 1)), 0)
         ax_res.bar(centers, pull, width=bw, color="steelblue", alpha=0.6)
@@ -1883,21 +1963,64 @@ def process_ecm(ecm):
         for fmt in ("png", "pdf"):
             fig.savefig(f"{plot_dir}/{bname}.{fmt}", dpi=150)
 
-        # Optional zoomed-in view: same fit/binning, narrower x-range + log-y so
-        # the unresolved peak and the wide tail are both visible.
+        plt.close(fig)
+
+        # Zoom view: re-binned in the zoom window so narrow peaks are resolved.
         zoom_xlim = cfg.get("zoom_xlim")
         if zoom_xlim is not None:
-            ax.set_xlim(*zoom_xlim)
-            ax_res.set_xlim(*zoom_xlim)
-            in_zoom = (centers >= zoom_xlim[0]) & (centers <= zoom_xlim[1]) & (counts > 0)
-            if in_zoom.any():
-                ax.set_ylim(max(0.5, float(counts[in_zoom].min()) * 0.5),
-                            float(counts[in_zoom].max()) * 1.5)
-                ax.set_yscale("log")
-            for fmt in ("png", "pdf"):
-                fig.savefig(f"{plot_dir}/{bname}_zoom.{fmt}", dpi=150)
+            zlo, zhi = zoom_xlim
+            z_vals = vals_c[(vals_c >= zlo) & (vals_c <= zhi)]
+            if len(z_vals) > 50:
+                z_counts, z_edges = np.histogram(z_vals, bins=120)
+                z_centers = 0.5 * (z_edges[:-1] + z_edges[1:])
+                z_bw      = float(np.diff(z_edges)[0])
+                # The fitted PDF was scaled to the inclusive bin width `bw`;
+                # rescale to the zoom bin width so curve and histogram match.
+                scale = z_bw / bw
+                z_xfine = np.linspace(zlo, zhi, 1500)
+                z_yfine = yfn(z_xfine) * scale
 
-        plt.close(fig)
+                fig_z, (axz, axz_res) = plt.subplots(
+                    2, 1, figsize=(7, 6), sharex=True,
+                    gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
+                    layout="constrained",
+                )
+                if cfg.get("symmetrize", False):
+                    is_orig_z = z_centers <= 0
+                    axz.bar(z_centers[is_orig_z],  z_counts[is_orig_z],  width=z_bw,
+                            color="steelblue", alpha=0.55, label="data (m_loss ≤ 0)")
+                    axz.bar(z_centers[~is_orig_z], z_counts[~is_orig_z], width=z_bw,
+                            color="tab:orange", alpha=0.55, label="mirror (−m_loss)")
+                else:
+                    axz.bar(z_centers, z_counts, width=z_bw,
+                            color="steelblue", alpha=0.55, label="data")
+                axz.plot(z_xfine, z_yfine, color="crimson", lw=2, label=lbl)
+                axz.set_ylabel("Entries", fontsize=11)
+                axz.set_title(f"{bname}  [ecm{ecm}]  (zoom)", fontsize=11)
+                axz.legend(fontsize=7.5, frameon=False, loc="upper left")
+                axz.set_xlim(zlo, zhi)
+                if cfg.get("log_y", False):
+                    z_pos = z_counts > 0
+                    if z_pos.any():
+                        axz.set_yscale("log")
+                        axz.set_ylim(max(0.5, float(z_counts[z_pos].min()) * 0.5),
+                                     float(z_counts.max()) * 1.5)
+                else:
+                    axz.set_ylim(bottom=0)
+
+                z_pred = yfn(z_centers) * scale
+                z_pull = np.where(z_counts > 0,
+                                  (z_counts - z_pred) / np.sqrt(np.maximum(z_counts, 1)),
+                                  0)
+                axz_res.bar(z_centers, z_pull, width=z_bw, color="steelblue", alpha=0.6)
+                axz_res.axhline(0, color="crimson", lw=1)
+                axz_res.set_ylabel("Pull", fontsize=10)
+                axz_res.set_xlabel(bname, fontsize=11)
+                axz_res.set_ylim(-5, 5)
+                axz_res.set_xlim(zlo, zhi)
+                for fmt in ("png", "pdf"):
+                    fig_z.savefig(f"{plot_dir}/{bname}_zoom.{fmt}", dpi=150)
+                plt.close(fig_z)
 
     # ── Jet1 vs jet2 comparison plots ────────────────────────────────────────
     comp_dir = f"{plot_dir}/jet_comparisons"
@@ -1914,85 +2037,90 @@ def process_ecm(ecm):
     # branches the binning var is the concat'd jet1+jet2 reco kinematic). Bin
     # fits are dispatched across an inner ProcessPool — they're independent
     # and dwarf the per-ECM serial cost.
-    print(f"\n  [{ecm}]  Binned-prior pass: {N_BINS_PRIOR} bins per branch")
-    binvar_cache = {}
-    def _bin_var_array(bcfg):
-        key = bcfg
-        if key in binvar_cache:
-            return binvar_cache[key]
-        arrs = []
-        for v in bcfg:
-            if v not in data_all:
-                binvar_cache[key] = None
-                return None
-            a = _flatten_raw(data_all[v])
-            if "costheta" in v:
-                a = np.abs(a)
-            arrs.append(a)
-        out = np.concatenate(arrs) if len(arrs) > 1 else arrs[0]
-        binvar_cache[key] = out
-        return out
+    _skip_binned = os.environ.get("WW_SKIP_BINNED", "").strip() in ("1", "true", "yes")
+    if _skip_binned:
+        print(f"\n  [{ecm}]  WW_SKIP_BINNED=1 — binned-prior pass skipped")
+    else:
+        print(f"\n  [{ecm}]  Binned-prior pass: {N_BINS_PRIOR} bins per branch")
+    if not _skip_binned:
+        binvar_cache = {}
+        def _bin_var_array(bcfg):
+            key = bcfg
+            if key in binvar_cache:
+                return binvar_cache[key]
+            arrs = []
+            for v in bcfg:
+                if v not in data_all:
+                    binvar_cache[key] = None
+                    return None
+                a = _flatten_raw(data_all[v])
+                if "costheta" in v:
+                    a = np.abs(a)
+                arrs.append(a)
+            out = np.concatenate(arrs) if len(arrs) > 1 else arrs[0]
+            binvar_cache[key] = out
+            return out
 
-    bin_specs = {}    # bname -> (list(bcfg), edges_list)
-    bin_tasks = []    # list of (bname, ibin, vals_subset, ecm)
-    bin_n     = {}    # (bname, ibin) -> N events
-    bin_vals  = {}    # bname -> list of N_BINS_PRIOR np.ndarrays (kept for binned-plot pass)
-    for bname, bcfg in BIN_CONFIG.items():
-        if bname not in branches:
-            continue
-        v = _bin_var_array(bcfg)
-        if v is None:
-            print(f"  [{ecm}]  SKIP {bname}: binning var(s) {bcfg} not in tree")
-            continue
-        yvals = _flatten_raw(data_all[bname])
-        if len(v) != len(yvals):
-            print(f"  [{ecm}]  SKIP {bname}: binning-var length {len(v)} != {len(yvals)}")
-            continue
-        edges_q = np.quantile(v, np.linspace(0, 1, N_BINS_PRIOR + 1))
-        edges_q[0]  -= 1e-9
-        edges_q[-1] += 1e-9
-        bin_specs[bname] = (list(bcfg), edges_q.tolist())
-        bin_vals[bname]  = [None] * N_BINS_PRIOR
-        for ibin in range(N_BINS_PRIOR):
-            m = (v >= edges_q[ibin]) & (v < edges_q[ibin+1])
-            sub = yvals[m]
-            bin_tasks.append((bname, ibin, sub, ecm))
-            bin_n[(bname, ibin)] = int(m.sum())
-            bin_vals[bname][ibin] = sub
+        bin_specs = {}    # bname -> (list(bcfg), edges_list)
+        bin_tasks = []    # list of (bname, ibin, vals_subset, ecm)
+        bin_n     = {}    # (bname, ibin) -> N events
+        bin_vals  = {}    # bname -> list of N_BINS_PRIOR np.ndarrays (kept for binned-plot pass)
+        for bname, bcfg in BIN_CONFIG.items():
+            if bname not in branches:
+                continue
+            v = _bin_var_array(bcfg)
+            if v is None:
+                print(f"  [{ecm}]  SKIP {bname}: binning var(s) {bcfg} not in tree")
+                continue
+            yvals = _flatten_raw(data_all[bname])
+            if len(v) != len(yvals):
+                print(f"  [{ecm}]  SKIP {bname}: binning-var length {len(v)} != {len(yvals)}")
+                continue
+            edges_q = np.quantile(v, np.linspace(0, 1, N_BINS_PRIOR + 1))
+            edges_q[0]  -= 1e-9
+            edges_q[-1] += 1e-9
+            bin_specs[bname] = (list(bcfg), edges_q.tolist())
+            bin_vals[bname]  = [None] * N_BINS_PRIOR
+            for ibin in range(N_BINS_PRIOR):
+                m = (v >= edges_q[ibin]) & (v < edges_q[ibin+1])
+                sub = yvals[m]
+                bin_tasks.append((bname, ibin, sub, ecm))
+                bin_n[(bname, ibin)] = int(m.sum())
+                bin_vals[bname][ibin] = sub
 
-    # Inner pool: 8 workers per ECM × 3 ECMs ≈ 24 cores busy on ironic (64 avail).
-    # Tasks are independent; worker count is bounded so we don't oversubscribe.
-    n_inner = min(8, max(1, len(bin_tasks)))
-    print(f"  [{ecm}]  dispatching {len(bin_tasks)} binned fits across {n_inner} workers")
-    bin_outputs = []
-    if bin_tasks:
-        with ProcessPoolExecutor(max_workers=n_inner) as inner_pool:
-            for out in inner_pool.map(_fit_bin_task, bin_tasks):
-                bin_outputs.append(out)
+        # Inner pool: 8 workers per ECM × 3 ECMs ≈ 24 cores busy on ironic (64 avail).
+        # Tasks are independent; worker count is bounded so we don't oversubscribe.
+        n_inner = min(8, max(1, len(bin_tasks)))
+        print(f"  [{ecm}]  dispatching {len(bin_tasks)} binned fits across {n_inner} workers")
+        bin_outputs = []
+        if bin_tasks:
+            with ProcessPoolExecutor(max_workers=n_inner) as inner_pool:
+                for out in inner_pool.map(_fit_bin_task, bin_tasks):
+                    bin_outputs.append(out)
 
-    # Aggregate by branch (preserve bin order via index).
-    agg = {b: [None]*N_BINS_PRIOR for b in bin_specs}
-    for bname, ibin, p in bin_outputs:
-        agg[bname][ibin] = p
-        chi2 = p["chi2_ndof"] if p else float("nan")
-        ok   = "OK" if (p and p.get("fit_ok")) else "WARN"
-        print(f"    [{ecm}]  {bname:30s} bin {ibin}/{N_BINS_PRIOR}  "
-              f"N={bin_n.get((bname, ibin), -1)}  χ²/ndf={chi2:.2f}  {ok}")
+        # Aggregate by branch (preserve bin order via index).
+        agg = {b: [None]*N_BINS_PRIOR for b in bin_specs}
+        for bname, ibin, p in bin_outputs:
+            agg[bname][ibin] = p
+            chi2 = p["chi2_ndof"] if p else float("nan")
+            ok   = "OK" if (p and p.get("fit_ok")) else "WARN"
+            print(f"    [{ecm}]  {bname:30s} bin {ibin}/{N_BINS_PRIOR}  "
+                  f"N={bin_n.get((bname, ibin), -1)}  χ²/ndf={chi2:.2f}  {ok}")
 
-    for bname, bins_list in agg.items():
-        bin_var, edges = bin_specs[bname]
-        results.setdefault(bname, {})
-        results[bname]["binned"] = {
-            "bin_var": bin_var,
-            "edges":   edges,
-            "bins":    bins_list,
-        }
-        # Per-branch binned plot: 5 sub-panels, one per quantile bin, with the
-        # data histogram, fitted PDF, and pull. Mirrors the inclusive plot's
-        # data+fit+pull layout for visual smoothness checks across the binning.
-        cfg = BRANCH_CONFIG.get(bname, {})
-        _plot_binned(ecm, plot_dir, bname, bins_list, edges,
-                     "+".join(bin_var), bin_vals.get(bname), cfg)
+        for bname, bins_list in agg.items():
+            bin_var, edges = bin_specs[bname]
+            results.setdefault(bname, {})
+            results[bname]["binned"] = {
+                "bin_var": bin_var,
+                "edges":   edges,
+                "bins":    bins_list,
+            }
+            # Per-branch binned plot: 5 sub-panels, one per quantile bin, with the
+            # data histogram, fitted PDF, and pull. Mirrors the inclusive plot's
+            # data+fit+pull layout for visual smoothness checks across the binning.
+            cfg = BRANCH_CONFIG.get(bname, {})
+            _plot_binned(ecm, plot_dir, bname, bins_list, edges,
+                         "+".join(bin_var), bin_vals.get(bname), cfg)
 
     # ── BES correlation diagnostic: ρ(m_ee−ECM, pz_ee) ───────────────────────
     if "gen_ee_m_minus_ecm" in data_all and "gen_ee_pz" in data_all:

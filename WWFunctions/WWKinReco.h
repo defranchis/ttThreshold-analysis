@@ -66,11 +66,9 @@ struct KinFitParamSet {
     SpikeDcbGaussParams                          isr_px;
     SpikeDcbGaussParams                          isr_py;
     SpikeDcbGaussParams                          isr_pz;
-    // m(WW) − m(ee) — pure ISR mass-loss with hard right boundary at 0.
-    // dcber3g: DCB power-law-left + Gaussian core + exponential right cutoff +
-    // shoulder Gauss + outlier Gauss (mirror of lep_p_resp). Three smooth
-    // components handle the multi-scale tail without role-swap pathologies.
-    DcbExpRight3GaussParams                      ww_m_minus_m_ee;
+    // m_loss prior: spike_dcb2g fit on |m_loss| (data symmetrized in
+    // fit_resolutions.py); kinfit adds a barrier for m_loss>0.
+    SpikeDcbGaussParams                          ww_m_minus_m_ee;
     // Inclusive (kinematics-averaged) variants — used when kf_use_binned_priors=false.
     DcbGaussParams                               jet1_p_resp_incl;
     DcbGaussParams                               jet2_p_resp_incl;
@@ -106,7 +104,7 @@ struct KinFitParamSet {
     AG3G_MET_PHI_RESOL_##E,          AG3G_MET_THETA_RESOL_##E, \
     GAUSS_GEN_EE_M_MINUS_ECM_##E, GAUSS_GEN_EE_PZ_##E, \
     SDCBG_GEN_ISR_PX_##E, SDCBG_GEN_ISR_PY_##E, SDCBG_GEN_ISR_PZ_##E, \
-    DCBER3G_GEN_WW_M_MINUS_M_EE_##E, \
+    SDCBG_GEN_WW_M_MINUS_M_EE_##E, \
     /* inclusive — POOL: jet1 and jet2 share the pooled scalar */ \
     DCBG_JET_P_RESP_##E, DCBG_JET_P_RESP_##E, DCBER3G_LEP_P_RESP_##E, \
     DCBG_JET_PHI_RESOL_##E, DCBG_JET_THETA_RESOL_##E, \
@@ -127,7 +125,7 @@ struct KinFitParamSet {
     AG3G_MET_PHI_RESOL_##E,          AG3G_MET_THETA_RESOL_##E, \
     GAUSS_GEN_EE_M_MINUS_ECM_##E, GAUSS_GEN_EE_PZ_##E, \
     SDCBG_GEN_ISR_PX_##E, SDCBG_GEN_ISR_PY_##E, SDCBG_GEN_ISR_PZ_##E, \
-    DCBER3G_GEN_WW_M_MINUS_M_EE_##E, \
+    SDCBG_GEN_WW_M_MINUS_M_EE_##E, \
     /* inclusive — SEP: per-jet scalar */ \
     DCBG_JET1_P_RESP_##E, DCBG_JET2_P_RESP_##E, DCBER3G_LEP_P_RESP_##E, \
     DCBG_JET1_PHI_RESOL_##E, DCBG_JET1_THETA_RESOL_##E, \
@@ -170,7 +168,7 @@ inline GaussParams                                  kf_ee_pz                 = G
 inline SpikeDcbGaussParams                          kf_isr_px                = SDCBG_GEN_ISR_PX_160;
 inline SpikeDcbGaussParams                          kf_isr_py                = SDCBG_GEN_ISR_PY_160;
 inline SpikeDcbGaussParams                          kf_isr_pz                = SDCBG_GEN_ISR_PZ_160;
-inline DcbExpRight3GaussParams                      kf_ww_m_minus_m_ee       = DCBER3G_GEN_WW_M_MINUS_M_EE_160;
+inline SpikeDcbGaussParams                          kf_ww_m_minus_m_ee       = SDCBG_GEN_WW_M_MINUS_M_EE_160;
 
 // Inclusive (kinematics-averaged) scalars — used when kf_use_binned_priors=false.
 // Same data as the bin arrays would collapse to with one bin spanning all events.
@@ -298,6 +296,10 @@ static constexpr double KF_LOOSE_EDM_MAX = 1e-2;
 // Seeded from the event's reco kinematics → reproducible across runs.
 static constexpr int    KF_RESTART_N      = 2;
 static constexpr double KF_RESTART_SIGMA  = 0.5;
+
+// Barrier σ for m_loss > 0 (in units of the m_loss prior's sigma_res). Must
+// match the value baked into `barrier_sigma` written by fit_resolutions.py.
+static constexpr double KF_M_LOSS_BARRIER_SIGMA_FRAC = 0.1;
 
 // Gaussian prior on gW (only active when fit_gW=true). gW is also y-rescaled
 // using this σ, so the prior collapses to y_gW² + log_norm in the χ².
@@ -696,14 +698,18 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                         + spike_dcb_gauss_neg2logpdf(isr_py_val, kf_isr_py)
                         + spike_dcb_gauss_neg2logpdf(isr_pz_val, kf_isr_pz);
 
-        // m(WW) − m_ee_fit. The physical boundary m_WW ≤ m_ee at gen is
-        // enforced by dcber3g itself: the right-exp tail of the core decays
-        // super-fast past 0, while the shoulder + outlier Gaussians provide
-        // a smooth finite floor — so neg2logpdf stays bounded for m_loss > 0
-        // without an external barrier. C¹ smooth across the boundary.
+        // Prior on |m_loss| (symmetrized in fit_resolutions.py) + quadratic
+        // barrier for m_loss>0 to enforce the physical bound m_WW ≤ m_ee.
         double m_ee_fit = ECM + bes_m;
         double m_loss   = WW.M() - m_ee_fit;
-        double m_loss_term = dcb_expright_3gauss_neg2logpdf(m_loss, kf_ww_m_minus_m_ee);
+        double m_loss_term = spike_dcb_gauss_neg2logpdf(std::fabs(m_loss),
+                                                        kf_ww_m_minus_m_ee);
+        if (m_loss > 0.0) {
+            const double sigma_barrier =
+                kf_ww_m_minus_m_ee.sigma_res * KF_M_LOSS_BARRIER_SIGMA_FRAC;
+            const double r = m_loss / sigma_barrier;
+            m_loss_term += r * r;
+        }
 
         double scale_pen = dcb_gauss_neg2logpdf(s1, p_jet1_p_resp)
                          + dcb_gauss_neg2logpdf(s2, p_jet2_p_resp)

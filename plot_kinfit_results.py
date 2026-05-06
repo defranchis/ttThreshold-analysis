@@ -490,17 +490,28 @@ def _make_pdf(p):
         def fn(x): return norm * dcb_gaussbox(x, 1.0, mu, sg, aL, nL, aR, nR, fw, pm, sb)
 
     elif model == "spike_dcb2g":
-        # f_delta · N(0, sig_res²) + (1−f_delta) · dcb2g(x; mu, sigma, aL, nL, aR, nR, f_wide, mu_wide, sigma_wide)
+        # f_delta · N(0, sig_res²) + (1−f_delta) · dcb2g(...). barrier_sigma
+        # (when set, e.g. for symmetrized m_loss) mirrors the kinfit's quadratic
+        # barrier on x>0 by suppressing the PDF there: exp(-(x/σ_b)²/2). Must
+        # stay in sync with KF_M_LOSS_BARRIER_SIGMA_FRAC in WWKinReco.h.
         f_d, sr   = p["f_delta"], abs(p["sig_res"])
         mu, sg    = p["mu"], p["sigma"]
         aL, nL, aR, nR = p["aL"], p["nL"], p["aR"], p["nR"]
         fw, mw, sw = p["f_wide"], p["mu_wide"], p["sigma_wide"]
         inv_sr = 1.0 / sr
         norm_g = inv_sr / math.sqrt(2.0 * math.pi)
+        _bs = p.get("barrier_sigma")
+        sig_b = abs(_bs) if _bs else None
         def fn(x):
-            spike = f_d * norm_g * np.exp(-0.5 * (x * inv_sr) ** 2)
-            cont  = (1.0 - f_d) * dcb_gauss(x, 1.0, mu, sg, aL, nL, aR, nR, fw, mw, sw)
-            return norm * (spike + cont)
+            xa    = np.asarray(x, dtype=float)
+            spike = f_d * norm_g * np.exp(-0.5 * (xa * inv_sr) ** 2)
+            cont  = (1.0 - f_d) * dcb_gauss(xa, 1.0, mu, sg, aL, nL, aR, nR, fw, mw, sw)
+            shape = norm * (spike + cont)
+            if sig_b is not None:
+                shape = np.where(xa > 0,
+                                  shape * np.exp(-0.5 * (xa / sig_b) ** 2),
+                                  shape)
+            return shape
 
     elif model == "spike_dcber2g":
         # f_delta · N(spike_center, sig_res²) + (1−f_delta) · dcber2g(...)
@@ -636,12 +647,15 @@ def _plot_branch(ax, bname, vals, ecm, pdf_fn=None, pdf_params=None,
     if xlim is not None:
         xlo, xhi = xlim
 
+    densities = []  # collect for y-limit computation under log scale
+
     def _draw_hist(v, label, clr, as_bar=False):
         v_c = v[(v >= xlo) & (v <= xhi)]
         counts, edges = np.histogram(v_c, bins=nbins, range=(xlo, xhi))
         bw = np.diff(edges)[0]
         density = counts / max(counts.sum() * bw, 1e-300)
         centers = 0.5 * (edges[:-1] + edges[1:])
+        densities.append(density)
         if as_bar:
             ax.bar(centers, density, width=bw, color=clr, alpha=0.55, label=label)
         else:
@@ -663,7 +677,13 @@ def _plot_branch(ax, bname, vals, ecm, pdf_fn=None, pdf_params=None,
     ax.set_xlabel(bname, fontsize=11)
     ax.set_ylabel("Probability density", fontsize=11)
     ax.set_xlim(xlo, xhi)
-    ax.set_ylim(bottom=0)
+    if bname == "kinfit_m_loss":
+        ax.set_yscale("log")
+        nonzero = [d[d > 0].min() for d in densities if (d > 0).any()]
+        if nonzero:
+            ax.set_ylim(bottom=0.5 * min(nonzero))
+    else:
+        ax.set_ylim(bottom=0)
     ax.legend(fontsize=9, frameon=False)
 
 
