@@ -24,9 +24,11 @@ if _ecm_env:
 # Optimizer is ROOT Minuit2 (robust, ~200-500 chi² evaluations per event).
 # An older custom BFGS variant was archived to WWFunctions/old/WWKinFitBFGS.h
 # on 2026-05-04 — see the file header for the test outcome and removal rationale.
-# True → fit gW as a free parameter with Gaussian prior σ = KF_GW_PRIOR_SIGMA_REL × KF_GW_FIXED;
-# False → pin gW = KF_GW_FIXED via Migrad FixVariable.
-KIN_FIT_FREE_GW = True
+# gW handling:
+#   "fixed"       → pin gW = KF_GW_FIXED via Minuit FixVariable.
+#   "constrained" → fit gW with Gaussian prior σ = KF_GW_PRIOR_SIGMA_REL × KF_GW_FIXED.
+#   "free"        → fit gW with no prior (data-only).
+KIN_FIT_GW_MODE = os.environ.get("KF_GW_MODE", "constrained")
 # Jet-prior convention. "pool": jet1 and jet2 share the pooled prior — pass-1 covers
 # both pT-orderings, swap fallback off (~10-25% faster). "swap": separate per-jet
 # priors with jet1↔jet2 swap fallback on non-converged events.
@@ -107,6 +109,8 @@ all_branches = [
     "kinfit_bes_m_minus_ecm", "kinfit_bes_pz",
     "kinfit_chi2", "kinfit_chi2_ndof", "kinfit_valid", "kinfit_valid_loose", "kinfit_status", "kinfit_edm",
     "kinfit_winner_pass", "kinfit_n_passes_run", "kinfit_priors_swapped",
+    # Post-fit correlation matrix (16x16, row-major flat; see KF_PARAM_NAMES in WWKinReco.h).
+    "kinfit_corr",
 
     # ── misc derived ───────────────────────────────────────────────────
     "n_lep_reco", "n_reco_jets", "deltaM",
@@ -194,7 +198,7 @@ class RDFanalysis:
         df = tc.match_jets_to_quarks(df)
         df = tc.define_resolutions(df)
 
-        df = tc.run_kinfit(df, free_gw=KIN_FIT_FREE_GW)
+        df = tc.run_kinfit(df, gw_mode=KIN_FIT_GW_MODE)
 
         # Diagnostic (not enforced): count events that would pass a dR<0.1
         # jet/quark matching cut. Side count, evaluated in the same event loop

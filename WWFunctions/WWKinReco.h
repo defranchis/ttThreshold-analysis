@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <functional>
 #include <random>
@@ -270,9 +271,13 @@ static constexpr int    KF_NDIM    = 15;   // free parameters when gW is fixed
 static constexpr int    KF_NPAR_TOTAL = KF_NDIM + 1;
 // Number of constraint terms in chi2: 4 momentum-response + 8 angular-resolution
 // + 2 BES (m, pz) + 3 ISR (px, py, pz via balance) + 1 m(WW)−m(ee) + 2 BW.
-// When fit_gW=true a Gaussian prior on gW adds +1 constraint, applied at
+// When gw_mode==Constrained a Gaussian prior on gW adds +1 constraint, applied at
 // chi2_ndof time.
 static constexpr int    KF_N_CONSTR = 20;
+
+// gW handling: pinned to KF_GW_FIXED, fitted with a Gaussian prior (σ =
+// KF_GW_PRIOR_SIGMA), or fitted with no prior (data-only).
+enum KFGwMode { KF_GW_FIXED_MODE = 0, KF_GW_CONSTRAINED_MODE = 1, KF_GW_FREE_MODE = 2 };
 
 // Migrad / Minuit2 tuning. These get tweaked together when convergence
 // behaviour changes (cascade order, status-3 recovery, etc.).
@@ -301,8 +306,10 @@ static constexpr double KF_RESTART_SIGMA  = 0.5;
 // match the value baked into `barrier_sigma` written by fit_resolutions.py.
 static constexpr double KF_M_LOSS_BARRIER_SIGMA_FRAC = 0.1;
 
-// Gaussian prior on gW (only active when fit_gW=true). gW is also y-rescaled
-// using this σ, so the prior collapses to y_gW² + log_norm in the χ².
+// Gaussian prior on gW (only active when gw_mode==KF_GW_CONSTRAINED_MODE). gW
+// is also y-rescaled using this σ, so the prior collapses to y_gW² + log_norm
+// in the χ². When gw_mode==KF_GW_FREE_MODE the same y-rescaling is used for
+// pre-conditioning; only the prior term is dropped from the χ².
 static constexpr double KF_GW_PRIOR_SIGMA_REL = 0.01;
 static constexpr double KF_GW_PRIOR_SIGMA     = KF_GW_PRIOR_SIGMA_REL * KF_GW_FIXED;
 // std::log isn't constexpr until C++26, so this is a runtime const initialized once.
@@ -342,6 +349,20 @@ struct KinFitResult {
     // Post-fit 4-vectors. All scalar projections (P, Pt, M, Px, ...) and the
     // Wlep/Whad/WW sums are derived in the consumer.
     TLorentzVector j1, j2, lep, nu;
+    // Post-fit correlation matrix between the KF_NPAR_TOTAL fit parameters,
+    // in y-space (the rescaling is diagonal so y/x-space correlations match).
+    // Index order matches x[]: 0=mW, 1=gW, 2..5=s{1,2,l,n}, 6..8=t{1,2,n},
+    // 9..11=p{1,2,n}, 12=tl, 13=pl, 14=bes_m, 15=bes_pz. Filled with NaN
+    // when the fit hasn't run, when gW is fixed (its row/col), or when the
+    // covariance is non-positive.
+    float corr[KF_NPAR_TOTAL][KF_NPAR_TOTAL];
+};
+
+// Index order in KinFitResult::corr (and in Minuit2's parameter vector).
+static constexpr const char* KF_PARAM_NAMES[KF_NPAR_TOTAL] = {
+    "mW", "gW", "s1", "s2", "sl", "sn",
+    "t1", "t2", "tn", "p1", "p2", "pn",
+    "tl", "pl", "bes_m", "bes_pz",
 };
 
 // Massless 4-vector from spherical coordinates.
@@ -583,7 +604,10 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                     float jet2_p,    float jet2_theta,    float jet2_phi,
                     float Isolep_p,  float Isolep_theta,  float Isolep_phi,
                     float missing_p, float missing_p_theta, float missing_p_phi,
-                    bool fit_gW = false) {
+                    int gw_mode = KF_GW_FIXED_MODE) {
+
+    const bool gw_free        = (gw_mode != KF_GW_FIXED_MODE);
+    const bool gw_constrained = (gw_mode == KF_GW_CONSTRAINED_MODE);
 
     KinFitResult result{};
     result.gW    = KF_GW_FIXED;
@@ -591,6 +615,9 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.status = -1;
     result.chi2  = 999.0f;
     result.chi2_ndof = 999.0f;
+    for (int i = 0; i < KF_NPAR_TOTAL; ++i)
+        for (int j = 0; j < KF_NPAR_TOTAL; ++j)
+            result.corr[i][j] = std::numeric_limits<float>::quiet_NaN();
 
     if (Isolep_p < 0 || jet1_p <= 0 || jet2_p <= 0 || missing_p <= 0)
         return result;
@@ -725,8 +752,10 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                        + asymgauss3g_neg2logpdf(pn, kf_met_phi_resol)
                        + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
 
-        // gW prior collapses to y_gW² + log_norm under the y-rescaling.
-        double gw_term = fit_gW ? (x[1] * x[1] + KF_GW_PRIOR_LOG_NORM) : 0.0;
+        // gW prior (only in Constrained mode) collapses to y_gW² + log_norm
+        // under the y-rescaling. In Free mode the prior is dropped; in Fixed
+        // mode gW is pinned via FixVariable so the term is identically zero.
+        double gw_term = gw_constrained ? (x[1] * x[1] + KF_GW_PRIOR_LOG_NORM) : 0.0;
 
         return bw_term + bes_term + isr_term + m_loss_term + scale_pen + angular + gw_term;
     };
@@ -761,7 +790,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         m->SetVariable(13, "y_pl",     x0[13], KF_INIT_STEP);
         m->SetVariable(14, "y_bes_m",  x0[14], KF_INIT_STEP);
         m->SetVariable(15, "y_bes_pz", x0[15], KF_INIT_STEP);
-        if (!fit_gW) m->FixVariable(1);
+        if (!gw_free) m->FixVariable(1);
     };
 
     double x_default[KF_NPAR_TOTAL] = {0,0, 0,0,0,0, 0,0,0, 0,0,0, 0,0, 0,0};
@@ -884,6 +913,13 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     // below reads them by reference.
     if (priors_swapped != best.swapped) swap_jet_priors();
 
+    // Re-seed `minimizer` at the winning point and recompute the Hessian so
+    // CovMatrix() reflects the winning pass (the live minimizer state may
+    // belong to a later, losing pass — passes 2/3/4 reuse the same object).
+    // Hesse() is a numerical Hessian at the supplied point, no extra descent.
+    configure(minimizer.get(), best.x, /*with_strategy=*/true);
+    minimizer->Hesse();
+
     int    status   = best.status;
     double chi2     = best.chi2;
     const double* x_final = best.x;
@@ -898,9 +934,9 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.n_passes_run   = n_passes_run;
     result.priors_swapped = best.swapped ? 1 : 0;
     result.edm            = static_cast<float>(best.edm);
-    int n_par    = fit_gW ? KF_NPAR_TOTAL : KF_NDIM;
-    // +1 constraint from the gW Gaussian prior when fit_gW=true.
-    int n_constr = KF_N_CONSTR + (fit_gW ? 1 : 0);
+    int n_par    = gw_free ? KF_NPAR_TOTAL : KF_NDIM;
+    // +1 constraint from the gW Gaussian prior in Constrained mode only.
+    int n_constr = KF_N_CONSTR + (gw_constrained ? 1 : 0);
     result.chi2_ndof = (n_constr > n_par) ? result.chi2 / float(n_constr - n_par) : -1.0f;
     result.mW = static_cast<float>(KF_MW_INIT  + KF_MW_PHYS_SIGMA  * x_final[0]);
     result.gW = static_cast<float>(KF_GW_FIXED + KF_GW_PRIOR_SIGMA * x_final[1]);
@@ -918,6 +954,28 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.pl = _y2x(x_final[13], kf_lep_phi_resol);
     result.bes_m_minus_ecm = static_cast<float>(_y2x(x_final[14], kf_ee_m_minus_ecm));
     result.bes_pz          = static_cast<float>(_y2x(x_final[15], kf_ee_pz));
+
+    // Post-fit correlation matrix from Minuit2's covariance at the winning x.
+    // y-rescaling is diagonal so y-space and x-space correlations agree.
+    // Off-diagonal entries with non-positive variances (e.g. fixed gW row/col)
+    // are NaN, set above; here we overwrite only the well-defined slots.
+    // Filled for valid_loose so strict-valid vs loose-only comparisons are
+    // possible downstream (loose events are status=3 near-converged points;
+    // Hesse above provides a numerical Hessian regardless of convergence).
+    if (result.valid_loose) {
+        for (int i = 0; i < KF_NPAR_TOTAL; ++i) {
+            const double vii = minimizer->CovMatrix(i, i);
+            if (!(vii > 0.0)) continue;
+            result.corr[i][i] = 1.0f;
+            for (int j = i + 1; j < KF_NPAR_TOTAL; ++j) {
+                const double vjj = minimizer->CovMatrix(j, j);
+                if (!(vjj > 0.0)) continue;
+                const double rho = minimizer->CovMatrix(i, j) / std::sqrt(vii * vjj);
+                result.corr[i][j] = static_cast<float>(rho);
+                result.corr[j][i] = static_cast<float>(rho);
+            }
+        }
+    }
 
     // Post-fit kinematics (shared — uses result fields filled above)
     TLorentzVector j1f = _vec_spherical(jet1_p/result.s1,    jet1_theta    - result.t1, jet1_phi    - result.p1);

@@ -360,15 +360,21 @@ def define_resolutions(df):
     return df
 
 
+_GW_MODE_TO_INT = {"fixed": 0, "constrained": 1, "free": 2}
+
 # ── kinematic fit (step2 only) ───────────────────────────────────────────────
-def run_kinfit(df, free_gw=False):
-    free_gw = "true" if free_gw else "false"
+def run_kinfit(df, gw_mode="fixed"):
+    if gw_mode not in _GW_MODE_TO_INT:
+        raise ValueError(
+            f"gw_mode={gw_mode!r} must be one of {list(_GW_MODE_TO_INT)}"
+        )
+    gw_mode_int = _GW_MODE_TO_INT[gw_mode]
     df = df.Define("kinfit",
         "FCCAnalyses::WWFunctions::kinFit("
         "reco_jet1_p, reco_jet1_theta, reco_jet1_phi,"
         "reco_jet2_p, reco_jet2_theta, reco_jet2_phi,"
         "reco_lep_p,  reco_lep_theta,  reco_lep_phi,"
-        f"reco_met_p, reco_met_theta, reco_met_phi, {free_gw})")
+        f"reco_met_p, reco_met_theta, reco_met_phi, {gw_mode_int})")
 
     for tag in ["mW","gW",
                 "s1","s2","sl","sn",
@@ -378,6 +384,18 @@ def run_kinfit(df, free_gw=False):
                 "chi2","chi2_ndof","valid","valid_loose","status","edm",
                 "winner_pass","n_passes_run","priors_swapped"]:
         df = df.Define(f"kinfit_{tag}", f"kinfit.{tag}")
+
+    # Post-fit correlation matrix (16x16, row-major flat). Index order is
+    # FCCAnalyses::WWFunctions::KF_PARAM_NAMES; entry [i*N+j] is corr(i,j).
+    # Stored as a single ROOT::RVecF column to keep the per-event payload as
+    # one branch instead of 120 scalars.
+    df = df.Define("kinfit_corr",
+        "ROOT::RVecF _c(FCCAnalyses::WWFunctions::KF_NPAR_TOTAL "
+        "* FCCAnalyses::WWFunctions::KF_NPAR_TOTAL);"
+        " for (int _i = 0; _i < FCCAnalyses::WWFunctions::KF_NPAR_TOTAL; ++_i)"
+        "  for (int _j = 0; _j < FCCAnalyses::WWFunctions::KF_NPAR_TOTAL; ++_j)"
+        "   _c[_i * FCCAnalyses::WWFunctions::KF_NPAR_TOTAL + _j] = kinfit.corr[_i][_j];"
+        " return _c;")
 
     # Postfit scalars projected from TLVs in KinFitResult.
     for obj, src in [("jet1","j1"), ("jet2","j2"), ("lep","lep"), ("nu","nu")]:
