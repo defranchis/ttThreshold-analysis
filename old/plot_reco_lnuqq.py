@@ -33,7 +33,7 @@ numeric_types = (
 )
 binning = {
     "m_lnu_status2":(50, 0, 150),
-    "m_qq_fromele":(50, 0, 150),
+    "gen_Whad_m":(50, 0, 150),
     "m_jj":(50, 0, 100),
     "GP_p":   (50, 0, 100),
     "gen_leps_status1_p":   (60, 0, 150),
@@ -62,7 +62,7 @@ def get_binning(name, leaf):
         minV, maxV = -0.5, 0.5
     elif "res" in name:
         minV, maxV = -0.1, 0.1
-    elif "sumP" in name:
+    elif name.endswith("_resol") and ("_p" in name or "_m" in name):
         minV, maxV = -10, 10
     elif "_costheta" in name:
         minV, maxV = -1.0, 1.0

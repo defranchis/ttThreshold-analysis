@@ -5,6 +5,20 @@ __pycache__/
 *.txt~
 *.py~
 *.root
+
+# Local helper scripts (ssh-driven pipeline wrappers)
+.run_*.sh
+
+# LaTeX build artefacts in report/
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+report/*.pdf
+
+# Claude's throwaway diagnostics / launchers — never tracked
+scripts_local/
+
 # C extensions
 *.so
 
@@ -163,6 +177,9 @@ cython_debug/
 
 localSamples/
 outputs/
+kinfit_inputs/
+logs/
+.simplify.diff
 
 fccee_flavtagging_edm4hep_wc_v1.json
 fccee_flavtagging_edm4hep_wc_v1.onnx
@@ -173,3 +190,5 @@ zz_old
 condor/scripts
 *.sub
 condor/std
+response
+misc_*
