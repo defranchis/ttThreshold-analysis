@@ -180,6 +180,7 @@ outputs/
 kinfit_inputs/
 kinfit_inputs_4q/
 logs/
+tools/build_logz_table
 .simplify.diff
 
 fccee_flavtagging_edm4hep_wc_v1.json
