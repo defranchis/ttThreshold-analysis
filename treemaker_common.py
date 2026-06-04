@@ -170,11 +170,24 @@ def select_gen_fromele(df):
     return df
 
 
-def define_beam_kinematics(df):
+def define_beam_kinematics(df, post_isr_mode="whizard", gen_ww_p4=None):
     """Beam e± at the two relevant chain depths:
       depth=1 (post-BES, pre-ISR) → m(ee)−ECM gives BES;
-      depth=2 (post-ISR, into hard process) → (depth1 − depth2) gives the
-      total ISR 4-momentum."""
+      post-ISR e± (into hard process) → (depth1 − post_isr) gives the total ISR
+      4-momentum.
+
+    post_isr_mode selects how the post-ISR (hard-process-incoming) e± is found:
+      "whizard" (default) → depth-2 chain walk (sel_post_isr_electrons). Correct
+                 for the Whizard wzp6_ee_munumuqq ℓνqq samples.
+      "p8"      → generatorStatus==21 (sel_post_isr_electrons_status). Robust to
+                 Pythia8's variable-length ISR e-chain; the depth-2 walk drops
+                 ~40% of p8 events (the hard-process e sits at depth 1/2/3).
+
+    gen_ww_p4 (a TLorentzVector column name, e.g. "WW_4q_gen") enables a SECOND,
+    generator-agnostic ISR estimate from the WW system: for a fully-reconstructed
+    final state the post-ISR e+e- 4-momentum equals the WW 4-momentum (momentum
+    conservation), so gen_isr_WW = gen_ee(depth1) − gen_WW. Emitted alongside the
+    electron-based gen_isr for cross-check; needs no e-history walk → no event loss."""
     df = df.Define("gen_beams",
         "FCCAnalyses::WWFunctions::sel_beam_electrons()(Particle, Particle0)")
     df = df.Filter("gen_beams.size() == 2",
@@ -189,10 +202,18 @@ def define_beam_kinematics(df):
     # independent Gaussians) but same width.
     df = df.Define("gen_ee_pz", "gen_ee_p4.Pz()")
 
-    df = df.Define("gen_post_isr_e",
-        "FCCAnalyses::WWFunctions::sel_post_isr_electrons()(Particle, Particle0)")
-    df = df.Filter("gen_post_isr_e.size() == 2",
-                   "gen: exactly 2 post-ISR e± (depth=2)")
+    if post_isr_mode == "p8":
+        df = df.Define("gen_post_isr_e",
+            "FCCAnalyses::WWFunctions::sel_post_isr_electrons_status(21)(Particle)")
+        df = df.Filter("gen_post_isr_e.size() == 2",
+                       "gen: exactly 2 post-ISR e± (genstat==21)")
+    elif post_isr_mode == "whizard":
+        df = df.Define("gen_post_isr_e",
+            "FCCAnalyses::WWFunctions::sel_post_isr_electrons()(Particle, Particle0)")
+        df = df.Filter("gen_post_isr_e.size() == 2",
+                       "gen: exactly 2 post-ISR e± (depth=2)")
+    else:
+        raise ValueError(f"post_isr_mode={post_isr_mode!r} must be 'whizard' or 'p8'")
     df = df.Define("gen_post_isr_e_tlv",
         "FCCAnalyses::MCParticle::get_tlv(gen_post_isr_e)")
     df = df.Define("gen_ee_postisr_p4",
@@ -201,6 +222,14 @@ def define_beam_kinematics(df):
     df = df.Define("gen_isr_px", "gen_isr_p4.Px()")
     df = df.Define("gen_isr_py", "gen_isr_p4.Py()")
     df = df.Define("gen_isr_pz", "gen_isr_p4.Pz()")
+
+    # WW-system ISR proxy (generator-agnostic cross-check): gen_ee − gen_WW.
+    if gen_ww_p4 is not None:
+        df = df.Define("gen_isr_WW_p4", f"gen_ee_p4 - {gen_ww_p4}")
+        df = df.Define("gen_isr_WW_px", "gen_isr_WW_p4.Px()")
+        df = df.Define("gen_isr_WW_py", "gen_isr_WW_p4.Py()")
+        df = df.Define("gen_isr_WW_pz", "gen_isr_WW_p4.Pz()")
+
     # m(WW) − m(ee) — pure ISR mass-loss, with BES variance subtracted off vs
     # the older m(WW) − ECM. In the no-ISR limit it is exactly 0; with ISR it
     # is < 0 (energy loss to the ISR photons).

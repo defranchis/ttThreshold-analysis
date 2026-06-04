@@ -123,6 +123,27 @@ struct sel_post_isr_electrons {
     }
 };
 
+// Pythia8 post-ISR (hard-process-incoming) electrons via generatorStatus.
+// The depth-2 chain walk in sel_post_isr_electrons is Whizard-specific; p8
+// writes a variable-length ISR e-chain (the hard-process-incoming e is at
+// depth 1, 2, or 3 depending on how many ISR electrons were stored), so the
+// rigid depth-2 requirement silently drops ~40% of p8 events. Pythia status 21
+// (= incoming to the hardest subprocess) tags exactly the 2 post-ISR electrons:
+// verified 2/2 in 5000/5000 p8_ee_WW_ecm160 events (vs depth-0 beams = status 4).
+struct sel_post_isr_electrons_status {
+    int status;
+    explicit sel_post_isr_electrons_status(int s = 21) : status(s) {}
+    ROOT::VecOps::RVec<edm4hep::MCParticleData> operator()(
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> in) const {
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> result;
+        result.reserve(2);
+        for (const auto& p : in)
+            if (std::abs(p.PDG) == 11 && p.generatorStatus == status)
+                result.emplace_back(p);
+        return result;
+    }
+};
+
 // ── WW → 4q (fully hadronic) gen-truth selection ────────────────────────────
 // Unlike the Whizard munumuqq samples (W absent from history → sel_*_fromele),
 // the inclusive Pythia8 p8_ee_WW sample KEEPS the W in the MC history. Each

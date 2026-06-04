@@ -61,7 +61,10 @@ if WW_GENTRUTH:
         "gen_quark1_p", "gen_quark2_p", "gen_quark3_p", "gen_quark4_p",
         "jet1_matched_q_dR", "jet2_matched_q_dR", "jet3_matched_q_dR", "jet4_matched_q_dR",
         "gen_W1_m", "gen_W2_m", "gen_WW_m", "gen_WW_m_minus_ecm",
-        "gen_WW_m_minus_m_ee", "gen_isr_pz",
+        "gen_WW_m_minus_m_ee",
+        # ISR cross-check: electron-based (genstat==21) vs WW-system proxy.
+        "gen_isr_px", "gen_isr_py", "gen_isr_pz",
+        "gen_isr_WW_px", "gen_isr_WW_py", "gen_isr_WW_pz",
         "jet1_p_resp", "jet2_p_resp", "jet3_p_resp", "jet4_p_resp",
         "gen_pairing_true", "kinfit4q_pairing_correct",
     ]
@@ -97,7 +100,7 @@ class RDFanalysis:
         if WW_GENTRUTH:
             df = tc.select_gen_fromW(df)
             df = tc.define_gen_kinematics_4q(df)
-            df = tc.define_beam_kinematics(df)
+            df = tc.define_beam_kinematics(df, post_isr_mode="p8", gen_ww_p4="WW_4q_gen")
             df = tc.match_jets_to_quarks_4q(df)
             df = tc.define_resolutions_4q(df)
 

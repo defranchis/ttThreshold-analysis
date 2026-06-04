@@ -80,7 +80,7 @@ class RDFanalysis:
 
         df = tc.select_gen_fromW(df)
         df = tc.define_gen_kinematics_4q(df)
-        df = tc.define_beam_kinematics(df)
+        df = tc.define_beam_kinematics(df, post_isr_mode="p8", gen_ww_p4="WW_4q_gen")
 
         df = tc.match_jets_to_quarks_4q(df)
         df = tc.define_resolutions_4q(df)
