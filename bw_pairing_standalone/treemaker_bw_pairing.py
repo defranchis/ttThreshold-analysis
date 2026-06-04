@@ -43,7 +43,7 @@ processList  = {BW_SAMPLE: {"fraction": _frac, "crossSection": 1}}
 prodTag      = "FCCee/winter2023/IDEA/"
 outputDir    = os.environ.get("BW_OUTDIR", "outputs/bw_pairing/" + BW_BOSON)
 # includePaths are resolved relative to THIS script's directory.
-includePaths = ["BWMatching.h", "BWPairing.h"]
+includePaths = ["JetQuarkMatching.h", "BWPairing.h"]
 
 # --- output branches ---------------------------------------------------------
 branches = ["d_45"]

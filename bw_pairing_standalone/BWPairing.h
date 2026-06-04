@@ -26,6 +26,27 @@
 //
 // Pairing index convention matches kinFit4q_bestpairing / pairing_index_from_groups:
 //   0: (j1 j2)(j3 j4)   1: (j1 j3)(j2 j4)   2: (j1 j4)(j2 j3)
+//
+// ── Why a BARE, pole-referenced BW (no normalization table, no phase space) ──
+// The full WW→4q kinematic fit uses a phase-space-normalised BW term:
+//     BW(m_a)·BW(m_b)·PS(m_a,m_b,M_WW) / Z(M_WW,mW,Γ),   PS = √λ/M_WW²  (Källén)
+// For *choosing the pairing* both extra factors are unnecessary or harmful:
+//   • Z (the normalization integral) depends only on M_WW = the invariant mass of
+//     all 4 jets, which is the SAME for the 3 partitions. So Z is a common offset
+//     → it cancels in argmin(gof) and in the prob softmax. No log-Z table needed
+//     (the fit needs it only because M_WW floats there; here it is fixed/event).
+//   • PS (the shared phase space of the two W's) IS pairing-dependent and is a
+//     closed form (no table) — but at √s≈160 the true both-on-shell pairing has
+//     m_a+m_b ≈ M_WW ≈ 2mW, i.e. it sits at the λ→0 threshold where PS is tiny, so
+//     including PS PENALISES the correct assignment. Measured: adding PS drops the
+//     correct-pairing fraction 91.6%→89.2% (matched events). So PS is omitted.
+// The bare −2·log[BW(m_a)·BW(m_b)] is therefore both the simplest AND the best
+// pairing discriminant here.
+//
+// (Consequence: prob[k] is the pure W-lineshape posterior. It is NOT a calibrated
+// P(correct) — the natural width Γ≈2 GeV is narrower than the ~few-GeV di-jet mass
+// resolution, so the probabilities are over-confident. Resolution is deliberately
+// NOT folded into Γ; a calibrated number would need a Voigtian or the full fit.)
 
 #include <TLorentzVector.h>
 #include <cmath>

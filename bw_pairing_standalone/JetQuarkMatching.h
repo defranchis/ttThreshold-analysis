@@ -1,7 +1,11 @@
-#ifndef BWMatching_H
-#define BWMatching_H
+#ifndef JetQuarkMatching_H
+#define JetQuarkMatching_H
 
-// ── Gen-truth ingredients for the BW jet→W pairing (standalone) ─────────────
+// ── Gen-truth jet ↔ quark matching (standalone) ─────────────────────────────
+// NOTE: pure truth matching — NO Breit-Wigner here. It exists only to *measure*
+// how good the BW pairing is, by giving the true jet→W pairing per event. The
+// BW pairing itself (BWPairing.h) needs none of this.
+//
 // Self-contained copies of the only three truth helpers the pipeline needs:
 //   sel_quarks_fromBoson : the 4 quarks of a VV→4q event, grouped by parent boson
 //   matchJets4           : global 4-jet ↔ 4-quark assignment (min total ΔR)
