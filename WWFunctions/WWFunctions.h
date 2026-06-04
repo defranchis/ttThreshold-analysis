@@ -157,8 +157,13 @@ struct sel_post_isr_electrons_status {
 // once the jets are matched (matchJets4). If the event is not a clean 2×2
 // hadronic topology the result is empty (size != 4), and the treemaker filters
 // on size()==4.
-struct sel_quarks_fromW {
-    sel_quarks_fromW() {}
+// Quarks from the two resonances of a VV→4q event, grouped by parent boson.
+// boson_pdg = 24 → WW→4q (default, keeps sel_quarks_fromW name working below),
+//             23 → ZZ→4q. Returns size 4 ([0,1]=boson A, [2,3]=boson B) only for
+// a clean 2-boson × 2-quark topology, else empty.
+struct sel_quarks_fromBoson {
+    int boson_pdg;
+    explicit sel_quarks_fromBoson(int pdg = 24) : boson_pdg(pdg) {}
     ROOT::VecOps::RVec<edm4hep::MCParticleData> operator()(
         ROOT::VecOps::RVec<edm4hep::MCParticleData> in,
         const ROOT::VecOps::RVec<int>& parents_relation) const {
@@ -166,23 +171,33 @@ struct sel_quarks_fromW {
         for (size_t i = 0; i < in.size(); ++i) {
             const auto& p = in[i];
             if (std::abs(p.PDG) > 5 || p.PDG == 0) continue;
-            int wparent = -1;
+            int bparent = -1;
             for (unsigned j = p.parents_begin; j < p.parents_end; ++j) {
                 if (j >= parents_relation.size()) break;
                 int idx = parents_relation[j];
                 if (idx < 0 || idx >= (int)in.size()) continue;
-                if (std::abs(in[idx].PDG) == 24) { wparent = idx; break; }
+                if (std::abs(in[idx].PDG) == boson_pdg) { bparent = idx; break; }
             }
-            if (wparent < 0) continue;
-            groups[wparent].emplace_back(p);
+            if (bparent < 0) continue;
+            groups[bparent].emplace_back(p);
         }
         ROOT::VecOps::RVec<edm4hep::MCParticleData> result;
-        if (groups.size() != 2) return result;          // not a clean 2-W topology
+        if (groups.size() != 2) return result;          // not a clean 2-boson topology
         for (auto& kv : groups) {
             if (kv.second.size() != 2) { result.clear(); return result; }
             for (auto& q : kv.second) result.emplace_back(q);
         }
-        return result;                                  // size 4, [0,1]=Wa [2,3]=Wb
+        return result;                                  // size 4, [0,1]=A [2,3]=B
+    }
+};
+
+// Back-compat alias: WW→4q (boson_pdg=24). Existing call sites use this name.
+struct sel_quarks_fromW {
+    sel_quarks_fromW() {}
+    ROOT::VecOps::RVec<edm4hep::MCParticleData> operator()(
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> in,
+        const ROOT::VecOps::RVec<int>& parents_relation) const {
+        return sel_quarks_fromBoson(24)(in, parents_relation);
     }
 };
 

@@ -49,16 +49,21 @@ def select_isoleps(df):
     return df
 
 
-def apply_channel_filter(df, channel):
-    if channel == "had":
-        df = df.Filter("muons_sel_iso.size() + electrons_sel_iso.size() == 0",
-                       "channel: 0 isolated leptons (had)")
-    elif channel == "semihad":
-        df = df.Filter("muons_sel_iso.size() + electrons_sel_iso.size() == 1",
-                       "channel: 1 isolated lepton (semihad)")
-    else:
-        df = df.Filter("muons_sel_iso.size() + electrons_sel_iso.size() == 2",
-                       "channel: 2 isolated leptons (lep)")
+def apply_channel_filter(df, channel, veto=True):
+    # veto=False skips the isolated-lepton COUNT cut but still builds the
+    # lepton/FSR-removed collection the jet clustering runs on. Used by studies
+    # that gen-select the final state (e.g. the 4q BW-pairing study) and don't
+    # want the reco lepton veto removing good gen-4q events.
+    if veto:
+        if channel == "had":
+            df = df.Filter("muons_sel_iso.size() + electrons_sel_iso.size() == 0",
+                           "channel: 0 isolated leptons (had)")
+        elif channel == "semihad":
+            df = df.Filter("muons_sel_iso.size() + electrons_sel_iso.size() == 1",
+                           "channel: 1 isolated lepton (semihad)")
+        else:
+            df = df.Filter("muons_sel_iso.size() + electrons_sel_iso.size() == 2",
+                           "channel: 2 isolated leptons (lep)")
 
     df = df.Define("Isoleps_bare", "ROOT::VecOps::Concatenate(muons_sel_iso, electrons_sel_iso)")
 
@@ -447,6 +452,18 @@ def select_gen_fromW(df):
     return df
 
 
+def select_gen_fromZ(df):
+    """Gen-level ZZ→4q filter: exactly 4 quarks from 2 Z's. Used to restrict the
+    inclusive ZZ sample to the fully-hadronic final state (the WW-hypothesis BW
+    pairing control). No pairing truth — the gof discriminant is generator-blind."""
+    df = df.Alias("Particle0", "Particle#0.index")
+    df = df.Define("gen_quarks_Z",
+        "FCCAnalyses::WWFunctions::sel_quarks_fromBoson(23)(Particle, Particle0)")
+    df = df.Filter("gen_quarks_Z.size() == 4",
+                   "gen: 4 quarks from 2 hadronic Z's")
+    return df
+
+
 def define_gen_kinematics_4q(df):
     df = df.Define("gen_quarks_W_tlv",
         "FCCAnalyses::MCParticle::get_tlv(gen_quarks_W)")
@@ -635,6 +652,28 @@ def run_kinfit_4q(df, gw_mode="constrained", with_truth=True):
     if with_truth:
         df = df.Define("kinfit4q_pairing_correct",
             "(int)(gen_pairing_true >= 0 && kinfit4q.pairing == gen_pairing_true)")
+    return df
+
+
+# ── Standalone BW jet→W pairing (no kinematic fit; WWFunctions/BWPairing.h) ───
+def run_bw_pairing(df, with_truth=True):
+    """Fast BW pairing discriminant on the 4 reco jets. Emits the most-probable
+    partition, the per-partition gof / posterior probability / di-jet masses, and
+    (signal only) the gen-truth correctness flag. No Minuit — pure arithmetic."""
+    df = df.Define("bwpair",
+        "FCCAnalyses::WWFunctions::bwPairing(jet1, jet2, jet3, jet4)")
+    df = df.Define("bwpair_pairing",   "bwpair.pairing")
+    df = df.Define("bwpair_gof_best",  "bwpair.gof_best")
+    df = df.Define("bwpair_prob_best", "bwpair.prob_best")
+    df = df.Define("bwpair_dgof",      "bwpair.dgof")
+    for k in range(3):
+        df = df.Define(f"bwpair_gof{k}",  f"bwpair.gof[{k}]")
+        df = df.Define(f"bwpair_prob{k}", f"bwpair.prob[{k}]")
+        df = df.Define(f"bwpair_ma{k}",   f"bwpair.m_a[{k}]")
+        df = df.Define(f"bwpair_mb{k}",   f"bwpair.m_b[{k}]")
+    if with_truth:
+        df = df.Define("bwpair_correct",
+            "(int)(gen_pairing_true >= 0 && bwpair.pairing == gen_pairing_true)")
     return df
 
 
