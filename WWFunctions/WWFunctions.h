@@ -2,6 +2,10 @@
 #define WWFunctions_H
 
 #include <cmath>
+#include <algorithm>
+#include <array>
+#include <limits>
+#include <map>
 #include "TMath.h"
 #include "TVector2.h"
 #include "TLorentzVector.h"
@@ -119,6 +123,48 @@ struct sel_post_isr_electrons {
     }
 };
 
+// ── WW → 4q (fully hadronic) gen-truth selection ────────────────────────────
+// Unlike the Whizard munumuqq samples (W absent from history → sel_*_fromele),
+// the inclusive Pythia8 p8_ee_WW sample KEEPS the W in the MC history. Each
+// matrix-element light quark points to its unique decaying-W immediate parent
+// (status 22/44 — irrelevant, the parent walk is unique). Verified 2026-06-04:
+// 100% of all-hadronic events give exactly 4 such quarks in 2 W groups (2 each).
+//
+// Returns the 4 quarks W-GROUPED-ORDERED: indices [0,1] are the two quarks of
+// one W, [2,3] the two quarks of the other (groups ordered by ascending
+// parent-W index → deterministic). The ordering encodes the true jet→W pairing
+// once the jets are matched (matchJets4). If the event is not a clean 2×2
+// hadronic topology the result is empty (size != 4), and the treemaker filters
+// on size()==4.
+struct sel_quarks_fromW {
+    sel_quarks_fromW() {}
+    ROOT::VecOps::RVec<edm4hep::MCParticleData> operator()(
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> in,
+        const ROOT::VecOps::RVec<int>& parents_relation) const {
+        std::map<int, ROOT::VecOps::RVec<edm4hep::MCParticleData>> groups;
+        for (size_t i = 0; i < in.size(); ++i) {
+            const auto& p = in[i];
+            if (std::abs(p.PDG) > 5 || p.PDG == 0) continue;
+            int wparent = -1;
+            for (unsigned j = p.parents_begin; j < p.parents_end; ++j) {
+                if (j >= parents_relation.size()) break;
+                int idx = parents_relation[j];
+                if (idx < 0 || idx >= (int)in.size()) continue;
+                if (std::abs(in[idx].PDG) == 24) { wparent = idx; break; }
+            }
+            if (wparent < 0) continue;
+            groups[wparent].emplace_back(p);
+        }
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> result;
+        if (groups.size() != 2) return result;          // not a clean 2-W topology
+        for (auto& kv : groups) {
+            if (kv.second.size() != 2) { result.clear(); return result; }
+            for (auto& q : kv.second) result.emplace_back(q);
+        }
+        return result;                                  // size 4, [0,1]=Wa [2,3]=Wb
+    }
+};
+
 // Light quarks (|PDG|<=5) with e± parent — like FCCAnalyses::MCParticle::sel_lightQuarks_fromele
 // but using the robust parents-relation walk.
 struct sel_lightQuarks_fromele {
@@ -150,6 +196,45 @@ matchJets2(const V& r1, const V& r2, const V& g1, const V& g2) {
     double dR_A = dR(r1, g1) + dR(r2, g2);
     double dR_B = dR(r1, g2) + dR(r2, g1);
     return (dR_A < dR_B) ? std::make_pair(g1, g2) : std::make_pair(g2, g1);
+}
+
+// 4-jet ↔ 4-quark global assignment. Returns a length-4 permutation: out[i] is
+// the gen-quark index (0..3) matched to reco jet i, chosen to minimize the
+// total ΔR over all 24 bijections. Used both to build the per-jet response
+// (p_reco/p_gen) and — combined with the W-grouped quark ordering from
+// sel_quarks_fromW — to derive the true jet→W pairing.
+template<typename V>
+ROOT::VecOps::RVec<int>
+matchJets4(const V& j0, const V& j1, const V& j2, const V& j3,
+           const V& q0, const V& q1, const V& q2, const V& q3) {
+    auto dR = [](const V& a, const V& b) {
+        double deta = a.Eta() - b.Eta();
+        double dphi = TVector2::Phi_mpi_pi(a.Phi() - b.Phi());
+        return std::sqrt(deta*deta + dphi*dphi);
+    };
+    const V* jets[4] = {&j0, &j1, &j2, &j3};
+    const V* qs[4]   = {&q0, &q1, &q2, &q3};
+    double dRm[4][4];
+    for (int i = 0; i < 4; ++i)
+        for (int k = 0; k < 4; ++k) dRm[i][k] = dR(*jets[i], *qs[k]);
+    std::array<int, 4> p = {0, 1, 2, 3};
+    std::array<int, 4> best = p;
+    double best_sum = std::numeric_limits<double>::max();
+    do {
+        double s = dRm[0][p[0]] + dRm[1][p[1]] + dRm[2][p[2]] + dRm[3][p[3]];
+        if (s < best_sum) { best_sum = s; best = p; }
+    } while (std::next_permutation(p.begin(), p.end()));
+    return ROOT::VecOps::RVec<int>(best.begin(), best.end());
+}
+
+// Reco-jet partition index from per-jet W-group labels (each 0 or 1):
+//   0: (j0 j1)(j2 j3)   1: (j0 j2)(j1 j3)   2: (j0 j3)(j1 j2)
+// Returns -1 if the labels don't split 2-2 into a valid partition.
+inline int pairing_index_from_groups(int w0, int w1, int w2, int w3) {
+    if (w0 == w1 && w2 == w3) return 0;
+    if (w0 == w2 && w1 == w3) return 1;
+    if (w0 == w3 && w1 == w2) return 2;
+    return -1;
 }
 
 // ── 4-vector sums ─────────────────────────────────────────────────────────

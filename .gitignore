@@ -178,6 +178,7 @@ cython_debug/
 localSamples/
 outputs/
 kinfit_inputs/
+kinfit_inputs_4q/
 logs/
 .simplify.diff
 

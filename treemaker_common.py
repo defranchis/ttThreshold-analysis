@@ -360,6 +360,135 @@ def define_resolutions(df):
     return df
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  WW → 4q (fully hadronic) building blocks
+#  ───────────────────────────────────────────────────────────────────────────
+#  Parallel to the ℓνqq helpers above but for the all-hadronic channel: 4 jets,
+#  4 gen quarks grouped by parent-W (p8 keeps the W in the MC history — see
+#  WWFunctions::sel_quarks_fromW). Reuses select_isoleps, apply_channel_filter
+#  (channel="had"), and define_beam_kinematics unchanged. FSR dressing is a
+#  no-op (0 isolated leptons) so we cluster on the same reduced collection.
+# ════════════════════════════════════════════════════════════════════════════
+
+def cluster_jets_4q(df):
+    # Exclusive kt into exactly 4 jets on the (lepton/FSR-removed, here ≡ full)
+    # reconstructed collection. Jets are E-sorted (descending) like ℓνqq.
+    helper = ExclusiveJetClusteringHelper("ReconstructedParticlesNoMuNoElNoFSR", 4)
+    df = helper.define(df)
+    df = df.Define("jets_p4",
+        f"JetConstituentsUtils::compute_tlv_jets({helper.jets})")
+    df = df.Define("jet1", "jets_p4[0]")
+    df = df.Define("jet2", "jets_p4[1]")
+    df = df.Define("jet3", "jets_p4[2]")
+    df = df.Define("jet4", "jets_p4[3]")
+    df = df.Define("n_reco_jets", "(int)jets_p4.size()")
+    df = df.Filter("n_reco_jets == 4", "exactly 4 reco jets")
+    # Durham dmerge scales (y_{n,n+1}) — jet-resolution observables, kept as
+    # diagnostics / future background discriminants.
+    df = df.Define("d_23", "JetClusteringUtils::get_exclusive_dmerge(_jet, 2)")
+    df = df.Define("d_34", "JetClusteringUtils::get_exclusive_dmerge(_jet, 3)")
+    df = df.Define("d_45", "JetClusteringUtils::get_exclusive_dmerge(_jet, 4)")
+    return df, helper
+
+
+def define_reco_jets_kinematics_4q(df):
+    for i in (1, 2, 3, 4):
+        df = df.Define(f"reco_jet{i}_p",        f"jet{i}.P()")
+        df = df.Define(f"reco_jet{i}_pt",       f"jet{i}.Pt()")
+        df = df.Define(f"reco_jet{i}_theta",    f"jet{i}.Theta()")
+        df = df.Define(f"reco_jet{i}_phi",      f"jet{i}.Phi()")
+        df = df.Define(f"reco_jet{i}_eta",      f"jet{i}.Eta()")
+        df = df.Define(f"reco_jet{i}_costheta", f"jet{i}.CosTheta()")
+        df = df.Define(f"reco_jet{i}_mass",     f"jet{i}.M()")
+        # Reco jets treated as massless (matches the kinfit (p,theta,phi) param).
+        df = df.Define(f"jet{i}_massless",
+            f"FCCAnalyses::WWFunctions::tlv_setmass(jet{i}, 0.)")
+    return df
+
+
+# ── gen-level (4 light quarks from the two W's; W present in p8 history) ──────
+def select_gen_fromW(df):
+    df = df.Alias("Particle0", "Particle#0.index")
+    # W-grouped quarks: size 4 → [Wa_q0, Wa_q1, Wb_q0, Wb_q1]; empty if the
+    # event is not a clean 2×(W→qq) topology (e.g. one W decayed leptonically).
+    df = df.Define("gen_quarks_W",
+        "FCCAnalyses::WWFunctions::sel_quarks_fromW()(Particle, Particle0)")
+    df = df.Filter("gen_quarks_W.size() == 4",
+                   "gen: 4 light quarks from 2 hadronic W's")
+    return df
+
+
+def define_gen_kinematics_4q(df):
+    df = df.Define("gen_quarks_W_tlv",
+        "FCCAnalyses::MCParticle::get_tlv(gen_quarks_W)")
+    df = df.Define("gen_q0_p4", "gen_quarks_W_tlv[0]")
+    df = df.Define("gen_q1_p4", "gen_quarks_W_tlv[1]")
+    df = df.Define("gen_q2_p4", "gen_quarks_W_tlv[2]")
+    df = df.Define("gen_q3_p4", "gen_quarks_W_tlv[3]")
+
+    # The two true W's (gen grouping): W1 = q0+q1, W2 = q2+q3. Quark masses kept.
+    df = df.Define("W1_gen", "FCCAnalyses::WWFunctions::sum_p4({gen_q0_p4, gen_q1_p4})")
+    df = df.Define("W2_gen", "FCCAnalyses::WWFunctions::sum_p4({gen_q2_p4, gen_q3_p4})")
+    df = df.Define("WW_4q_gen",
+        "FCCAnalyses::WWFunctions::sum_p4({gen_q0_p4, gen_q1_p4, gen_q2_p4, gen_q3_p4})")
+
+    for W, src in [("W1", "W1_gen"), ("W2", "W2_gen")]:
+        df = df.Define(f"gen_{W}_m",  f"{src}.M()")
+        df = df.Define(f"gen_{W}_p",  f"{src}.P()")
+        df = df.Define(f"gen_{W}_pt", f"{src}.Pt()")
+        df = df.Define(f"gen_{W}_px", f"{src}.Px()")
+        df = df.Define(f"gen_{W}_py", f"{src}.Py()")
+        df = df.Define(f"gen_{W}_pz", f"{src}.Pz()")
+
+    # gen_WW_* names match the ℓνqq convention so define_beam_kinematics
+    # (gen_WW_m_minus_m_ee) and downstream resolution code reuse unchanged.
+    df = df.Define("gen_WW_m",               "WW_4q_gen.M()")
+    df = df.Define("gen_WW_m_minus_ecm",     "gen_WW_m - FCCAnalyses::WWFunctions::ECM")
+    df = df.Define("gen_WW_px",              "WW_4q_gen.Px()")
+    df = df.Define("gen_WW_py",              "WW_4q_gen.Py()")
+    df = df.Define("gen_WW_pz",              "WW_4q_gen.Pz()")
+    df = df.Define("gen_WW_p_imbalance_tot", "WW_4q_gen.P()")
+    return df
+
+
+def match_jets_to_quarks_4q(df):
+    # Global min-ΣΔR assignment: perm[i] = gen-quark index (0..3) matched to jet i.
+    df = df.Define("jet_match_perm",
+        "FCCAnalyses::WWFunctions::matchJets4(jet1, jet2, jet3, jet4, "
+        "gen_q0_p4, gen_q1_p4, gen_q2_p4, gen_q3_p4)")
+
+    for i in (1, 2, 3, 4):
+        k = i - 1
+        df = df.Define(f"gen_quark{i}_p4", f"gen_quarks_W_tlv[jet_match_perm[{k}]]")
+        df = df.Define(f"jet{i}_matched_q_dR",
+            f"(double)jet{i}.DeltaR(gen_quark{i}_p4)")
+        df = df.Define(f"gen_quark{i}_p",        f"gen_quark{i}_p4.P()")
+        df = df.Define(f"gen_quark{i}_pt",       f"gen_quark{i}_p4.Pt()")
+        df = df.Define(f"gen_quark{i}_theta",    f"gen_quark{i}_p4.Theta()")
+        df = df.Define(f"gen_quark{i}_phi",      f"gen_quark{i}_p4.Phi()")
+        df = df.Define(f"gen_quark{i}_eta",      f"gen_quark{i}_p4.Eta()")
+        df = df.Define(f"gen_quark{i}_costheta", f"gen_quark{i}_p4.CosTheta()")
+        # W-group label of jet i (quarks 0,1 → W1 = 0; quarks 2,3 → W2 = 1).
+        df = df.Define(f"jet{i}_wlab", f"(int)(jet_match_perm[{k}] >= 2)")
+
+    # True reco-jet pairing index in {0,1,2} (−1 if matching doesn't split 2-2).
+    df = df.Define("gen_pairing_true",
+        "FCCAnalyses::WWFunctions::pairing_index_from_groups("
+        "jet1_wlab, jet2_wlab, jet3_wlab, jet4_wlab)")
+    return df
+
+
+def define_resolutions_4q(df):
+    for i in (1, 2, 3, 4):
+        df = df.Define(f"jet{i}_p_resp",      f"reco_jet{i}_p / gen_quark{i}_p")
+        df = df.Define(f"jet{i}_theta_resol", f"reco_jet{i}_theta - gen_quark{i}_theta")
+        df = df.Define(f"jet{i}_phi_resol",
+            f"TVector2::Phi_mpi_pi(reco_jet{i}_phi - gen_quark{i}_phi)")
+        df = df.Define(f"jet{i}_eta_resol",      f"reco_jet{i}_eta - gen_quark{i}_eta")
+        df = df.Define(f"jet{i}_costheta_resol", f"reco_jet{i}_costheta - gen_quark{i}_costheta")
+    return df
+
+
 _GW_MODE_TO_INT = {"fixed": 0, "constrained": 1, "free": 2}
 
 # ── kinematic fit (step2 only) ───────────────────────────────────────────────
@@ -422,6 +551,61 @@ def run_kinfit(df, gw_mode="fixed"):
     df = df.Define("kinfit_WW_py",              "WW_kinfit.Py()")
     df = df.Define("kinfit_WW_pz",              "WW_kinfit.Pz()")
     df = df.Define("kinfit_WW_p_imbalance_tot", "WW_kinfit.P()")
+    return df
+
+
+# ── WW → 4q kinematic fit (step2 only) ───────────────────────────────────────
+def run_kinfit_4q(df, gw_mode="constrained", with_truth=True):
+    """Best-pairing 4q kinematic fit (WWKinReco4q.h). Runs all 3 jet→W
+    partitions, keeps the lowest-χ² one, and emits pairing / χ² / W kinematics
+    branches. with_truth=True also emits the gen-truth pairing-correctness flag
+    (needs gen_pairing_true); set False for background / data-like samples where
+    no W gen-truth exists (e.g. ZZ→4q, applying the WW hypothesis as a χ²
+    discriminant)."""
+    if gw_mode not in _GW_MODE_TO_INT:
+        raise ValueError(f"gw_mode={gw_mode!r} must be one of {list(_GW_MODE_TO_INT)}")
+    gw_mode_int = _GW_MODE_TO_INT[gw_mode]
+    df = df.Define("kinfit4q",
+        "FCCAnalyses::WWFunctions::kinFit4q_bestpairing("
+        "reco_jet1_p, reco_jet1_theta, reco_jet1_phi,"
+        "reco_jet2_p, reco_jet2_theta, reco_jet2_phi,"
+        "reco_jet3_p, reco_jet3_theta, reco_jet3_phi,"
+        f"reco_jet4_p, reco_jet4_theta, reco_jet4_phi, {gw_mode_int})")
+
+    # Pairing-level outputs (the headline: which partition wins + χ² separation).
+    df = df.Define("kinfit4q_pairing",           "kinfit4q.pairing")
+    df = df.Define("kinfit4q_chi2_p0",           "kinfit4q.chi2_p0")
+    df = df.Define("kinfit4q_chi2_p1",           "kinfit4q.chi2_p1")
+    df = df.Define("kinfit4q_chi2_p2",           "kinfit4q.chi2_p2")
+    df = df.Define("kinfit4q_dchi2",             "kinfit4q.dchi2")
+    df = df.Define("kinfit4q_n_pairings_valid",  "kinfit4q.n_pairings_valid")
+
+    # Winning-fit quality + parameters.
+    for tag, expr in [
+        ("chi2",        "kinfit4q.fit.chi2"),
+        ("chi2_ndof",   "kinfit4q.fit.chi2_ndof"),
+        ("valid",       "kinfit4q.fit.valid"),
+        ("valid_loose", "kinfit4q.fit.valid_loose"),
+        ("status",      "kinfit4q.fit.status"),
+        ("edm",         "kinfit4q.fit.edm"),
+        ("winner_pass", "kinfit4q.fit.winner_pass"),
+        ("mW",          "kinfit4q.fit.mW"),
+        ("gW",          "kinfit4q.fit.gW"),
+    ]:
+        df = df.Define(f"kinfit4q_{tag}", expr)
+
+    # Post-fit W / WW kinematics (W_a = first pair, W_b = second pair).
+    for W, src in [("Wa", "kinfit4q.Wa"), ("Wb", "kinfit4q.Wb"), ("WW", "kinfit4q.WW")]:
+        df = df.Define(f"kinfit4q_{W}_m",  f"{src}.M()")
+        df = df.Define(f"kinfit4q_{W}_p",  f"{src}.P()")
+        df = df.Define(f"kinfit4q_{W}_pt", f"{src}.Pt()")
+        df = df.Define(f"kinfit4q_{W}_pz", f"{src}.Pz()")
+
+    # Pairing correctness vs gen truth (gen_pairing_true uses the same index
+    # convention as kinFit4q_bestpairing / pairing_index_from_groups).
+    if with_truth:
+        df = df.Define("kinfit4q_pairing_correct",
+            "(int)(gen_pairing_true >= 0 && kinfit4q.pairing == gen_pairing_true)")
     return df
 
 
