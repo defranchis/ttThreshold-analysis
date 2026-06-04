@@ -8,37 +8,39 @@ resonance. **No kinematic fit, no Minuit** — pure arithmetic, microseconds/eve
 It also works as a **WW-vs-background discriminant** (e.g. ZZ → 4 jets): the
 best-pairing goodness-of-fit is larger for ZZ (di-jet masses near the Z, not the W).
 
-## The physics
+## The physics (the specifics)
 
-At the FCC-ee we collide e⁺e⁻ at √s ≈ 160 GeV, right at the **WW production
-threshold**. Each W decays; when *both* decay hadronically (W → q q̄, branching
-~46%) the final state is **four quarks**, which hadronise and are reconstructed as
-**four jets**. The two quarks of one W came from a single ~80 GeV resonance, so the
-**invariant mass of the right jet pair peaks at m_W = 80.4 GeV** (with the natural
-width Γ_W ≈ 2 GeV). The wrong pairings combine jets from *different* W's, giving
-di-jet masses that are not both near m_W.
+The discriminant is **only the two di-jet masses vs the W Breit-Wigner** — in the
+full WW→4q kinematic fit, a per-term study showed the BW mass term is the *only*
+part that separates pairings (the jet detector priors carry no pairing information).
+So this tool drops the fit entirely and keeps just that term; it reproduces the
+fit's pairing power.
 
-The catch is **combinatorics**: four jets can be grouped into two pairs in three
-ways, and only one is correct. That is the problem this tool solves — pick the
-grouping whose two di-jet masses are most consistent with two W's, scored by the
-**Breit-Wigner** lineshape `BW(m) ∝ (m_W Γ) / ((m²−m_W²)² + (m_W Γ)²)`.
+The non-trivial points, all driven by being **at threshold** (2·m_W ≈ 160.8 > √s):
 
-Two physics points worth knowing:
+- **M_WW is pairing-invariant.** The 4-jet invariant mass M_WW ≈ √s ≈ 2·m_W is the
+  same for all 3 pairings. Two consequences:
+  - the BW phase-space **normalization Z(M_WW) cancels** across pairings → no log-Z
+    table is needed here (the full fit needs it only because M_WW floats there);
+  - the true (both di-jets ≈ 80) pairing sits at the two-body phase-space edge
+    `m_a+m_b ≈ M_WW` (Källén λ → 0), so multiplying by the proper phase-space factor
+    `√λ/M_WW²` would *penalise the correct pairing*. Measured: adding it drops the
+    matched-event efficiency 91.6% → 89.2%. Hence the **bare, pole-referenced BW**.
 
-- **Threshold.** 2·m_W ≈ 160.8 GeV is *above* √s = 160, so the two W's are produced
-  nearly at rest and slightly off-shell. This is why the di-jet masses cluster just
-  below 80, and why we deliberately do **not** add the two-W phase-space factor: at
-  threshold it would penalise the (correct) both-on-shell pairing. See `BWPairing.h`.
+- **`prob` is over-confident.** It is the pure W-lineshape posterior, with Γ_W ≈ 2 GeV
+  *narrower* than the ~few-GeV di-jet mass resolution. Resolution is deliberately not
+  folded into Γ (that would mis-state the physical width); a calibrated probability
+  would need a Voigtian or the full fit. Use `prob` as a ranking, not a P(correct).
 
-- **Radiation.** A hard gluon (q → q g) turns a W's 2-prong decay into 3 prongs, so
-  forcing the event into 4 jets no longer maps cleanly onto the 4 quarks. These
-  events are removed with a **genuine-4-jet cut** on the Durham `d_45` scale (the
-  resolution at which a 5th jet appears) — a standard e⁺e⁻ selection that needs no
-  truth, so it also works on data.
+- **The ceiling is QCD radiation, not the BW.** On *matched* events (the 4 jets
+  faithfully represent the 4 quarks) the tool is ~91% correct and **flat in `d_45`** —
+  radiation does not degrade the discriminant. What it degrades is the 4q↔4-jet
+  *correspondence* (a hard gluon makes the event effectively 5-jet), which is removed
+  with the **`sqrt(d_45)` genuine-4-jet cut** (data-applicable, no truth). The
+  remaining "unmatched" events often have no well-defined correct pairing at all.
 
-For **WW vs ZZ**: applying the *W* hypothesis to ZZ → 4q is a poor fit (the Z mass,
-91 GeV, is ~5 widths off the W pole), so ZZ events get a systematically larger
-`gof` and separate from WW.
+- **WW vs ZZ.** Under the *W* hypothesis the Z mass (91 GeV) is ~5 Γ_W off the pole,
+  so ZZ→4q events get a systematically larger `gof` (AUC ≈ 0.95 vs matched WW).
 
 ## The idea in one line
 
