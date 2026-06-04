@@ -127,6 +127,21 @@ else:
         "lep_phi_resol":    ("reco_lep_p",),
     }
 
+# Per-bin jet-pool exclusion for the 4q p-binned jet priors. From the per-bin
+# per-jet comparison (jet_binned_priors_by_jet.png): the leading jet (jet1) has
+# an anomalously low response when it lands in a low-p bin (mismeasured-hard
+# population), and the softest jet (jet4) has ~no statistics in high-p bins. So
+# exclude those (jet, bin) combos from the pooled binned FIT. The bin EDGES are
+# still computed on the full 4-jet pooled distribution (kept consistent with the
+# kinfit's pick_bin), only the per-bin training subset is restricted.
+# Keyed: branch -> {1-based jet index: set of 0-based bin indices to EXCLUDE}.
+# Applies only to the p-binned branches (φ is binned in |cosθ|, where this p-based
+# rule doesn't map). N_BINS_PRIOR=5, so low = {0,1,2}, high = {3,4}.
+POOL_BIN_EXCLUDE_4Q = {
+    "jet_p_resp_4q":      {1: {0, 1, 2}, 4: {3, 4}},
+    "jet_theta_resol_4q": {1: {0, 1, 2}, 4: {3, 4}},
+}
+
 # ── Per-branch configuration overrides ─────────────────────────────────────
 BRANCH_CONFIG = {
     # Jet p response: detector core + wide-radiation tail → DCB+G.
@@ -2159,8 +2174,27 @@ def process_ecm(ecm):
             edges_q[-1] += 1e-9
             bin_specs[bname] = (list(bcfg), edges_q.tolist())
             bin_vals[bname]  = [None] * N_BINS_PRIOR
+
+            # Optional per-bin jet-pool exclusion (4q). The pooled arrays are the
+            # concat of the 4 jets in order, equal segments, so element i belongs
+            # to jet (i // nseg)+1. Restrict the per-bin training subset only;
+            # edges above are unchanged (computed on the full pooled distribution).
+            excl  = POOL_BIN_EXCLUDE_4Q.get(bname)
+            jetid = None
+            if excl is not None:
+                nseg = len(v) // 4
+                if nseg * 4 == len(v):
+                    jetid = np.repeat([1, 2, 3, 4], nseg)
+                else:
+                    print(f"  [{ecm}]  WARN {bname}: pooled length {len(v)} not 4×N; "
+                          f"jet-pool exclusion disabled")
+
             for ibin in range(N_BINS_PRIOR):
                 m = (v >= edges_q[ibin]) & (v < edges_q[ibin+1])
+                if jetid is not None:
+                    for jet, bins_excl in excl.items():
+                        if ibin in bins_excl:
+                            m = m & (jetid != jet)
                 sub = yvals[m]
                 bin_tasks.append((bname, ibin, sub, ecm))
                 bin_n[(bname, ibin)] = int(m.sum())
