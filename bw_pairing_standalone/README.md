@@ -60,6 +60,26 @@ Outputs:
 - ntuples in `outputs/bw_pairing/W/` and `outputs/bw_pairing/Z/` (TTree `events`),
 - plots in `bw_pairing_plots/`.
 
+## What you should reproduce
+
+`analyze_bw_pairing.py` should print a **pairing efficiency** around:
+
+```
+all events       ~ 0.70
+matched (dR<0.1) ~ 0.91      <- where the jets cleanly match the quarks
+unmatched        ~ 0.63
+```
+
+and produce this **WW-vs-ZZ gof** plot (`gof_WW_vs_ZZ_matched_unmatched.png`) —
+three separated populations: WW-matched lowest, WW-unmatched in the middle, ZZ
+highest (its di-jet masses prefer the Z, far from the W pole). WW-matched vs ZZ
+separation is AUC ≈ 0.95.
+
+![Expected WW vs ZZ gof](reference_gof_WW_vs_ZZ.png)
+
+(Reference figure made on `p8_ee_{WW,ZZ}_ecm160` with the genuine-4-jet cut
+`sqrt(d_45) < 7`. Your medians/normalisations should match to within statistics.)
+
 ### Knobs (environment variables, all optional)
 
 | variable | default | meaning |
