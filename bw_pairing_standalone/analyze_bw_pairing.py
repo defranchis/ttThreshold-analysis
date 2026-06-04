@@ -54,8 +54,10 @@ def pairing_efficiency(ww_fn):
     cols = ["bwpair_pairing", "bwpair_correct", "gen_pairing_true"] + \
            [f"jet{i}_matched_q_dR" for i in (1, 2, 3, 4)]
     C = load(ww_fn, cols)
-    pairing = C["bwpair_pairing"].astype(int)
-    correct = C["bwpair_correct"].astype(float)
+    pairing = C["bwpair_pairing"].astype(int)        # the BW tool's choice, per event
+    correct = C["bwpair_correct"].astype(float)      # 1 if it equals the true pairing, else 0
+    # an event is "matched" if ALL 4 jets sit within MATCH_DR of their quark, i.e.
+    # the reco faithfully represents the quarks and the true pairing is reliable.
     dRmax   = np.stack([C[f"jet{i}_matched_q_dR"] for i in (1, 2, 3, 4)], 1).max(1)
     matched = dRmax < MATCH_DR
     return {
@@ -83,6 +85,8 @@ def main():
     print("=" * 60)
 
     # ---- WW vs ZZ gof, split matched / unmatched ----
+    # The winner's gof is also a WW-vs-ZZ discriminant: ZZ di-jet masses prefer the
+    # Z (~91 GeV), far from the W pole, so ZZ sits at higher gof. Overlay the three.
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
