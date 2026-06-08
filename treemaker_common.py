@@ -708,3 +708,40 @@ def run_bw_pairing(df, with_truth=True):
     return df
 
 
+# ── DIAGNOSTIC: full fit on all 3 pairings + per-term χ² breakdown ────────────
+# Emits, per jet→W partition k∈{0,1,2}: full-fit chi2 / valid / status / ndof and
+# the 8-way per-term decomposition (bw, bes, isr, m_loss, scale_pen, angular, mw,
+# gw). Heavier than production (3 full fits/event); use on a diagnostic subsample
+# to root-cause the discriminant + chi2-magnitude. Returns the extra branch names
+# so the caller can append them to the output list.
+def run_kinfit_4q_diag(df, gw_mode="constrained"):
+    gw_mode_int = _GW_MODE_TO_INT[gw_mode]
+    df = df.Define("kf4qdiag",
+        "FCCAnalyses::WWFunctions::kinFit4q_diag("
+        "reco_jet1_p, reco_jet1_theta, reco_jet1_phi,"
+        "reco_jet2_p, reco_jet2_theta, reco_jet2_phi,"
+        "reco_jet3_p, reco_jet3_theta, reco_jet3_phi,"
+        f"reco_jet4_p, reco_jet4_theta, reco_jet4_phi, {gw_mode_int})")
+    branches = ["kf4qdiag_argmin"]
+    df = df.Define("kf4qdiag_argmin", "kf4qdiag.argmin")
+    _terms = ["bw", "bes", "isr", "m_loss", "scale_pen", "angular", "mw", "gw", "total", "gof"]
+    for k in range(3):
+        for tag, expr in [
+            (f"chi2_p{k}",        f"(float)kf4qdiag.chi2[{k}]"),
+            (f"valid_p{k}",       f"(int)kf4qdiag.valid[{k}]"),
+            (f"valid_loose_p{k}", f"(int)kf4qdiag.valid_loose[{k}]"),
+            (f"status_p{k}",      f"(int)kf4qdiag.status[{k}]"),
+            (f"ndof_p{k}",        f"(float)kf4qdiag.ndof[{k}]"),
+            (f"edm_p{k}",         f"(float)kf4qdiag.edm[{k}]"),
+            (f"fast_status_p{k}", f"(int)kf4qdiag.fast_status[{k}]"),
+            (f"fast_valid_p{k}",  f"(int)kf4qdiag.fast_valid[{k}]"),
+            (f"fast_edm_p{k}",    f"(float)kf4qdiag.fast_edm[{k}]"),
+        ]:
+            name = f"kf4qdiag_{tag}"
+            df = df.Define(name, expr); branches.append(name)
+        for tm in _terms:
+            name = f"kf4qdiag_t_{tm}_p{k}"
+            df = df.Define(name, f"(float)kf4qdiag.terms[{k}].{tm}"); branches.append(name)
+    return df, branches
+
+

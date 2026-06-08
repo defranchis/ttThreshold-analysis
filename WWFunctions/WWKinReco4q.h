@@ -453,6 +453,176 @@ inline KinFit4qResult kinFit4q(
     return result;
 }
 
+// ── DIAGNOSTIC: per-term χ² breakdown ───────────────────────────────────────
+// Re-evaluates each additive χ² term from a fit's PHYSICAL parameters, mirroring
+// chi2fn term-by-term. Single source of truth check: terms.total must equal the
+// fit's reported chi2 (MinValue) to ~1e-4. Used only by kinFit4q_diag to expose
+// which prior/constraint dominates and to test the pairing discriminant — NOT on
+// the production path. (TEMPORARY, strip with the kf4q_prof profiling.)
+struct KinFit4qChi2Terms {
+    double bw, bes, isr, m_loss, scale_pen, angular, mw, gw, total;
+    // Proper goodness-of-fit: each term referenced to its own mode (min value),
+    // so gof = Σ (term − term_at_mode) ≥ 0 and is ≈ χ²(ndof)-distributed — unlike
+    // `total`, which carries the large negative prior log-norm offsets. ndof =
+    // KF4Q_N_CONSTR(+gw) − n_par. For the BW term the reference is both W's on the
+    // pole (m_h=m_l=mW), isolating the dijet-mass-compatibility residual.
+    double gof;
+};
+
+inline KinFit4qChi2Terms kf4q_chi2_terms(
+        float jet1_p, float jet1_theta, float jet1_phi,
+        float jet2_p, float jet2_theta, float jet2_phi,
+        float jet3_p, float jet3_theta, float jet3_phi,
+        float jet4_p, float jet4_theta, float jet4_phi,
+        double mW, double gW,
+        double s1, double s2, double s3, double s4,
+        double t1, double t2, double t3, double t4,
+        double q1, double q2, double q3, double q4,
+        double bes_m, double bes_pz, int gw_mode) {
+    KinFit4qChi2Terms T{};
+    // Identical bin selection to kinFit4q (p_resp & θ on jet p, φ on |cosθ|).
+    const double j1_acth = std::abs(std::cos(jet1_theta));
+    const double j2_acth = std::abs(std::cos(jet2_theta));
+    const double j3_acth = std::abs(std::cos(jet3_theta));
+    const double j4_acth = std::abs(std::cos(jet4_theta));
+    const DcbGaussParams pr1 = kf4q_use_binned ? pick_bin(kf4q_jet_p_resp_bins, kf4q_jet_p_resp_edges, (double)jet1_p) : kf4q_jet_p_resp_incl;
+    const DcbGaussParams pr2 = kf4q_use_binned ? pick_bin(kf4q_jet_p_resp_bins, kf4q_jet_p_resp_edges, (double)jet2_p) : kf4q_jet_p_resp_incl;
+    const DcbGaussParams pr3 = kf4q_use_binned ? pick_bin(kf4q_jet_p_resp_bins, kf4q_jet_p_resp_edges, (double)jet3_p) : kf4q_jet_p_resp_incl;
+    const DcbGaussParams pr4 = kf4q_use_binned ? pick_bin(kf4q_jet_p_resp_bins, kf4q_jet_p_resp_edges, (double)jet4_p) : kf4q_jet_p_resp_incl;
+    const DcbGaussParams th1 = kf4q_use_binned ? pick_bin(kf4q_jet_theta_resol_bins, kf4q_jet_theta_resol_edges, (double)jet1_p) : kf4q_jet_theta_resol_incl;
+    const DcbGaussParams th2 = kf4q_use_binned ? pick_bin(kf4q_jet_theta_resol_bins, kf4q_jet_theta_resol_edges, (double)jet2_p) : kf4q_jet_theta_resol_incl;
+    const DcbGaussParams th3 = kf4q_use_binned ? pick_bin(kf4q_jet_theta_resol_bins, kf4q_jet_theta_resol_edges, (double)jet3_p) : kf4q_jet_theta_resol_incl;
+    const DcbGaussParams th4 = kf4q_use_binned ? pick_bin(kf4q_jet_theta_resol_bins, kf4q_jet_theta_resol_edges, (double)jet4_p) : kf4q_jet_theta_resol_incl;
+    const DcbGaussParams ph1 = kf4q_use_binned ? pick_bin(kf4q_jet_phi_resol_bins, kf4q_jet_phi_resol_edges, j1_acth) : kf4q_jet_phi_resol_incl;
+    const DcbGaussParams ph2 = kf4q_use_binned ? pick_bin(kf4q_jet_phi_resol_bins, kf4q_jet_phi_resol_edges, j2_acth) : kf4q_jet_phi_resol_incl;
+    const DcbGaussParams ph3 = kf4q_use_binned ? pick_bin(kf4q_jet_phi_resol_bins, kf4q_jet_phi_resol_edges, j3_acth) : kf4q_jet_phi_resol_incl;
+    const DcbGaussParams ph4 = kf4q_use_binned ? pick_bin(kf4q_jet_phi_resol_bins, kf4q_jet_phi_resol_edges, j4_acth) : kf4q_jet_phi_resol_incl;
+
+    TLorentzVector j1f = _vec_spherical(jet1_p/s1, jet1_theta - t1, jet1_phi - q1);
+    TLorentzVector j2f = _vec_spherical(jet2_p/s2, jet2_theta - t2, jet2_phi - q2);
+    TLorentzVector j3f = _vec_spherical(jet3_p/s3, jet3_theta - t3, jet3_phi - q3);
+    TLorentzVector j4f = _vec_spherical(jet4_p/s4, jet4_theta - t4, jet4_phi - q4);
+    TLorentzVector Wa = j1f + j2f, Wb = j3f + j4f, WW = Wa + Wb;
+
+    double mh = Wa.M(), ml = Wb.M(), mwgw = mW * gW;
+    double dh = mh*mh - mW*mW, dl = ml*ml - mW*mW;
+    double bw_h = mwgw / (dh*dh + mwgw*mwgw);
+    double bw_l = mwgw / (dl*dl + mwgw*mwgw);
+    double s_ww = WW.M2();
+    double lam  = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
+    lam = std::sqrt(lam*lam + 1e-24);
+    T.bw = -2.0 * (std::log(bw_h) + std::log(bw_l)) + 4.0 * std::log(M_PI)
+         - std::log(lam) + 2.0 * std::log(s_ww)
+         + 2.0 * log_Z_bw_phasespace(std::sqrt(s_ww), mW, gW);
+
+    T.bes = gauss_neg2logpdf(bes_m, KF4Q_BES_M_PRIOR)
+          + gauss_neg2logpdf(bes_pz, KF4Q_BES_PZ_PRIOR);
+
+    const double isr_px_val = -WW.Px(), isr_py_val = -WW.Py(), isr_pz_val = bes_pz - WW.Pz();
+    T.isr = gauss_neg2logpdf(isr_px_val, KF4Q_ISR_PX_PRIOR)
+          + gauss_neg2logpdf(isr_py_val, KF4Q_ISR_PY_PRIOR)
+          + spike_dcb_gauss_neg2logpdf(isr_pz_val, kf4q_isr_pz);
+
+    double m_ee_fit = ECM + bes_m, m_loss = WW.M() - m_ee_fit;
+    T.m_loss = spike_dcb_gauss_neg2logpdf(std::fabs(m_loss), kf4q_ww_m_minus_m_ee);
+    if (m_loss > 0.0) {
+        const double sigma_barrier = kf4q_ww_m_minus_m_ee.sigma_res * KF_M_LOSS_BARRIER_SIGMA_FRAC;
+        const double r = m_loss / sigma_barrier;
+        T.m_loss += r * r;
+    }
+
+    T.scale_pen = dcb_gauss_neg2logpdf(s1, pr1) + dcb_gauss_neg2logpdf(s2, pr2)
+                + dcb_gauss_neg2logpdf(s3, pr3) + dcb_gauss_neg2logpdf(s4, pr4);
+    T.angular = dcb_gauss_neg2logpdf(t1, th1) + dcb_gauss_neg2logpdf(t2, th2)
+              + dcb_gauss_neg2logpdf(t3, th3) + dcb_gauss_neg2logpdf(t4, th4)
+              + dcb_gauss_neg2logpdf(q1, ph1) + dcb_gauss_neg2logpdf(q2, ph2)
+              + dcb_gauss_neg2logpdf(q3, ph3) + dcb_gauss_neg2logpdf(q4, ph4);
+
+    double y_mW = (mW - KF_MW_INIT) / KF4Q_MW_PRIOR_SIGMA;
+    T.mw = y_mW * y_mW + KF4Q_MW_PRIOR_LOG_NORM;
+    double y_gW = (gW - KF_GW_FIXED) / KF_GW_PRIOR_SIGMA;
+    T.gw = (gw_mode == KF_GW_CONSTRAINED_MODE) ? (y_gW * y_gW + KF_GW_PRIOR_LOG_NORM) : 0.0;
+
+    T.total = T.bw + T.bes + T.isr + T.m_loss + T.scale_pen + T.angular + T.mw + T.gw;
+
+    // ── Mode-referenced residuals → goodness-of-fit (≥0, ≈χ²) ──────────────
+    // Each prior/constraint term minus its value at its own mode (min). DCB modes
+    // ≈ p.mu; Gaussian/spike modes at 0 (their μ); BW reference at the W pole.
+    double r_bw  = -2.0 * (std::log(bw_h) + std::log(bw_l)) - 4.0 * std::log(mwgw);
+    double r_bes = (gauss_neg2logpdf(bes_m,  KF4Q_BES_M_PRIOR)  - gauss_neg2logpdf(KF4Q_BES_M_PRIOR.mu,  KF4Q_BES_M_PRIOR))
+                 + (gauss_neg2logpdf(bes_pz, KF4Q_BES_PZ_PRIOR) - gauss_neg2logpdf(KF4Q_BES_PZ_PRIOR.mu, KF4Q_BES_PZ_PRIOR));
+    double r_isr = (gauss_neg2logpdf(isr_px_val, KF4Q_ISR_PX_PRIOR) - gauss_neg2logpdf(KF4Q_ISR_PX_PRIOR.mu, KF4Q_ISR_PX_PRIOR))
+                 + (gauss_neg2logpdf(isr_py_val, KF4Q_ISR_PY_PRIOR) - gauss_neg2logpdf(KF4Q_ISR_PY_PRIOR.mu, KF4Q_ISR_PY_PRIOR))
+                 + (spike_dcb_gauss_neg2logpdf(isr_pz_val, kf4q_isr_pz) - spike_dcb_gauss_neg2logpdf(0.0, kf4q_isr_pz));
+    double r_mloss = T.m_loss - spike_dcb_gauss_neg2logpdf(0.0, kf4q_ww_m_minus_m_ee);
+    double r_scale = (dcb_gauss_neg2logpdf(s1, pr1) - dcb_gauss_neg2logpdf(pr1.mu, pr1))
+                   + (dcb_gauss_neg2logpdf(s2, pr2) - dcb_gauss_neg2logpdf(pr2.mu, pr2))
+                   + (dcb_gauss_neg2logpdf(s3, pr3) - dcb_gauss_neg2logpdf(pr3.mu, pr3))
+                   + (dcb_gauss_neg2logpdf(s4, pr4) - dcb_gauss_neg2logpdf(pr4.mu, pr4));
+    double r_ang = 0.0;
+    { const DcbGaussParams* TH[8] = {&th1,&th2,&th3,&th4,&ph1,&ph2,&ph3,&ph4};
+      const double V[8] = {t1,t2,t3,t4,q1,q2,q3,q4};
+      for (int i=0;i<8;++i) r_ang += dcb_gauss_neg2logpdf(V[i], *TH[i]) - dcb_gauss_neg2logpdf(TH[i]->mu, *TH[i]); }
+    double r_mw = y_mW * y_mW;
+    double r_gw = (gw_mode == KF_GW_CONSTRAINED_MODE) ? (y_gW * y_gW) : 0.0;
+    T.gof = r_bw + r_bes + r_isr + r_mloss + r_scale + r_ang + r_mw + r_gw;
+    return T;
+}
+
+// ── DIAGNOSTIC: full-quality fit on ALL THREE pairings + per-term breakdown ──
+// Decouples discriminant quality (does the TRUE pairing have lowest full-fit χ²?)
+// from minimizer quality (does the fast tier-1 fit rank correctly?). Heavier than
+// production (3 full fits/event) — gate to a diagnostic subsample. (TEMPORARY.)
+struct KinFit4qDiag {
+    float chi2[3];
+    int   valid[3], status[3], valid_loose[3];
+    float ndof[3], edm[3];
+    // Plain Migrad-only (fast) fit per pairing — to test whether the Simplex
+    // pre-pass + retry ladder actually improves convergence vs bare Migrad.
+    int   fast_status[3], fast_valid[3];
+    float fast_chi2[3], fast_edm[3];
+    KinFit4qChi2Terms terms[3];
+    int   argmin;            // pairing with lowest full-fit χ²
+};
+
+inline KinFit4qDiag kinFit4q_diag(
+        float j1_p, float j1_theta, float j1_phi,
+        float j2_p, float j2_theta, float j2_phi,
+        float j3_p, float j3_theta, float j3_phi,
+        float j4_p, float j4_theta, float j4_phi,
+        int gw_mode = KF_GW_CONSTRAINED_MODE) {
+    const double P[4]  = {j1_p, j2_p, j3_p, j4_p};
+    const double TH[4] = {j1_theta, j2_theta, j3_theta, j4_theta};
+    const double PH[4] = {j1_phi, j2_phi, j3_phi, j4_phi};
+    static const int order[3][4] = {{0,1,2,3}, {0,2,1,3}, {0,3,1,2}};
+
+    KinFit4qDiag D{};
+    D.argmin = -1;
+    for (int k = 0; k < 3; ++k) {
+        const int a = order[k][0], b = order[k][1], c = order[k][2], d = order[k][3];
+        KinFit4qResult r = kinFit4q(P[a], TH[a], PH[a], P[b], TH[b], PH[b],
+                                    P[c], TH[c], PH[c], P[d], TH[d], PH[d],
+                                    gw_mode, /*fast=*/false);
+        D.chi2[k]        = r.chi2;
+        D.valid[k]       = r.valid;
+        D.valid_loose[k] = r.valid_loose;
+        D.status[k]      = r.status;
+        D.ndof[k]        = r.chi2_ndof;
+        D.edm[k]         = r.edm;
+        D.terms[k]  = kf4q_chi2_terms(
+            P[a], TH[a], PH[a], P[b], TH[b], PH[b], P[c], TH[c], PH[c], P[d], TH[d], PH[d],
+            r.mW, r.gW, r.s1, r.s2, r.s3, r.s4, r.t1, r.t2, r.t3, r.t4,
+            r.p1, r.p2, r.p3, r.p4, r.bes_m_minus_ecm, r.bes_pz, gw_mode);
+        KinFit4qResult rf = kinFit4q(P[a], TH[a], PH[a], P[b], TH[b], PH[b],
+                                     P[c], TH[c], PH[c], P[d], TH[d], PH[d],
+                                     gw_mode, /*fast=*/true);
+        D.fast_status[k] = rf.status; D.fast_valid[k] = rf.valid;
+        D.fast_chi2[k]   = rf.chi2;   D.fast_edm[k]   = rf.edm;
+        if (D.argmin < 0 || D.chi2[k] < D.chi2[D.argmin]) D.argmin = k;
+    }
+    return D;
+}
+
 // Best-pairing 4q fit. The 4 jets admit 3 partitions into 2 W's:
 //   pairing 0: (j1 j2)(j3 j4)   1: (j1 j3)(j2 j4)   2: (j1 j4)(j2 j3)
 // Run kinFit4q for each, pick the lowest χ² (preferring valid fits). The pairing

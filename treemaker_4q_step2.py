@@ -112,6 +112,10 @@ class RDFanalysis:
 
         df = tc.run_kinfit_4q(df, gw_mode=KIN_FIT_GW_MODE, with_truth=WW_GENTRUTH)
 
+        if KIN_FIT_DIAG:
+            df, _diag_branches = tc.run_kinfit_4q_diag(df, gw_mode=KIN_FIT_GW_MODE)
+            all_branches.extend(_diag_branches)
+
         print(f"\n[cutflow] dataset={_dataset}")
         df.Report().Print()
         print()
