@@ -17,6 +17,24 @@ OUTDIR = sys.argv[3] if len(sys.argv) > 3 else "/eos/user/m/mdefranc/www/mW/bwpa
 os.makedirs(OUTDIR, exist_ok=True)
 
 
+def ensure_index_php(outdir):
+    """Drop the CERN web-gallery index.php into the publish dir (so the plots are
+    browsable). Reuse the existing convention from a parent www directory."""
+    import shutil
+    dst = os.path.join(outdir, "index.php")
+    if os.path.exists(dst):
+        return
+    for cand in (os.path.join(os.path.dirname(outdir.rstrip("/")), "index.php"),
+                 "/eos/user/m/mdefranc/www/mW/index.php"):
+        if os.path.exists(cand):
+            shutil.copy(cand, dst)
+            print("wrote:", dst)
+            return
+
+
+ensure_index_php(OUTDIR)
+
+
 def load(fn, cols):
     rdf = ROOT.RDataFrame("events", fn)
     a = rdf.AsNumpy(cols)

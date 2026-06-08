@@ -425,6 +425,20 @@ def cluster_jets_4q(df):
     return df, helper
 
 
+def filter_genuine_4jet(df, sqrtd45_max=7.0):
+    """Reco-level genuine-4-jet selection (standard ee 4-jet cut): reject hard
+    5th-jet / radiative events via the Durham 4→5 splitting scale, requiring
+    √d_45 < sqrtd45_max [GeV] (d_45 is in GeV²). Data-applicable — no gen truth.
+    Studied on WW→4q (sqrt-d binning): the clean (well-matched) population
+    dominates below √d_45 ≈ 5–7 GeV; the cut roughly doubles the all-4 jet→quark
+    matching efficiency and the surviving 4-jet system is much better defined.
+    sqrtd45_max<=0 disables the cut."""
+    if sqrtd45_max and sqrtd45_max > 0:
+        df = df.Filter(f"d_45 < {sqrtd45_max * sqrtd45_max}",
+                       f"reco genuine 4-jet: sqrt(d_45) < {sqrtd45_max:g} GeV")
+    return df
+
+
 def define_reco_jets_kinematics_4q(df):
     for i in (1, 2, 3, 4):
         df = df.Define(f"reco_jet{i}_p",        f"jet{i}.P()")
@@ -521,6 +535,23 @@ def match_jets_to_quarks_4q(df):
     df = df.Define("gen_pairing_true",
         "FCCAnalyses::WWFunctions::pairing_index_from_groups("
         "jet1_wlab, jet2_wlab, jet3_wlab, jet4_wlab)")
+    return df
+
+
+def define_match_quality_4q(df):
+    """Global jet→quark matching-quality variables (Δθ, Δφ over all 4 pairs of the
+    globally-chosen assignment). gen_match_dist = Σ_i √(Δθ_i²+Δφ_i²) is a single
+    event-level matching score to cut on, replacing the 4 per-jet dR<0.1 cuts.
+    gen_match_dmax = max_i √(Δθ_i²+Δφ_i²) is the worst single jet (≈ the per-jet cut)."""
+    for i in (1, 2, 3, 4):
+        df = df.Define(f"jet{i}_dtheta", f"(double)(jet{i}.Theta() - gen_quark{i}_theta)")
+        df = df.Define(f"jet{i}_dphi",
+            f"(double)TVector2::Phi_mpi_pi(jet{i}.Phi() - gen_quark{i}_phi)")
+        df = df.Define(f"jet{i}_dang",
+            f"std::sqrt(jet{i}_dtheta*jet{i}_dtheta + jet{i}_dphi*jet{i}_dphi)")
+    df = df.Define("gen_match_dist", "jet1_dang + jet2_dang + jet3_dang + jet4_dang")
+    df = df.Define("gen_match_dmax",
+        "std::max(std::max(jet1_dang, jet2_dang), std::max(jet3_dang, jet4_dang))")
     return df
 
 

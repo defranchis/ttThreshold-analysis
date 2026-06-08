@@ -35,11 +35,17 @@ all_branches = [
     "bwpair_gof0", "bwpair_gof1", "bwpair_gof2",
     "bwpair_prob0", "bwpair_prob1", "bwpair_prob2",
     "bwpair_ma0", "bwpair_mb0", "bwpair_ma1", "bwpair_mb1", "bwpair_ma2", "bwpair_mb2",
+    # Durham splitting scales: d_45 = scale of a 5th jet (radiation), d_34 = 4th jet.
+    # Cut d_45 small to require a genuine 4-jet event (standard ee 4-jet selection).
+    "d_23", "d_34", "d_45",
 ]
 if WW_GENTRUTH:
     all_branches += [
         "gen_pairing_true", "bwpair_correct",
         "jet1_matched_q_dR", "jet2_matched_q_dR", "jet3_matched_q_dR", "jet4_matched_q_dR",
+        # global jet->quark matching-quality variable (Δθ,Δφ over all 4 pairs)
+        "gen_match_dist", "gen_match_dmax",
+        "jet1_dang", "jet2_dang", "jet3_dang", "jet4_dang",
     ]
 
 jetClusteringHelper = None
@@ -66,6 +72,7 @@ class RDFanalysis:
             df = tc.select_gen_fromW(df)
             df = tc.define_gen_kinematics_4q(df)
             df = tc.match_jets_to_quarks_4q(df)   # defines gen_pairing_true + jet*_matched_q_dR
+            df = tc.define_match_quality_4q(df)   # global Δθ,Δφ matching variable
         elif WW_GEN4Q == "Z":
             df = tc.select_gen_fromZ(df)          # ZZ→4q filter, no pairing truth
         elif WW_GEN4Q != "none":

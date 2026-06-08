@@ -30,7 +30,52 @@
 #include "WWFunctions/WWKinReco.h"
 #include "kinfit_inputs_4q/dcb_params_4q.h"
 
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <cstdio>
+
 namespace FCCAnalyses { namespace WWFunctions {
+
+// ── TEMPORARY profiling (export KF4Q_TIMING=1): split the per-event 4q fit cost
+//    into Simplex / Migrad / Hesse. Effectively zero overhead when the env var
+//    is unset (one cached-bool branch per scoped block). Prints a summary to
+//    stderr at program exit. Remove once the bottleneck split is confirmed. ──
+namespace kf4q_prof {
+    inline std::atomic<long long> ns_simplex{0}, ns_migrad{0}, ns_hesse{0}, ns_event{0};
+    inline std::atomic<long long> n_event{0}, n_simplex{0}, n_migrad{0}, n_hesse{0};
+    inline bool enabled() { static const bool on = (std::getenv("KF4Q_TIMING") != nullptr); return on; }
+    inline long long now_ns() {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+    struct Scoped {
+        std::atomic<long long>* acc; std::atomic<long long>* cnt; long long t0; bool on;
+        Scoped(std::atomic<long long>* a, std::atomic<long long>* c)
+            : acc(a), cnt(c), t0(0), on(enabled()) { if (on) t0 = now_ns(); }
+        ~Scoped() {
+            if (!on) return;
+            acc->fetch_add(now_ns() - t0, std::memory_order_relaxed);
+            if (cnt) cnt->fetch_add(1, std::memory_order_relaxed);
+        }
+    };
+    struct Reporter { ~Reporter(); };
+    inline Reporter _reporter;   // static-duration: destructor fires at exit
+    inline Reporter::~Reporter() {
+        if (!enabled() || n_event.load() == 0) return;
+        const long long ne = n_event.load();
+        auto us = [](long long ns) { return ns / 1000.0; };
+        std::fprintf(stderr,
+          "\n[KF4Q_TIMING] events=%lld   per-event total=%.1f us\n"
+          "   simplex: %10.1f us total   %7.2f us/call   %8lld calls   %7.1f us/event\n"
+          "   migrad : %10.1f us total   %7.2f us/call   %8lld calls   %7.1f us/event\n"
+          "   hesse  : %10.1f us total   %7.2f us/call   %8lld calls   %7.1f us/event\n",
+          ne, us(ns_event.load()) / ne,
+          us(ns_simplex.load()), us(ns_simplex.load()) / std::max(1LL, n_simplex.load()), n_simplex.load(), us(ns_simplex.load()) / ne,
+          us(ns_migrad.load()),  us(ns_migrad.load())  / std::max(1LL, n_migrad.load()),  n_migrad.load(),  us(ns_migrad.load())  / ne,
+          us(ns_hesse.load()),   us(ns_hesse.load())   / std::max(1LL, n_hesse.load()),   n_hesse.load(),   us(ns_hesse.load())   / ne);
+    }
+}
 
 // ── 4q fit constants ────────────────────────────────────────────────────────
 static constexpr int    KF4Q_NPAR_TOTAL = 16;   // mW, gW, 4 s, 4 t, 4 φ, 2 BES
@@ -126,8 +171,13 @@ inline KinFit4qResult kinFit4q(
         float jet2_p, float jet2_theta, float jet2_phi,
         float jet3_p, float jet3_theta, float jet3_phi,
         float jet4_p, float jet4_theta, float jet4_phi,
-        int gw_mode = KF_GW_CONSTRAINED_MODE) {
+        int gw_mode = KF_GW_CONSTRAINED_MODE,
+        bool fast = false) {
 
+    // fast=true: cheap pairing-discriminant fit — a single strategy-0 Migrad from
+    // the default start, NO Simplex pre-pass / retry ladder / Hesse-covariance.
+    // Only chi2 (+ a rough validity flag) are meaningful; used by the best-pairing
+    // wrapper to rank the 3 jet→W partitions before the full fit on the winner.
     const bool gw_free        = (gw_mode != KF_GW_FIXED_MODE);
     const bool gw_constrained = (gw_mode == KF_GW_CONSTRAINED_MODE);
 
@@ -257,11 +307,12 @@ inline KinFit4qResult kinFit4q(
     std::function<double(const double*)> fObj = chi2fn;
     ROOT::Math::Functor functor(fObj, KF4Q_NPAR_TOTAL);
 
-    auto configure = [&](ROOT::Math::Minimizer* m, const double* x0, bool with_strategy) {
+    auto configure = [&](ROOT::Math::Minimizer* m, const double* x0, bool with_strategy,
+                         int strategy = -1) {
         m->SetFunction(functor);
         m->SetMaxFunctionCalls(KF_MAX_FUNCTION_CALLS);
         m->SetTolerance(KF_MIGRAD_TOLERANCE);
-        if (with_strategy) m->SetStrategy(KF_MIGRAD_STRATEGY);
+        if (with_strategy) m->SetStrategy(strategy >= 0 ? strategy : KF_MIGRAD_STRATEGY);
         m->SetPrintLevel(-1);
         const char* names[KF4Q_NPAR_TOTAL] = {
             "y_mW","y_gW","y_s1","y_s2","y_s3","y_s4",
@@ -280,10 +331,14 @@ inline KinFit4qResult kinFit4q(
         std::unique_ptr<ROOT::Math::Minimizer> simplex(
             ROOT::Math::Factory::CreateMinimizer("Minuit2", "Simplex"));
         configure(simplex.get(), x_init, /*with_strategy=*/false);
-        simplex->Minimize();
+        { kf4q_prof::Scoped _t(&kf4q_prof::ns_simplex, &kf4q_prof::n_simplex); simplex->Minimize(); }
         configure(minimizer.get(), simplex->X(), /*with_strategy=*/true);
-        minimizer->Minimize();
-        minimizer->Minimize();
+        // Two Migrad passes: the second restarts from the converged point and lets
+        // Minuit re-estimate EDM/covariance — empirically rescues ~2× more fits to
+        // converged status (valid 22%→48% at ecm160) for negligible cost (Migrad is
+        // ~3% of the per-event time; Simplex dominates).
+        { kf4q_prof::Scoped _t(&kf4q_prof::ns_migrad, &kf4q_prof::n_migrad); minimizer->Minimize(); }
+        { kf4q_prof::Scoped _t(&kf4q_prof::ns_migrad, &kf4q_prof::n_migrad); minimizer->Minimize(); }
         return minimizer->Status();
     };
 
@@ -303,39 +358,47 @@ inline KinFit4qResult kinFit4q(
         if (cand.chi2 < best.chi2) best = cand;
     };
 
-    // Pass 1: Simplex+Migrad. Pass 2: Hesse-refresh + Simplex+Migrad.
-    // Pass 3: deterministic random-restart. No jet-swap pass (priors are pooled
-    // / jet-symmetric, so swapping is a no-op).
+    // fast: single strategy-0 Migrad, no Simplex / retries (pairing discriminant).
+    // full: Pass 1 Simplex+Migrad; Pass 2 Hesse-refresh + Simplex+Migrad; Pass 3
+    // deterministic random-restart. No jet-swap pass (priors are pooled /
+    // jet-symmetric, so swapping is a no-op).
     int n_passes_run = 1;
-    PassResult best = snapshot(simplex_then_migrad(x_default), /*pass=*/1);
+    PassResult best;
+    if (fast) {
+        configure(minimizer.get(), x_default, /*with_strategy=*/true, /*strategy=*/0);
+        { kf4q_prof::Scoped _t(&kf4q_prof::ns_migrad, &kf4q_prof::n_migrad); minimizer->Minimize(); }
+        best = snapshot(minimizer->Status(), /*pass=*/0);
+    } else {
+        best = snapshot(simplex_then_migrad(x_default), /*pass=*/1);
 
-    if (!converged(best.status) && (!std::isfinite(best.edm) || best.edm < 1.0)) {
-        configure(minimizer.get(), best.x, /*with_strategy=*/true);
-        minimizer->Hesse();
-        ++n_passes_run;
-        pick_better(best, snapshot(simplex_then_migrad(best.x), /*pass=*/2));
-    }
-
-    if (!converged(best.status)) {
-        auto bits_of = [](double d) -> uint64_t {
-            uint64_t b; std::memcpy(&b, &d, sizeof(b)); return b; };
-        uint64_t s = bits_of(jet1_p) ^ (bits_of(jet2_p) << 1)
-                   ^ (bits_of(jet3_p) << 2) ^ (bits_of(jet4_p) << 3);
-        std::mt19937_64 rng(s);
-        std::normal_distribution<double> jitter(0.0, KF_RESTART_SIGMA);
-        for (int t = 0; t < KF_RESTART_N; ++t) {
-            double x_jitter[KF4Q_NPAR_TOTAL];
-            for (int i = 0; i < KF4Q_NPAR_TOTAL; ++i) x_jitter[i] = x_default[i];
-            for (int i = 2; i < KF4Q_NPAR_TOTAL; ++i) x_jitter[i] += jitter(rng);
+        if (!converged(best.status) && (!std::isfinite(best.edm) || best.edm < 1.0)) {
+            configure(minimizer.get(), best.x, /*with_strategy=*/true);
+            { kf4q_prof::Scoped _t(&kf4q_prof::ns_hesse, &kf4q_prof::n_hesse); minimizer->Hesse(); }
             ++n_passes_run;
-            pick_better(best, snapshot(simplex_then_migrad(x_jitter), /*pass=*/3));
-            if (converged(best.status)) break;
+            pick_better(best, snapshot(simplex_then_migrad(best.x), /*pass=*/2));
         }
-    }
 
-    // Recompute the Hessian at the winning point for the covariance.
-    configure(minimizer.get(), best.x, /*with_strategy=*/true);
-    minimizer->Hesse();
+        if (!converged(best.status)) {
+            auto bits_of = [](double d) -> uint64_t {
+                uint64_t b; std::memcpy(&b, &d, sizeof(b)); return b; };
+            uint64_t s = bits_of(jet1_p) ^ (bits_of(jet2_p) << 1)
+                       ^ (bits_of(jet3_p) << 2) ^ (bits_of(jet4_p) << 3);
+            std::mt19937_64 rng(s);
+            std::normal_distribution<double> jitter(0.0, KF_RESTART_SIGMA);
+            for (int t = 0; t < KF_RESTART_N; ++t) {
+                double x_jitter[KF4Q_NPAR_TOTAL];
+                for (int i = 0; i < KF4Q_NPAR_TOTAL; ++i) x_jitter[i] = x_default[i];
+                for (int i = 2; i < KF4Q_NPAR_TOTAL; ++i) x_jitter[i] += jitter(rng);
+                ++n_passes_run;
+                pick_better(best, snapshot(simplex_then_migrad(x_jitter), /*pass=*/3));
+                if (converged(best.status)) break;
+            }
+        }
+
+        // Recompute the Hessian at the winning point for the covariance.
+        configure(minimizer.get(), best.x, /*with_strategy=*/true);
+        { kf4q_prof::Scoped _t(&kf4q_prof::ns_hesse, &kf4q_prof::n_hesse); minimizer->Hesse(); }
+    }
 
     const double* xf = best.x;
     result.status        = best.status;
@@ -368,7 +431,7 @@ inline KinFit4qResult kinFit4q(
     result.bes_m_minus_ecm = static_cast<float>(_y2x(xf[14], KF4Q_BES_M_PRIOR));
     result.bes_pz          = static_cast<float>(_y2x(xf[15], KF4Q_BES_PZ_PRIOR));
 
-    if (result.valid_loose) {
+    if (!fast && result.valid_loose) {
         for (int i = 0; i < KF4Q_NPAR_TOTAL; ++i) {
             const double vii = minimizer->CovMatrix(i, i);
             if (!(vii > 0.0)) continue;
@@ -413,6 +476,8 @@ inline KinFit4qBest kinFit4q_bestpairing(
         float j4_p, float j4_theta, float j4_phi,
         int gw_mode = KF_GW_CONSTRAINED_MODE) {
 
+    kf4q_prof::Scoped _ev(&kf4q_prof::ns_event, &kf4q_prof::n_event);  // per-event total (TEMP profiling)
+
     const double P[4]  = {j1_p, j2_p, j3_p, j4_p};
     const double TH[4] = {j1_theta, j2_theta, j3_theta, j4_theta};
     const double PH[4] = {j1_phi, j2_phi, j3_phi, j4_phi};
@@ -420,15 +485,20 @@ inline KinFit4qBest kinFit4q_bestpairing(
     static const int order[3][4] = {{0,1,2,3}, {0,2,1,3}, {0,3,1,2}};
 
     KinFit4qBest out{};
+
+    // ── Tier 1: cheap pairing discriminant. Run a fast (Migrad-only, no Simplex /
+    // retries / Hesse) fit for each of the 3 partitions and rank them by χ². The
+    // wrong pairings give badly-mismatched W masses → high χ², so even the rough
+    // Migrad-alone χ² separates pairings; the precise fit is deferred to tier 2.
     float   chi2s[3];
     int     valids[3];
-    KinFit4qResult fits[3];
     for (int k = 0; k < 3; ++k) {
         const int a = order[k][0], b = order[k][1], c = order[k][2], d = order[k][3];
-        fits[k] = kinFit4q(P[a], TH[a], PH[a], P[b], TH[b], PH[b],
-                           P[c], TH[c], PH[c], P[d], TH[d], PH[d], gw_mode);
-        chi2s[k]  = fits[k].chi2;
-        valids[k] = fits[k].valid;
+        KinFit4qResult cheap = kinFit4q(P[a], TH[a], PH[a], P[b], TH[b], PH[b],
+                                        P[c], TH[c], PH[c], P[d], TH[d], PH[d],
+                                        gw_mode, /*fast=*/true);
+        chi2s[k]  = cheap.chi2;
+        valids[k] = cheap.valid;
     }
     out.chi2_p0 = chi2s[0]; out.chi2_p1 = chi2s[1]; out.chi2_p2 = chi2s[2];
     out.valid_p0 = valids[0]; out.valid_p1 = valids[1]; out.valid_p2 = valids[2];
@@ -451,8 +521,14 @@ inline KinFit4qBest kinFit4q_bestpairing(
     }
 
     out.pairing = best;
-    out.fit     = fits[best];
     out.dchi2   = std::isfinite(second) ? (second - chi2s[best]) : -1.0f;
+
+    // ── Tier 2: one full-quality fit (Simplex + Migrad + retry ladder + Hesse
+    // covariance) on the winning pairing only. This is the result reported
+    // downstream (kinfit4q_chi2 / valid / mW / covariance / post-fit W's).
+    const int a = order[best][0], b = order[best][1], c = order[best][2], d = order[best][3];
+    out.fit = kinFit4q(P[a], TH[a], PH[a], P[b], TH[b], PH[b],
+                       P[c], TH[c], PH[c], P[d], TH[d], PH[d], gw_mode, /*fast=*/false);
     out.Wa = out.fit.j1 + out.fit.j2;
     out.Wb = out.fit.j3 + out.fit.j4;
     out.WW = out.Wa + out.Wb;

@@ -24,6 +24,11 @@ processList = {
 KIN_FIT_GW_MODE = os.environ.get("KF_GW_MODE", "constrained")
 # Binned (per-jet-p) pooled jet priors via pick_bin (default), or inclusive scalars.
 KIN_FIT_USE_BINNED = os.environ.get("KF_USE_BINNED", "true").lower() in ("1", "true", "yes")
+# DIAGNOSTIC: full fit on all 3 pairings + per-term χ² breakdown (KF4Q_DIAG=1).
+KIN_FIT_DIAG = os.environ.get("KF4Q_DIAG", "0").strip().lower() in ("1", "true", "yes")
+# Reco-level genuine-4-jet selection: require sqrt(d_45) < this [GeV] (0 disables).
+# Rejects hard-5th-jet/radiative events for a well-defined 4-jet system.
+WW_SQRTD45_MAX = float(os.environ.get("WW_SQRTD45_MAX", "7.0"))
 
 channel = "had"
 
@@ -93,6 +98,7 @@ class RDFanalysis:
         df = tc.apply_channel_filter(df, channel)
         df, jetClusteringHelper = tc.cluster_jets_4q(df)
         df = tc.define_reco_jets_kinematics_4q(df)
+        df = tc.filter_genuine_4jet(df, WW_SQRTD45_MAX)   # genuine 4-jet selection
 
         # Gen-truth chain (signal only). For background/data-like samples
         # (WW_GENTRUTH=0) we apply the WW-hypothesis fit directly to the 4 reco
