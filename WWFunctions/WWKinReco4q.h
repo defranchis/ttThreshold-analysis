@@ -84,11 +84,20 @@ static constexpr int    KF4Q_NDIM       = 15;   // free params when gW fixed
 // + 1 mW prior. A floated/constrained gW adds +1 (applied at chi2_ndof time).
 static constexpr int    KF4Q_N_CONSTR   = 21;
 
-// Tight Gaussian prior on mW (SM ± KF4Q_MW_PRIOR_SIGMA). mW is y-rescaled with
-// this σ so the prior collapses to y_mW² + log_norm, mirroring the gW prior.
-static constexpr double KF4Q_MW_PRIOR_SIGMA = 0.010;   // 10 MeV — tunable
-inline const double KF4Q_MW_PRIOR_LOG_NORM =
-        std::log(2.0 * M_PI * KF4Q_MW_PRIOR_SIGMA * KF4Q_MW_PRIOR_SIGMA);
+// mW handling. Two modes (set per-run by setKinFitParams4q from the environment):
+//   - PRIOR mode (default): tight Gaussian prior on mW (SM ± KF4Q_MW_PRIOR_SIGMA);
+//     mW is y-rescaled with this σ so the prior collapses to y_mW² + log_norm
+//     (mirrors the gW prior). σ env-tunable via KF4Q_MW_PRIOR_SIGMA for the scan.
+//   - FREE mode (env KF4Q_MW_FREE=1): NO Gaussian prior — mW floats for the mW
+//     MEASUREMENT, y-rescaled by KF_MW_PHYS_SIGMA (2 GeV) exactly like the ℓνqq fit.
+//     This also removes the stiffest Hessian direction (the 10 MeV prior) → better
+//     convergence: the free-mW measurement goal and convergence goal are aligned.
+inline double KF4Q_MW_PRIOR_SIGMA   = 0.010;   // 10 MeV (env KF4Q_MW_PRIOR_SIGMA)
+inline double KF4Q_MW_PRIOR_LOG_NORM =
+        std::log(2.0 * M_PI * 0.010 * 0.010);
+inline bool   kf4q_mw_free = false;            // env KF4Q_MW_FREE=1 → no mW prior
+// Active mW y-rescale: KF_MW_PHYS_SIGMA in free mode, else the prior σ.
+inline double kf4q_mw_scale() { return kf4q_mw_free ? KF_MW_PHYS_SIGMA : KF4Q_MW_PRIOR_SIGMA; }
 
 // VERY NARROW fixed Gaussian priors for the p8-degenerate WW-system components.
 // p8 has negligible BES (gen_ee_* ≈ 0) and purely collinear ISR (gen_isr_px/py ≈ 0
@@ -121,7 +130,25 @@ inline DcbGaussParams       kf4q_jet_phi_resol_incl   = WWFunctions4q::DCBG_JET_
 inline SpikeDcbGaussParams  kf4q_isr_pz           = WWFunctions4q::SDCBG_GEN_ISR_PZ_160;
 inline SpikeDcbGaussParams  kf4q_ww_m_minus_m_ee  = WWFunctions4q::SDCBG_GEN_WW_M_MINUS_M_EE_160;
 
-inline void setKinFitParams4q(int ecm, bool use_binned = true) {
+// Closure mode (env KF4Q_ISR_MODE, set per-run by setKinFitParams4q):
+//   "mloss" (default, original) : invariant-mass m_WW−m_ee spike-DCB prior + an
+//                                 asymmetric barrier on the unphysical m_WW>m_ee side.
+//   "kfit"                      : symmetric Gaussian ENERGY-balance closure
+//                                 r = (ECM+bes_m) − E_WW − E_γ, replacing the m_loss
+//                                 term. ISR stays recoil-derived (4q has no neutrino,
+//                                 so momentum conservation already fixes ISR exactly —
+//                                 the only lnuqq-kfit ingredient that transfers is the
+//                                 barrier→symmetric-closure swap, which in ℓνqq removed
+//                                 the −2 GeV Whad bias from the one-sided m_loss penalty).
+// σ_R = reco-level energy-balance residual width; 4 jets ⇒ wider than the ℓνqq 1.5.
+// Env KF4Q_SIGMA_R overrides; default to be MEASURED on the 4q sample (placeholder 3.0).
+inline std::string kf4q_isr_mode      = "mloss";
+inline double      KF4Q_ISR_SYS_SIGMA = 3.0;
+inline double      KF4Q_ISR_SYS_LOG_NORM =
+        std::log(2.0 * M_PI * KF4Q_ISR_SYS_SIGMA * KF4Q_ISR_SYS_SIGMA);
+
+inline void setKinFitParams4q(int ecm, bool use_binned = true,
+                              const std::string& isr_mode = "mloss") {
     ECM = static_cast<float>(ecm);
     kf4q_use_binned = use_binned;
     // Only the p8_ee_WW_ecm160 priors exist for now; other ECMs fall back to 160.
@@ -136,6 +163,40 @@ inline void setKinFitParams4q(int ecm, bool use_binned = true) {
     kf4q_jet_phi_resol_incl    = WWFunctions4q::DCBG_JET_PHI_RESOL_4Q_160;
     kf4q_isr_pz          = WWFunctions4q::SDCBG_GEN_ISR_PZ_160;
     kf4q_ww_m_minus_m_ee = WWFunctions4q::SDCBG_GEN_WW_M_MINUS_M_EE_160;
+
+    // Closure mode + energy-balance σ_R (kfit mode). Arg wins; env is the override.
+    kf4q_isr_mode = isr_mode;
+    if (const char* e = std::getenv("KF4Q_ISR_MODE")) kf4q_isr_mode = e;
+    if (const char* e = std::getenv("KF4Q_SIGMA_R")) {
+        const double v = std::atof(e);
+        if (v > 0.0) KF4Q_ISR_SYS_SIGMA = v;
+    }
+    KF4Q_ISR_SYS_LOG_NORM =
+        std::log(2.0 * M_PI * KF4Q_ISR_SYS_SIGMA * KF4Q_ISR_SYS_SIGMA);
+
+    // Per-run tuning from the environment (defaults preserve current behavior).
+    // mW: free-floating (measurement) or tunable-σ prior (convergence scan).
+    if (const char* e = std::getenv("KF4Q_MW_FREE"))
+        kf4q_mw_free = (std::atoi(e) != 0);
+    if (const char* e = std::getenv("KF4Q_MW_PRIOR_SIGMA")) {
+        const double v = std::atof(e);
+        if (v > 0.0) KF4Q_MW_PRIOR_SIGMA = v;
+    }
+    KF4Q_MW_PRIOR_LOG_NORM =
+        std::log(2.0 * M_PI * KF4Q_MW_PRIOR_SIGMA * KF4Q_MW_PRIOR_SIGMA);
+    // Minimizer numerics (shared KF_* knobs; only this 4q process is affected).
+    if (const char* e = std::getenv("KF_MIGRAD_TOLERANCE")) {
+        const double v = std::atof(e);
+        if (v > 0.0) KF_MIGRAD_TOLERANCE = v;
+    }
+    if (const char* e = std::getenv("KF_MIGRAD_STRATEGY"))
+        KF_MIGRAD_STRATEGY = std::atoi(e);
+    std::fprintf(stderr,
+        "[setKinFitParams4q] mW_free=%d  mW_prior_sigma=%.4g  migrad_tol=%.1e  strategy=%d  "
+        "isr_mode=%s  sigma_R=%.3g\n",
+        (int)kf4q_mw_free, KF4Q_MW_PRIOR_SIGMA, KF_MIGRAD_TOLERANCE, KF_MIGRAD_STRATEGY,
+        kf4q_isr_mode.c_str(), KF4Q_ISR_SYS_SIGMA);
+
     kf_init_logz_table();   // shared log-Z table (range covers ecm160 m_WW)
 }
 
@@ -215,7 +276,7 @@ inline KinFit4qResult kinFit4q(
     const DcbGaussParams ph4 = kf4q_use_binned ? pick_bin(kf4q_jet_phi_resol_bins, kf4q_jet_phi_resol_edges, j4_acth) : kf4q_jet_phi_resol_incl;
 
     auto chi2fn = [=](const double* x) -> double {
-        const double mW = KF_MW_INIT  + KF4Q_MW_PRIOR_SIGMA * x[0];
+        const double mW = KF_MW_INIT  + kf4q_mw_scale() * x[0];
         const double gW = KF_GW_FIXED + KF_GW_PRIOR_SIGMA   * x[1];
         const double s1 = _y2x(x[2],  pr1);
         const double s2 = _y2x(x[3],  pr2);
@@ -269,16 +330,29 @@ inline KinFit4qResult kinFit4q(
                         + gauss_neg2logpdf(isr_py_val, KF4Q_ISR_PY_PRIOR)
                         + spike_dcb_gauss_neg2logpdf(isr_pz_val, kf4q_isr_pz);
 
-        // Mass loss m_WW − m_ee ≤ 0 (fitted prior + barrier on the unphysical side).
-        double m_ee_fit = ECM + bes_m;
-        double m_loss   = WW.M() - m_ee_fit;
-        double m_loss_term = spike_dcb_gauss_neg2logpdf(std::fabs(m_loss),
-                                                        kf4q_ww_m_minus_m_ee);
-        if (m_loss > 0.0) {
-            const double sigma_barrier =
-                kf4q_ww_m_minus_m_ee.sigma_res * KF_M_LOSS_BARRIER_SIGMA_FRAC;
-            const double r = m_loss / sigma_barrier;
-            m_loss_term += r * r;
+        // Closure: "mloss" = invariant-mass m_WW−m_ee ≤ 0 (fitted prior + asymmetric
+        // barrier on the unphysical side); "kfit" = symmetric Gaussian ENERGY balance
+        // r = (ECM+bes_m) − E_WW − E_γ, with E_γ the massless energy of the recoil-
+        // derived ISR (3-momentum isr_{px,py,pz}_val). Replaces the one-sided m_loss
+        // penalty that biased the dijet masses low.
+        const double m_ee_fit = ECM + bes_m;
+        double m_loss_term;
+        if (kf4q_isr_mode == "kfit") {
+            const double Eg = std::sqrt(isr_px_val*isr_px_val
+                                      + isr_py_val*isr_py_val
+                                      + isr_pz_val*isr_pz_val);
+            const double r  = (m_ee_fit - WW.E() - Eg) / KF4Q_ISR_SYS_SIGMA;
+            m_loss_term = r * r + KF4Q_ISR_SYS_LOG_NORM;
+        } else {
+            const double m_loss = WW.M() - m_ee_fit;
+            m_loss_term = spike_dcb_gauss_neg2logpdf(std::fabs(m_loss),
+                                                     kf4q_ww_m_minus_m_ee);
+            if (m_loss > 0.0) {
+                const double sigma_barrier =
+                    kf4q_ww_m_minus_m_ee.sigma_res * KF_M_LOSS_BARRIER_SIGMA_FRAC;
+                const double r = m_loss / sigma_barrier;
+                m_loss_term += r * r;
+            }
         }
 
         // Pooled-BINNED jet detector priors (each jet's own bin, picked at entry).
@@ -296,8 +370,8 @@ inline KinFit4qResult kinFit4q(
                        + dcb_gauss_neg2logpdf(q3, ph3)
                        + dcb_gauss_neg2logpdf(q4, ph4);
 
-        // mW prior (always constrained) + gW prior (Constrained mode only).
-        double mw_term = x[0] * x[0] + KF4Q_MW_PRIOR_LOG_NORM;
+        // mW prior (PRIOR mode only — dropped in free-floating mode) + gW prior.
+        double mw_term = kf4q_mw_free ? 0.0 : (x[0] * x[0] + KF4Q_MW_PRIOR_LOG_NORM);
         double gw_term = gw_constrained ? (x[1] * x[1] + KF_GW_PRIOR_LOG_NORM) : 0.0;
 
         return bw_term + bes_term + isr_term + m_loss_term
@@ -414,7 +488,7 @@ inline KinFit4qResult kinFit4q(
     int n_constr = KF4Q_N_CONSTR + (gw_constrained ? 1 : 0);
     result.chi2_ndof = (n_constr > n_par) ? result.chi2 / float(n_constr - n_par) : -1.0f;
 
-    result.mW = static_cast<float>(KF_MW_INIT  + KF4Q_MW_PRIOR_SIGMA * xf[0]);
+    result.mW = static_cast<float>(KF_MW_INIT  + kf4q_mw_scale() * xf[0]);
     result.gW = static_cast<float>(KF_GW_FIXED + KF_GW_PRIOR_SIGMA   * xf[1]);
     result.s1 = _y2x(xf[2],  pr1);
     result.s2 = _y2x(xf[3],  pr2);
@@ -523,12 +597,24 @@ inline KinFit4qChi2Terms kf4q_chi2_terms(
           + gauss_neg2logpdf(isr_py_val, KF4Q_ISR_PY_PRIOR)
           + spike_dcb_gauss_neg2logpdf(isr_pz_val, kf4q_isr_pz);
 
-    double m_ee_fit = ECM + bes_m, m_loss = WW.M() - m_ee_fit;
-    T.m_loss = spike_dcb_gauss_neg2logpdf(std::fabs(m_loss), kf4q_ww_m_minus_m_ee);
-    if (m_loss > 0.0) {
-        const double sigma_barrier = kf4q_ww_m_minus_m_ee.sigma_res * KF_M_LOSS_BARRIER_SIGMA_FRAC;
-        const double r = m_loss / sigma_barrier;
-        T.m_loss += r * r;
+    // Closure term + its mode-referenced residual (r_mloss), mirroring chi2fn.
+    const double m_ee_fit = ECM + bes_m;
+    double r_mloss;
+    if (kf4q_isr_mode == "kfit") {
+        const double Eg = std::sqrt(isr_px_val*isr_px_val + isr_py_val*isr_py_val
+                                  + isr_pz_val*isr_pz_val);
+        const double rr = (m_ee_fit - WW.E() - Eg) / KF4Q_ISR_SYS_SIGMA;
+        T.m_loss = rr * rr + KF4Q_ISR_SYS_LOG_NORM;
+        r_mloss  = rr * rr;                 // mode at r=0
+    } else {
+        const double m_loss = WW.M() - m_ee_fit;
+        T.m_loss = spike_dcb_gauss_neg2logpdf(std::fabs(m_loss), kf4q_ww_m_minus_m_ee);
+        if (m_loss > 0.0) {
+            const double sigma_barrier = kf4q_ww_m_minus_m_ee.sigma_res * KF_M_LOSS_BARRIER_SIGMA_FRAC;
+            const double r = m_loss / sigma_barrier;
+            T.m_loss += r * r;
+        }
+        r_mloss = T.m_loss - spike_dcb_gauss_neg2logpdf(0.0, kf4q_ww_m_minus_m_ee);
     }
 
     T.scale_pen = dcb_gauss_neg2logpdf(s1, pr1) + dcb_gauss_neg2logpdf(s2, pr2)
@@ -538,8 +624,8 @@ inline KinFit4qChi2Terms kf4q_chi2_terms(
               + dcb_gauss_neg2logpdf(q1, ph1) + dcb_gauss_neg2logpdf(q2, ph2)
               + dcb_gauss_neg2logpdf(q3, ph3) + dcb_gauss_neg2logpdf(q4, ph4);
 
-    double y_mW = (mW - KF_MW_INIT) / KF4Q_MW_PRIOR_SIGMA;
-    T.mw = y_mW * y_mW + KF4Q_MW_PRIOR_LOG_NORM;
+    double y_mW = (mW - KF_MW_INIT) / kf4q_mw_scale();
+    T.mw = kf4q_mw_free ? 0.0 : (y_mW * y_mW + KF4Q_MW_PRIOR_LOG_NORM);
     double y_gW = (gW - KF_GW_FIXED) / KF_GW_PRIOR_SIGMA;
     T.gw = (gw_mode == KF_GW_CONSTRAINED_MODE) ? (y_gW * y_gW + KF_GW_PRIOR_LOG_NORM) : 0.0;
 
@@ -554,7 +640,6 @@ inline KinFit4qChi2Terms kf4q_chi2_terms(
     double r_isr = (gauss_neg2logpdf(isr_px_val, KF4Q_ISR_PX_PRIOR) - gauss_neg2logpdf(KF4Q_ISR_PX_PRIOR.mu, KF4Q_ISR_PX_PRIOR))
                  + (gauss_neg2logpdf(isr_py_val, KF4Q_ISR_PY_PRIOR) - gauss_neg2logpdf(KF4Q_ISR_PY_PRIOR.mu, KF4Q_ISR_PY_PRIOR))
                  + (spike_dcb_gauss_neg2logpdf(isr_pz_val, kf4q_isr_pz) - spike_dcb_gauss_neg2logpdf(0.0, kf4q_isr_pz));
-    double r_mloss = T.m_loss - spike_dcb_gauss_neg2logpdf(0.0, kf4q_ww_m_minus_m_ee);
     double r_scale = (dcb_gauss_neg2logpdf(s1, pr1) - dcb_gauss_neg2logpdf(pr1.mu, pr1))
                    + (dcb_gauss_neg2logpdf(s2, pr2) - dcb_gauss_neg2logpdf(pr2.mu, pr2))
                    + (dcb_gauss_neg2logpdf(s3, pr3) - dcb_gauss_neg2logpdf(pr3.mu, pr3))
@@ -563,7 +648,7 @@ inline KinFit4qChi2Terms kf4q_chi2_terms(
     { const DcbGaussParams* TH[8] = {&th1,&th2,&th3,&th4,&ph1,&ph2,&ph3,&ph4};
       const double V[8] = {t1,t2,t3,t4,q1,q2,q3,q4};
       for (int i=0;i<8;++i) r_ang += dcb_gauss_neg2logpdf(V[i], *TH[i]) - dcb_gauss_neg2logpdf(TH[i]->mu, *TH[i]); }
-    double r_mw = y_mW * y_mW;
+    double r_mw = kf4q_mw_free ? 0.0 : y_mW * y_mW;
     double r_gw = (gw_mode == KF_GW_CONSTRAINED_MODE) ? (y_gW * y_gW) : 0.0;
     T.gof = r_bw + r_bes + r_isr + r_mloss + r_scale + r_ang + r_mw + r_gw;
     return T;

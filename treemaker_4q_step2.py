@@ -24,6 +24,9 @@ processList = {
 KIN_FIT_GW_MODE = os.environ.get("KF_GW_MODE", "constrained")
 # Binned (per-jet-p) pooled jet priors via pick_bin (default), or inclusive scalars.
 KIN_FIT_USE_BINNED = os.environ.get("KF_USE_BINNED", "true").lower() in ("1", "true", "yes")
+# Closure mode: "mloss" (default, invariant-mass m_loss + barrier) or "kfit"
+# (symmetric Gaussian energy-balance closure). σ_R tunable via env KF4Q_SIGMA_R.
+KIN_FIT_ISR_MODE = os.environ.get("KF4Q_ISR_MODE", "mloss")
 # DIAGNOSTIC: full fit on all 3 pairings + per-term χ² breakdown (KF4Q_DIAG=1).
 KIN_FIT_DIAG = os.environ.get("KF4Q_DIAG", "0").strip().lower() in ("1", "true", "yes")
 # Reco-level genuine-4-jet selection: require sqrt(d_45) < this [GeV] (0 disables).
@@ -90,7 +93,8 @@ class RDFanalysis:
             raise ValueError(f"ecm={_ecm} parsed from '{_dataset}' not in AVAILABLE_ECM={tc.AVAILABLE_ECM}")
         ROOT.gInterpreter.ProcessLine(
             f'FCCAnalyses::WWFunctions::setKinFitParams4q({_ecm}, '
-            f'{"true" if KIN_FIT_USE_BINNED else "false"});')
+            f'{"true" if KIN_FIT_USE_BINNED else "false"}, '
+            f'"{KIN_FIT_ISR_MODE}");')
         ROOT.gInterpreter.ProcessLine(
             'std::cout << "[DEBUG 4q step2] ECM from WWFunctions = " << FCCAnalyses::WWFunctions::ECM << std::endl;')
 
