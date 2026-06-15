@@ -36,6 +36,10 @@ KIN_FIT_JET_PRIOR_MODE = os.environ.get("KF_JET_PRIOR_MODE", "swap")
 # True → use binned priors (pick_bin per event from reco kinematics).
 # False → use the inclusive (kinematics-averaged) scalar priors.
 KIN_FIT_USE_BINNED = os.environ.get("KF_USE_BINNED", "true").lower() in ("1", "true", "yes")
+# ISR / neutrino treatment: "mloss" (default; MET-measured ν + |m_loss|) or
+# "kfit" (explicit ISR photon + ν derived from 4-mom conservation + Gaussian
+# energy closure). For kfit, pair with KF_JET_PRIOR_MODE=pool.
+KIN_FIT_ISR_MODE = os.environ.get("KF_ISR_MODE", "mloss")
 
 # Run ONNX flavour tagging? Currently outputs are not consumed by any branch
 # in FULL_BRANCHES, but the helper is wired up here for future use.
@@ -157,7 +161,7 @@ class RDFanalysis:
             raise ValueError(f"ecm={_ecm} parsed from '{_dataset}' not in AVAILABLE_ECM={tc.AVAILABLE_ECM}")
         ROOT.gInterpreter.ProcessLine(
             f'FCCAnalyses::WWFunctions::setKinFitParams({_ecm}, "{KIN_FIT_JET_PRIOR_MODE}", '
-            f'{"true" if KIN_FIT_USE_BINNED else "false"});')
+            f'{"true" if KIN_FIT_USE_BINNED else "false"}, "{KIN_FIT_ISR_MODE}");')
         ROOT.gInterpreter.ProcessLine(
             'std::cout << "[DEBUG step2] ECM from WWFunctions = " << FCCAnalyses::WWFunctions::ECM << std::endl;')
 

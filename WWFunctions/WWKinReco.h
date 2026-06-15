@@ -192,6 +192,30 @@ inline bool kf_jet_swap_enabled = false;
 // False → use the inclusive (kinematics-averaged) scalar priors.
 inline bool kf_use_binned_priors = true;
 
+// ISR / neutrino treatment, selected at setKinFitParams() time:
+//  - "mloss" (default): neutrino built from the measured MET (x[5,8,11] = MET
+//            p_resp/θ/φ); ISR via the WW recoil priors; energy via the
+//            |m_loss| spike-DCB + barrier. The original lnuqq fit.
+//  - "kfit" : explicit ISR photon (px_γ,py_γ,k) occupies x[5,8,11] with the
+//            measured ISR-momentum priors; the neutrino is DERIVED from
+//            4-momentum conservation (p_ν = beam − visible − ISR, E_ν=|p_ν|,
+//            massless). The MET measurement is dropped (≡ −visible). Energy
+//            conservation enters as a single Gaussian closure residual
+//            r = (ECM+bes_m) − E_WW − E_γ at the RECO-level width
+//            KF_ISR_SYS_SIGMA. See jax_prototype/kinfit_lnuqq_jax.py (kfit).
+inline std::string kf_isr_mode = "mloss";
+// y-rescale (preconditioning) for the explicit ISR params in "kfit" mode,
+// centered at 0 (ISR spectrum peaks at 0): px_γ,py_γ ~0.4, k longitudinal ~few.
+static constexpr double KF_ISR_SX = 0.4;
+static constexpr double KF_ISR_SY = 0.4;
+static constexpr double KF_ISR_SZ = 2.0;
+// Energy-closure prior width [GeV] for "kfit": the RECO-level closure spread
+// (jet-energy-residual dominated, ~1.5) — NOT the truth ISR-system mass (~0.42),
+// which over-constrains (see project_lnuqq_binned_jets_and_gof_tail).
+static constexpr double KF_ISR_SYS_SIGMA = 1.5;
+inline const double KF_ISR_SYS_LOG_NORM =
+        std::log(2.0 * M_PI * KF_ISR_SYS_SIGMA * KF_ISR_SYS_SIGMA);
+
 // Forward-decl: setKinFitParams calls kf_init_logz_table() (defined below
 // alongside the LogZTable definition) to allocate the precomputed log-Z grid.
 // The init runs on the main thread before any RDataFrame workers exist, so
@@ -199,13 +223,15 @@ inline bool kf_use_binned_priors = true;
 static void kf_init_logz_table();
 
 inline void setKinFitParams(int ecm, const std::string& jet_mode = "swap",
-                             bool use_binned = true) {
+                             bool use_binned = true,
+                             const std::string& isr_mode = "mloss") {
     ECM = static_cast<float>(ecm);
     const bool use_pool  = (jet_mode == "pool");
     const bool use_fixed = (jet_mode == "fixed");
     // Swap fallback only in "swap" (default) mode.
     kf_jet_swap_enabled  = !use_pool && !use_fixed;
     kf_use_binned_priors = use_binned;
+    kf_isr_mode          = isr_mode;
     const KinFitParamSet* p =
         ecm == 157 ? (use_pool ? &KF_PARAMS_157_POOL : &KF_PARAMS_157_SEP) :
         ecm == 160 ? (use_pool ? &KF_PARAMS_160_POOL : &KF_PARAMS_160_SEP) :
@@ -274,6 +300,10 @@ static constexpr int    KF_NPAR_TOTAL = KF_NDIM + 1;
 // When gw_mode==Constrained a Gaussian prior on gW adds +1 constraint, applied at
 // chi2_ndof time.
 static constexpr int    KF_N_CONSTR = 20;
+// "kfit" mode drops the 3 MET prior terms (p_resp + θ + φ) — the neutrino is
+// derived, not measured — and replaces |m_loss| with 1 energy-closure term:
+// 3 jet/lep p_resp + 6 jet/lep angular + 2 BES + 3 ISR + 1 closure + 2 BW = 17.
+static constexpr int    KF_N_CONSTR_KFIT = 17;
 
 // gW handling: pinned to KF_GW_FIXED, fitted with a Gaussian prior (σ =
 // KF_GW_PRIOR_SIGMA), or fitted with no prior (data-only).
@@ -282,8 +312,10 @@ enum KFGwMode { KF_GW_FIXED_MODE = 0, KF_GW_CONSTRAINED_MODE = 1, KF_GW_FREE_MOD
 // Migrad / Minuit2 tuning. These get tweaked together when convergence
 // behaviour changes (cascade order, status-3 recovery, etc.).
 static constexpr int    KF_MAX_FUNCTION_CALLS = 100000;
-static constexpr double KF_MIGRAD_TOLERANCE   = 1e-3;
-static constexpr int    KF_MIGRAD_STRATEGY    = 2;
+// Runtime-settable (env KF_MIGRAD_TOLERANCE / KF_MIGRAD_STRATEGY via the 4q
+// setKinFitParams4q; defaults preserve the original constexpr values).
+inline double KF_MIGRAD_TOLERANCE = 1e-3;
+inline int    KF_MIGRAD_STRATEGY  = 2;
 // Initial Migrad finite-difference step in y-space (every parameter is
 // y-rescaled to unit-σ priors). 0.01 = 1 % of prior σ — small enough to
 // resolve posteriors that are 5–10 % of prior σ (BES, MET angular, lep tl)
@@ -608,6 +640,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
 
     const bool gw_free        = (gw_mode != KF_GW_FIXED_MODE);
     const bool gw_constrained = (gw_mode == KF_GW_CONSTRAINED_MODE);
+    const bool kfit           = (kf_isr_mode == "kfit");  // explicit-ISR + derived-ν
 
     KinFitResult result{};
     result.gW    = KF_GW_FIXED;
@@ -670,23 +703,44 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         const double s1 = _y2x(x[2],  p_jet1_p_resp);
         const double s2 = _y2x(x[3],  p_jet2_p_resp);
         const double sl = _y2x(x[4],  kf_lep_p_resp);
-        const double sn = _y2x(x[5],  kf_met_p_resp);
         const double t1 = _y2x(x[6],  p_jet1_theta_resol);
         const double t2 = _y2x(x[7],  p_jet2_theta_resol);
-        const double tn = _y2x(x[8],  kf_met_theta_resol);
         const double p1 = _y2x(x[9],  p_jet1_phi_resol);
         const double p2 = _y2x(x[10], p_jet2_phi_resol);
-        const double pn = _y2x(x[11], kf_met_phi_resol);
         const double tl = _y2x(x[12], kf_lep_theta_resol);
         const double pl = _y2x(x[13], kf_lep_phi_resol);
         const double bes_m  = _y2x(x[14], kf_ee_m_minus_ecm);   // = m_ee_fit − ECM
         const double bes_pz = _y2x(x[15], kf_ee_pz);            // = pz_ee_fit
-        if (s1 <= 0.0 || s2 <= 0.0 || sl <= 0.0 || sn <= 0.0) return 1e10;
+        if (s1 <= 0.0 || s2 <= 0.0 || sl <= 0.0) return 1e10;
 
-        TLorentzVector j1f = _vec_spherical(jet1_p/s1,    jet1_theta    - t1, jet1_phi    - p1);
-        TLorentzVector j2f = _vec_spherical(jet2_p/s2,    jet2_theta    - t2, jet2_phi    - p2);
-        TLorentzVector lf  = _vec_spherical(Isolep_p/sl,  Isolep_theta  - tl, Isolep_phi  - pl);
-        TLorentzVector nf  = _vec_spherical(missing_p/sn, missing_p_theta - tn, missing_p_phi - pn);
+        TLorentzVector j1f = _vec_spherical(jet1_p/s1,   jet1_theta   - t1, jet1_phi   - p1);
+        TLorentzVector j2f = _vec_spherical(jet2_p/s2,   jet2_theta   - t2, jet2_phi   - p2);
+        TLorentzVector lf  = _vec_spherical(Isolep_p/sl, Isolep_theta - tl, Isolep_phi - pl);
+
+        // Neutrino: "kfit" derives it from 4-momentum conservation against an
+        // explicit ISR photon (px_γ,py_γ,k in slots x[5,8,11]); "mloss" builds it
+        // from the measured MET. ISR / closure / MET-prior terms branch below.
+        TLorentzVector nf;
+        double pgx = 0.0, pgy = 0.0, kz = 0.0, Eg = 0.0;
+        double met_scale_pen = 0.0, met_angular = 0.0;
+        if (kfit) {
+            pgx = KF_ISR_SX * x[5];  pgy = KF_ISR_SY * x[8];  kz = KF_ISR_SZ * x[11];
+            Eg  = std::sqrt(pgx*pgx + pgy*pgy + kz*kz);
+            const TLorentzVector Vis = j1f + j2f + lf;
+            const double nux = -Vis.Px() - pgx;
+            const double nuy = -Vis.Py() - pgy;
+            const double nuz = bes_pz - Vis.Pz() - kz;
+            nf.SetPxPyPzE(nux, nuy, nuz, std::sqrt(nux*nux + nuy*nuy + nuz*nuz));
+        } else {
+            const double sn = _y2x(x[5],  kf_met_p_resp);
+            const double tn = _y2x(x[8],  kf_met_theta_resol);
+            const double pn = _y2x(x[11], kf_met_phi_resol);
+            if (sn <= 0.0) return 1e10;
+            nf = _vec_spherical(missing_p/sn, missing_p_theta - tn, missing_p_phi - pn);
+            met_scale_pen = asymgauss3g_neg2logpdf(sn, kf_met_p_resp);
+            met_angular   = asymgauss3g_neg2logpdf(tn, kf_met_theta_resol)
+                          + asymgauss3g_neg2logpdf(pn, kf_met_phi_resol);
+        }
 
         TLorentzVector Wh = j1f + j2f;
         TLorentzVector Wl = lf  + nf;
@@ -716,48 +770,52 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         double bes_term = gauss_neg2logpdf(bes_m,  kf_ee_m_minus_ecm)
                         + gauss_neg2logpdf(bes_pz, kf_ee_pz);
 
-        // ISR via 4-momentum balance with depth-1 e+e- (px=py=0, pz=bes_pz):
-        //   ISR_p = depth1_p − WW_p
-        const double isr_px_val = -WW.Px();
-        const double isr_py_val = -WW.Py();
-        const double isr_pz_val = bes_pz - WW.Pz();
-        double isr_term = spike_dcb_gauss_neg2logpdf(isr_px_val, kf_isr_px)
-                        + spike_dcb_gauss_neg2logpdf(isr_py_val, kf_isr_py)
-                        + spike_dcb_gauss_neg2logpdf(isr_pz_val, kf_isr_pz);
-
-        // Prior on |m_loss| (symmetrized in fit_resolutions.py) + quadratic
-        // barrier for m_loss>0 to enforce the physical bound m_WW ≤ m_ee.
-        double m_ee_fit = ECM + bes_m;
-        double m_loss   = WW.M() - m_ee_fit;
-        double m_loss_term = spike_dcb_gauss_neg2logpdf(std::fabs(m_loss),
-                                                        kf_ww_m_minus_m_ee);
-        if (m_loss > 0.0) {
-            const double sigma_barrier =
-                kf_ww_m_minus_m_ee.sigma_res * KF_M_LOSS_BARRIER_SIGMA_FRAC;
-            const double r = m_loss / sigma_barrier;
-            m_loss_term += r * r;
+        // ISR + energy closure.
+        //  kfit : priors on the explicit ISR photon (px_γ,py_γ,k) + a Gaussian
+        //         energy-closure residual r = (ECM+bes_m) − E_WW − E_γ at the
+        //         reco-level width KF_ISR_SYS_SIGMA.
+        //  mloss: priors on the WW recoil (ISR_p = depth1_p − WW_p, px=py=0,
+        //         pz=bes_pz) + |m_loss| spike-DCB with an m_loss>0 barrier.
+        double isr_term, eclos_term;
+        if (kfit) {
+            isr_term = spike_dcb_gauss_neg2logpdf(pgx, kf_isr_px)
+                     + spike_dcb_gauss_neg2logpdf(pgy, kf_isr_py)
+                     + spike_dcb_gauss_neg2logpdf(kz,  kf_isr_pz);
+            const double r = (ECM + bes_m) - WW.E() - Eg;
+            eclos_term = (r / KF_ISR_SYS_SIGMA) * (r / KF_ISR_SYS_SIGMA) + KF_ISR_SYS_LOG_NORM;
+        } else {
+            isr_term = spike_dcb_gauss_neg2logpdf(-WW.Px(),         kf_isr_px)
+                     + spike_dcb_gauss_neg2logpdf(-WW.Py(),         kf_isr_py)
+                     + spike_dcb_gauss_neg2logpdf(bes_pz - WW.Pz(), kf_isr_pz);
+            const double m_loss = WW.M() - (ECM + bes_m);
+            eclos_term = spike_dcb_gauss_neg2logpdf(std::fabs(m_loss), kf_ww_m_minus_m_ee);
+            if (m_loss > 0.0) {
+                const double sigma_barrier =
+                    kf_ww_m_minus_m_ee.sigma_res * KF_M_LOSS_BARRIER_SIGMA_FRAC;
+                const double rb = m_loss / sigma_barrier;
+                eclos_term += rb * rb;
+            }
         }
 
         double scale_pen = dcb_gauss_neg2logpdf(s1, p_jet1_p_resp)
                          + dcb_gauss_neg2logpdf(s2, p_jet2_p_resp)
                          + dcb_expright_3gauss_neg2logpdf(sl, kf_lep_p_resp)
-                         + asymgauss3g_neg2logpdf(sn, kf_met_p_resp);
+                         + met_scale_pen;   // MET p_resp term only in "mloss"
 
         double angular = dcb_gauss_neg2logpdf(t1, p_jet1_theta_resol)
                        + dcb_gauss_neg2logpdf(t2, p_jet2_theta_resol)
-                       + asymgauss3g_neg2logpdf(tn, kf_met_theta_resol)
                        + dcb_gauss_neg2logpdf(tl, kf_lep_theta_resol)
                        + dcb_gauss_neg2logpdf(p1, p_jet1_phi_resol)
                        + dcb_gauss_neg2logpdf(p2, p_jet2_phi_resol)
-                       + asymgauss3g_neg2logpdf(pn, kf_met_phi_resol)
-                       + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol);
+                       + dcb_gauss_neg2logpdf(pl, kf_lep_phi_resol)
+                       + met_angular;       // MET θ/φ terms only in "mloss"
 
         // gW prior (only in Constrained mode) collapses to y_gW² + log_norm
         // under the y-rescaling. In Free mode the prior is dropped; in Fixed
         // mode gW is pinned via FixVariable so the term is identically zero.
         double gw_term = gw_constrained ? (x[1] * x[1] + KF_GW_PRIOR_LOG_NORM) : 0.0;
 
-        return bw_term + bes_term + isr_term + m_loss_term + scale_pen + angular + gw_term;
+        return bw_term + bes_term + isr_term + eclos_term + scale_pen + angular + gw_term;
     };
 
     std::function<double(const double*)> fObj = chi2fn;
@@ -936,22 +994,29 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.edm            = static_cast<float>(best.edm);
     int n_par    = gw_free ? KF_NPAR_TOTAL : KF_NDIM;
     // +1 constraint from the gW Gaussian prior in Constrained mode only.
-    int n_constr = KF_N_CONSTR + (gw_constrained ? 1 : 0);
+    int n_constr = (kfit ? KF_N_CONSTR_KFIT : KF_N_CONSTR) + (gw_constrained ? 1 : 0);
     result.chi2_ndof = (n_constr > n_par) ? result.chi2 / float(n_constr - n_par) : -1.0f;
     result.mW = static_cast<float>(KF_MW_INIT  + KF_MW_PHYS_SIGMA  * x_final[0]);
     result.gW = static_cast<float>(KF_GW_FIXED + KF_GW_PRIOR_SIGMA * x_final[1]);
     result.s1 = _y2x(x_final[2],  p_jet1_p_resp);
     result.s2 = _y2x(x_final[3],  p_jet2_p_resp);
     result.sl = _y2x(x_final[4],  kf_lep_p_resp);
-    result.sn = _y2x(x_final[5],  kf_met_p_resp);
     result.t1 = _y2x(x_final[6],  p_jet1_theta_resol);
     result.t2 = _y2x(x_final[7],  p_jet2_theta_resol);
-    result.tn = _y2x(x_final[8],  kf_met_theta_resol);
     result.p1 = _y2x(x_final[9],  p_jet1_phi_resol);
     result.p2 = _y2x(x_final[10], p_jet2_phi_resol);
-    result.pn = _y2x(x_final[11], kf_met_phi_resol);
     result.tl = _y2x(x_final[12], kf_lep_theta_resol);
     result.pl = _y2x(x_final[13], kf_lep_phi_resol);
+    // sn/tn/pn slots: "mloss" = MET p_resp/θ/φ; "kfit" = explicit ISR px_γ/py_γ/k.
+    if (kfit) {
+        result.sn = static_cast<float>(KF_ISR_SX * x_final[5]);
+        result.tn = static_cast<float>(KF_ISR_SY * x_final[8]);
+        result.pn = static_cast<float>(KF_ISR_SZ * x_final[11]);
+    } else {
+        result.sn = _y2x(x_final[5],  kf_met_p_resp);
+        result.tn = _y2x(x_final[8],  kf_met_theta_resol);
+        result.pn = _y2x(x_final[11], kf_met_phi_resol);
+    }
     result.bes_m_minus_ecm = static_cast<float>(_y2x(x_final[14], kf_ee_m_minus_ecm));
     result.bes_pz          = static_cast<float>(_y2x(x_final[15], kf_ee_pz));
 
@@ -981,7 +1046,16 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     TLorentzVector j1f = _vec_spherical(jet1_p/result.s1,    jet1_theta    - result.t1, jet1_phi    - result.p1);
     TLorentzVector j2f = _vec_spherical(jet2_p/result.s2,    jet2_theta    - result.t2, jet2_phi    - result.p2);
     TLorentzVector lf  = _vec_spherical(Isolep_p/result.sl,  Isolep_theta - result.tl, Isolep_phi - result.pl);
-    TLorentzVector nf  = _vec_spherical(missing_p/result.sn, missing_p_theta - result.tn, missing_p_phi - result.pn);
+    TLorentzVector nf;
+    if (kfit) {   // derive the neutrino from 4-mom conservation (sn/tn/pn hold ISR px/py/k)
+        const TLorentzVector Vis = j1f + j2f + lf;
+        const double nux = -Vis.Px() - result.sn;
+        const double nuy = -Vis.Py() - result.tn;
+        const double nuz = result.bes_pz - Vis.Pz() - result.pn;
+        nf.SetPxPyPzE(nux, nuy, nuz, std::sqrt(nux*nux + nuy*nuy + nuz*nuz));
+    } else {
+        nf = _vec_spherical(missing_p/result.sn, missing_p_theta - result.tn, missing_p_phi - result.pn);
+    }
 
     result.j1  = j1f;
     result.j2  = j2f;
