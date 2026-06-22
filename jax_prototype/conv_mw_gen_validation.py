@@ -20,8 +20,9 @@ import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 import uproot
 from scipy.interpolate import RegularGridInterpolator  # noqa (kept for parity w/ anatomy)
 
-GW      = float(os.environ.get("GW", "2.085"))
-MW_REF  = float(os.environ.get("MW_REF", "80.379"))    # generator-ish input mW (PDG); the gen peak tests it
+BW_RUN  = int(os.environ.get("BW_RUN", "1"))           # 1=running-width BW Γ(m)=gW·m²/mW (DAY7 fix, default); 0=fixed
+GW      = float(os.environ.get("GW", "2.049"))         # WHIZARD SM.mdl generator width wW=2.049 (was PDG 2.085)
+MW_REF  = float(os.environ.get("MW_REF", "80.419"))    # WHIZARD generator mW=80.419 (was PDG 80.379); the gen peak tests it
 SIG_BES_ECM = {157: 0.116, 160: 0.119, 163: 0.121}     # measured BES on √s' [GeV] (memory: depth-1 e± pair)
 EOSW    = "/eos/user/m/mdefranc/www/mW/conv_mw"; os.makedirs(EOSW, exist_ok=True)
 ALPHA   = 1.0/137.035999; ME = 0.000510999
@@ -33,11 +34,17 @@ def log_Z(m_WW, mW, gW=GW):
     s = m_WW**2; t_min = np.arctan(-mW2/mwgw); t_max = np.arctan((s-mW2)/mwgw)
     hd = 0.5*(t_max-t_min); hs = 0.5*(t_max+t_min); t = hd[:,None]*_GX[None,:]+hs[:,None]
     m = np.sqrt(np.maximum(mW2+mwgw*np.tan(t),1e-12)); inv = 1/m
+    if BW_RUN:   # importance-reweight the fixed-width arctan sampling onto running-width Γ(m)=gW·m²/mW
+        dd = m*m-mW2; wm = gW*m*m/mW; rf = (m*m/mW2)*(dd*dd+mwgw*mwgw)/(dd*dd+wm*wm)
+    else: rf = np.ones_like(m)
     mh = m[:,:,None]; ml = m[:,None,:]; ih = inv[:,:,None]; il = inv[:,None,:]; sE = s[:,None,None]
+    rh = rf[:,:,None]; rl = rf[:,None,:]
     lam = (sE-(mh+ml)**2)*(sE-(mh-ml)**2)
-    integ = np.where(lam>0, np.sqrt(np.maximum(lam,0))*ih*il/(4*sE), 0.0)
+    integ = np.where(lam>0, np.sqrt(np.maximum(lam,0))*ih*il*rh*rl/(4*sE), 0.0)
     Z = np.sum(_W2[None]*integ,axis=(1,2))*hd*hd; return np.log(np.maximum(Z,1e-300))
-def bw(m, mW, gW=GW): mwgw = mW*gW; d = m*m-mW*mW; return mwgw/(d*d+mwgw*mwgw)
+def bw_fixed(m, mW, gW=GW): mwgw = mW*gW; d = m*m-mW*mW; return mwgw/(d*d+mwgw*mwgw)
+def bw_run(m, mW, gW=GW):   d = m*m-mW*mW; wm = gW*m*m/mW; return wm/(d*d+wm*wm)
+def bw(m, mW, gW=GW): return bw_run(m,mW,gW) if BW_RUN else bw_fixed(m,mW,gW)
 
 TLO, THI, NT = 28.0, 96.0, 137
 tg = np.linspace(TLO, THI, NT); dt = tg[1]-tg[0]
@@ -132,5 +139,6 @@ for r, ECM in enumerate(ECMS):
     ax.set_xlim(0,maxi); ax.set_yscale("log"); ax.set_ylim(1e-3,5); ax.set_title(f"ecm{ECM}: ISR energy"); ax.legend(fontsize=10); ax.set_xlabel("GeV")
     print(f"{ECM:>4d} {'ISR':9s} {stats(isrE)[0]:9.3f} {stats(isrE)[1]:8.3f} {stats(ECM-sqs)[0]:10.3f} {stats(ECM-sqs)[1]:9.3f}")
 
-fig.suptitle(f"ISR-convolved double-BW vs GEN (mW={MW_REF}, Γ_W={GW}); √s' model = SF⊗BES × Z(√s') production", fontsize=14)
+_bwlab = "running-width" if BW_RUN else "fixed-width"
+fig.suptitle(f"ISR-convolved double-BW [{_bwlab}] vs GEN  (WHIZARD generator mW={MW_REF}, Γ_W={GW}); √s' model = SF⊗BES × Z(√s')", fontsize=14)
 fig.tight_layout(); png=f"{EOSW}/gen_validation.png"; fig.savefig(png,dpi=130); print(f"\n[plot] {png}")

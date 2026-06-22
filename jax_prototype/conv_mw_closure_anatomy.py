@@ -32,6 +32,10 @@ np.set_printoptions(linewidth=160, suppress=True)
 ECM    = int(sys.argv[1]) if len(sys.argv) > 1 else 160
 GW     = float(os.environ.get("GW", "2.085"))
 MW_REF = float(os.environ.get("MW_REF", "80.379"))
+BW_RUN = int(os.environ.get("BW_RUN", "0"))   # 0=fixed-width BW (default); 1=running-width Γ_W(m)=gW·m²/mW²
+#   DAY7 test: PDG mW is the running-width convention; M(run)=M(pole)+Γ²/(2mW)≈+27 MeV. A running-width BW with
+#   parameter mW peaks ~27 MeV BELOW mW, so a fit recovers mW ~27 MeV ABOVE the fixed-width fit. Expect gen_pe
+#   to shift ~+27 MeV (toward PDG) when BW_RUN=1.
 MAXN   = int(os.environ.get("MAXN", "0"))
 NMW    = int(os.environ.get("NMW", "61"))
 MWLO, MWHI = float(os.environ.get("MWLO","79.0")), float(os.environ.get("MWHI","81.5"))
@@ -63,16 +67,26 @@ def log_Z(m_WW, mW, gW=GW):
         half_d = 0.5*(t_max-t_min); half_s = 0.5*(t_max+t_min)
         t = half_d[:, None]*_GX[None, :] + half_s[:, None]
         m = np.sqrt(np.maximum(mW2 + mwgw*np.tan(t), 1e-12)); inv = 1.0/m
+        if BW_RUN:    # reweight the fixed-width arctan importance sampling → running-width BW (exact, no new grid)
+            dd = m*m - mW2; wm = gW*m*m/mW; rf = (m*m/mW2)*(dd*dd + mwgw*mwgw)/(dd*dd + wm*wm)
+        else:
+            rf = np.ones_like(m)
         mh = m[:, :, None]; ml = m[:, None, :]; ih = inv[:, :, None]; il = inv[:, None, :]; sE = s[:, None, None]
+        rh = rf[:, :, None]; rl = rf[:, None, :]
         lam = (sE-(mh+ml)**2)*(sE-(mh-ml)**2)
-        integ = np.where(lam > 0, np.sqrt(np.maximum(lam, 0))*ih*il/(4.0*sE), 0.0)
+        integ = np.where(lam > 0, np.sqrt(np.maximum(lam, 0))*ih*il*rh*rl/(4.0*sE), 0.0)
         Z = np.sum(_W2[None]*integ, axis=(1, 2)) * half_d*half_d
         out[a:a+CH] = np.log(np.maximum(Z, 1e-300))
     return out
 
-def bw(m, mW, gW=GW):
+def bw_fixed(m, mW, gW=GW):
     mwgw = mW*gW; d = m*m - mW*mW
     return mwgw/(d*d + mwgw*mwgw)
+def bw_run(m, mW, gW=GW):      # running width: width term ∝ m² ⇒ BW peaks ~Γ²/2mW (≈27 MeV) below mW
+    d = m*m - mW*mW; wm = gW*m*m/mW
+    return wm/(d*d + wm*wm)
+def bw(m, mW, gW=GW):
+    return bw_run(m, mW, gW) if BW_RUN else bw_fixed(m, mW, gW)
 
 # ── load ────────────────────────────────────────────────────────────────────────────────────────
 t = uproot.open(ROOT)["events"]
