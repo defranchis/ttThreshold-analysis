@@ -147,6 +147,14 @@ inline double      KF4Q_ISR_SYS_SIGMA = 3.0;
 inline double      KF4Q_ISR_SYS_LOG_NORM =
         std::log(2.0 * M_PI * KF4Q_ISR_SYS_SIGMA * KF4Q_ISR_SYS_SIGMA);
 
+// Simplex pre-pass function-call cap (env KF4Q_SIMPLEX_MAXCALLS). The shared
+// KF_MAX_FUNCTION_CALLS=100000 is applied to BOTH Simplex and Migrad; profiling
+// (KF4Q_TIMING) shows Simplex hits that ceiling on ~every call (~100 ms/call =
+// 96% of per-event time) because Nelder-Mead never satisfies its tolerance in
+// 16-D. Migrad converges in ~1000 evals, so a low Simplex-only cap slashes the
+// dominant cost while leaving Migrad untouched. Default 100000 = unchanged.
+inline int         KF4Q_SIMPLEX_MAX_CALLS = 100000;
+
 inline void setKinFitParams4q(int ecm, bool use_binned = true,
                               const std::string& isr_mode = "mloss") {
     ECM = static_cast<float>(ecm);
@@ -191,6 +199,10 @@ inline void setKinFitParams4q(int ecm, bool use_binned = true,
     }
     if (const char* e = std::getenv("KF_MIGRAD_STRATEGY"))
         KF_MIGRAD_STRATEGY = std::atoi(e);
+    if (const char* e = std::getenv("KF4Q_SIMPLEX_MAXCALLS")) {
+        const int v = std::atoi(e);
+        if (v > 0) KF4Q_SIMPLEX_MAX_CALLS = v;
+    }
     std::fprintf(stderr,
         "[setKinFitParams4q] mW_free=%d  mW_prior_sigma=%.4g  migrad_tol=%.1e  strategy=%d  "
         "isr_mode=%s  sigma_R=%.3g\n",
@@ -405,6 +417,7 @@ inline KinFit4qResult kinFit4q(
         std::unique_ptr<ROOT::Math::Minimizer> simplex(
             ROOT::Math::Factory::CreateMinimizer("Minuit2", "Simplex"));
         configure(simplex.get(), x_init, /*with_strategy=*/false);
+        simplex->SetMaxFunctionCalls(KF4Q_SIMPLEX_MAX_CALLS);  // Simplex-only cap (see decl)
         { kf4q_prof::Scoped _t(&kf4q_prof::ns_simplex, &kf4q_prof::n_simplex); simplex->Minimize(); }
         configure(minimizer.get(), simplex->X(), /*with_strategy=*/true);
         // Two Migrad passes: the second restarts from the converged point and lets

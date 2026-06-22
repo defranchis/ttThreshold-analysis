@@ -216,6 +216,19 @@ static constexpr double KF_ISR_SYS_SIGMA = 1.5;
 inline const double KF_ISR_SYS_LOG_NORM =
         std::log(2.0 * M_PI * KF_ISR_SYS_SIGMA * KF_ISR_SYS_SIGMA);
 
+// Runtime knobs read by setKinFitParams (declared here so they precede that
+// function's use of them). Full rationale at their use-sites below.
+//  KF_SIMPLEX_MAX_CALLS: Simplex-pre-pass-only function-call cap (env
+//    KF_SIMPLEX_MAXCALLS). The shared KF_MAX_FUNCTION_CALLS=100000 lets the
+//    gradient-free Simplex grind to the ceiling every call (the dominant
+//    per-event cost); a low cap slashes it and leaves Migrad/Hesse untouched.
+//  KF_MW_FIX_VALUE: constrained-scan hypothesis [GeV] (env KF_MW_FIX). >0 pins
+//    mW via FixVariable(0) — removes the flat mW<->jet-scale direction so the
+//    fit converges ~100%; per-event chi2 then IS the profile -2lnL(mW), summed
+//    over events across a grid to give the ensemble L(mW). <=0 = float mW.
+inline int    KF_SIMPLEX_MAX_CALLS = 100000;
+inline double KF_MW_FIX_VALUE      = -1.0;
+
 // Forward-decl: setKinFitParams calls kf_init_logz_table() (defined below
 // alongside the LogZTable definition) to allocate the precomputed log-Z grid.
 // The init runs on the main thread before any RDataFrame workers exist, so
@@ -273,6 +286,20 @@ inline void setKinFitParams(int ecm, const std::string& jet_mode = "swap",
     kf_jet2_theta_resol_incl  = p->jet2_theta_resol_incl;
     kf_lep_phi_resol_incl     = p->lep_phi_resol_incl;
     kf_lep_theta_resol_incl   = p->lep_theta_resol_incl;
+    // Simplex pre-pass call cap (default 100000 = unchanged). Bounds only the
+    // gradient-free pre-pass; Migrad/Hesse keep KF_MAX_FUNCTION_CALLS.
+    if (const char* e = std::getenv("KF_SIMPLEX_MAXCALLS")) {
+        const int v = std::atoi(e);
+        if (v > 0) KF_SIMPLEX_MAX_CALLS = v;
+    }
+    // Fixed-mW scan hypothesis (GeV). >0 pins mW; <=0 / unset floats it.
+    if (const char* e = std::getenv("KF_MW_FIX")) {
+        const double v = std::atof(e);
+        KF_MW_FIX_VALUE = (v > 0.0) ? v : -1.0;
+        if (KF_MW_FIX_VALUE > 0.0)
+            std::fprintf(stderr, "[setKinFitParams] mW FIXED at %.4f GeV (constrained-scan mode)\n",
+                         KF_MW_FIX_VALUE);
+    }
     // Allocate the 3D log Z table on the heap if not yet built. Definition is
     // below the LogZTable / kf_build_logz_table block so we go through this
     // forward-declared init function.
@@ -291,6 +318,7 @@ static constexpr double KF_GW_FIXED = 2.049;
 // Pre-conditioning σ for mW (no Gaussian prior — y-rescale around KF_MW_INIT
 // using a typical per-event posterior scale). gW uses KF_GW_PRIOR_SIGMA below.
 static constexpr double KF_MW_PHYS_SIGMA = 2.0;
+// (KF_MW_FIX_VALUE / constrained-scan mode declared above setKinFitParams.)
 static constexpr int    KF_NDIM    = 15;   // free parameters when gW is fixed
                                             // (12 detector nuisances + mW + 2 BES)
 // Total slots in the parameter array x[] (includes gW even when fixed).
@@ -312,6 +340,9 @@ enum KFGwMode { KF_GW_FIXED_MODE = 0, KF_GW_CONSTRAINED_MODE = 1, KF_GW_FREE_MOD
 // Migrad / Minuit2 tuning. These get tweaked together when convergence
 // behaviour changes (cascade order, status-3 recovery, etc.).
 static constexpr int    KF_MAX_FUNCTION_CALLS = 100000;
+// (KF_SIMPLEX_MAX_CALLS — Simplex-pre-pass-only cap — declared above
+// setKinFitParams; it bounds only the gradient-free pre-pass, the dominant
+// per-event cost, and leaves Migrad/Hesse on the full KF_MAX_FUNCTION_CALLS.)
 // Runtime-settable (env KF_MIGRAD_TOLERANCE / KF_MIGRAD_STRATEGY via the 4q
 // setKinFitParams4q; defaults preserve the original constexpr values).
 inline double KF_MIGRAD_TOLERANCE = 1e-3;
@@ -641,6 +672,9 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     const bool gw_free        = (gw_mode != KF_GW_FIXED_MODE);
     const bool gw_constrained = (gw_mode == KF_GW_CONSTRAINED_MODE);
     const bool kfit           = (kf_isr_mode == "kfit");  // explicit-ISR + derived-ν
+    // Constrained-scan mode: pin mW at the hypothesis (y-coord) instead of floating.
+    const bool   mw_fixed  = (KF_MW_FIX_VALUE > 0.0);
+    const double x0_mW_fix = mw_fixed ? (KF_MW_FIX_VALUE - KF_MW_INIT) / KF_MW_PHYS_SIGMA : 0.0;
 
     KinFitResult result{};
     result.gW    = KF_GW_FIXED;
@@ -849,9 +883,11 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         m->SetVariable(14, "y_bes_m",  x0[14], KF_INIT_STEP);
         m->SetVariable(15, "y_bes_pz", x0[15], KF_INIT_STEP);
         if (!gw_free) m->FixVariable(1);
+        if (mw_fixed) m->FixVariable(0);   // constrained-scan: pin mW at hypothesis
     };
 
     double x_default[KF_NPAR_TOTAL] = {0,0, 0,0,0,0, 0,0,0, 0,0,0, 0,0, 0,0};
+    if (mw_fixed) x_default[0] = x0_mW_fix;   // start (and stay) at the pinned mW
     std::unique_ptr<ROOT::Math::Minimizer> minimizer(
         ROOT::Math::Factory::CreateMinimizer("Minuit2", "Migrad")
     );
@@ -868,6 +904,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
             ROOT::Math::Factory::CreateMinimizer("Minuit2", "Simplex")
         );
         configure(simplex.get(), x_init, /*with_strategy=*/false);
+        simplex->SetMaxFunctionCalls(KF_SIMPLEX_MAX_CALLS);  // Simplex-only cap (see decl)
         simplex->Minimize();
         configure(minimizer.get(), simplex->X(), /*with_strategy=*/true);
         minimizer->Minimize();
@@ -993,6 +1030,7 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
     result.priors_swapped = best.swapped ? 1 : 0;
     result.edm            = static_cast<float>(best.edm);
     int n_par    = gw_free ? KF_NPAR_TOTAL : KF_NDIM;
+    if (mw_fixed) n_par -= 1;   // mW pinned, one fewer free parameter
     // +1 constraint from the gW Gaussian prior in Constrained mode only.
     int n_constr = (kfit ? KF_N_CONSTR_KFIT : KF_N_CONSTR) + (gw_constrained ? 1 : 0);
     result.chi2_ndof = (n_constr > n_par) ? result.chi2 / float(n_constr - n_par) : -1.0f;
