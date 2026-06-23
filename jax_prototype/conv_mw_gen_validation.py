@@ -130,7 +130,11 @@ for r, ECM in enumerate(ECMS):
     fl,pl=lumi_density(None,ECM,sig); ax.plot(sg,np.interp(sg,fl,pl/np.trapz(pl[fl>=lo],fl[fl>=lo])),color="C1",ls="--",lw=1.8,label="SF⊗BES (luminosity)")
     pm=model_sqrts_density(sg,ECM,MW_REF,sig); ax.plot(sg,pm,color="C2",lw=2.6,label="model = SF⊗BES × Z(√s')")
     ax.set_xlim(lo,ECM+1.5); ax.set_title(f"ecm{ECM}: m_lνuqq = √s'  (σ_BES={sig})"); ax.legend(fontsize=10); ax.set_xlabel("GeV"); ax.set_yscale("log"); ax.set_ylim(1e-3,5)
-    mm=model_stats(sg,pm); print(f"{ECM:>4d} {'sqrts':9s} {stats(sqs)[0]:9.3f} {stats(sqs)[1]:8.3f} {mm[0]:10.3f} {mm[1]:9.3f}")
+    # ⚠ measure the model RMS on the FULL √s' support, NOT the plot window [lo,ECM+1.5]: the gen RMS (stats(sqs))
+    # is over the full sample, so windowing only the model chops its low-√s' tail and FALSELY reports it "too
+    # narrow" (DAY7 artifact: model 1.54 vs gen 2.70 was model-on-window vs gen-on-full; matched, both ≈2.1).
+    sg_full=np.linspace(ECM-60.0,ECM+3.0,4000); pm_full=model_sqrts_density(sg_full,ECM,MW_REF,sig)
+    mm=model_stats(sg_full,pm_full); print(f"{ECM:>4d} {'sqrts':9s} {stats(sqs)[0]:9.3f} {stats(sqs)[1]:8.3f} {mm[0]:10.3f} {mm[1]:9.3f}")
     # ISR energy = ECM − √s'
     ax=AX[r,3]; maxi=ECM-lo
     c,h=norm_hist(isrE,80,(0,maxi)); ax.step(c,h,where="mid",color="k",lw=1.6,label="gen |p_ISR|")

@@ -33,6 +33,10 @@ ECM    = int(sys.argv[1]) if len(sys.argv) > 1 else 160
 GW     = float(os.environ.get("GW", "2.085"))
 MW_REF = float(os.environ.get("MW_REF", "80.379"))
 BW_RUN = int(os.environ.get("BW_RUN", "0"))   # 0=fixed-width BW (default); 1=running-width Γ_W(m)=gW·m²/mW²
+DECAY_P = float(os.environ.get("DECAY_P", "0"))  # W→qq decay phase-space factor: lineshape f(m)=m^p·BW(m).
+#   DAY8: WHIZARD propagator is CONSTANT-width (ground-truth), but the OBSERVED m_qq density = |prop|²×(m-dep
+#   decay factor).  DECAY_P>0 with BW_RUN=0 keeps WHIZARD's const-width denominator + adds the physical decay
+#   numerator m^p (p≈2 mimics the running-width BW, p≈3 fits even better). Default 0 = bit-identical baseline.
 #   DAY7 test: PDG mW is the running-width convention; M(run)=M(pole)+Γ²/(2mW)≈+27 MeV. A running-width BW with
 #   parameter mW peaks ~27 MeV BELOW mW, so a fit recovers mW ~27 MeV ABOVE the fixed-width fit. Expect gen_pe
 #   to shift ~+27 MeV (toward PDG) when BW_RUN=1.
@@ -71,6 +75,8 @@ def log_Z(m_WW, mW, gW=GW):
             dd = m*m - mW2; wm = gW*m*m/mW; rf = (m*m/mW2)*(dd*dd + mwgw*mwgw)/(dd*dd + wm*wm)
         else:
             rf = np.ones_like(m)
+        if DECAY_P:   # W→qq decay phase-space numerator m^p on each W ⇒ integrand carries (m_h·m_l)^p
+            rf = rf * m**DECAY_P
         mh = m[:, :, None]; ml = m[:, None, :]; ih = inv[:, :, None]; il = inv[:, None, :]; sE = s[:, None, None]
         rh = rf[:, :, None]; rl = rf[:, None, :]
         lam = (sE-(mh+ml)**2)*(sE-(mh-ml)**2)
@@ -134,6 +140,8 @@ def n2ll_perevent(mh, ml, mWW, mW, logz):
     bad = lam <= 0; lam = np.where(bad, 1.0, lam)
     tv = (-2.0*np.log(np.maximum(bw(mh,mW),1e-300)) - 2.0*np.log(np.maximum(bw(ml,mW),1e-300))
           - np.log(lam) + 2.0*np.log(s) + 2.0*logz)
+    if DECAY_P:   # lineshape f(m)=m^p·BW(m): add the decay numerator (mW-independent ⇒ no effect on argmin, kept for consistency)
+        tv = tv - 2.0*DECAY_P*(np.log(np.maximum(mh,1e-9)) + np.log(np.maximum(ml,1e-9)))
     return np.where(bad, 1e6, tv)
 
 def scan_perevent(sqrts=None):
@@ -163,7 +171,9 @@ def radiator_obs(width_scale=1.0):
 
 def build_Ptrue(mW, rad):
     sn, sw, divz = rad
-    bwh = bw(tg, mW); BWout = bwh[:,None]*bwh[None,:]
+    bwh = bw(tg, mW)
+    if DECAY_P: bwh = bwh * tg**DECAY_P              # lineshape f(m)=m^p·BW(m), consistent with log_Z
+    BWout = bwh[:,None]*bwh[None,:]
     u = np.zeros((NT, NT)); logZ = log_Z(sn, mW) if divz else None
     for k, (sp, wk) in enumerate(zip(sn, sw)):
         s = sp*sp
@@ -255,6 +265,8 @@ else:
     genmarg = s_marg = float("nan")
 print(f"\n[targets] gen_pe={genpe:.4f}±{s_pe:.4f}   gen_marg={genmarg:.4f}   "
       f"gen_marg−gen_pe = {1000*(genmarg-genpe):+.1f} MeV")
+if int(os.environ.get("GENPE_ONLY", "0")):   # DAY8: skip the (expensive) fold estimator when only gen_pe is wanted
+    sys.stdout.flush(); sys.exit(0)
 exa_id   = fold_fit(L_tmpl, mqq_g, mlv_g)[0]
 exa_rec  = fold_fit(L_tmpl, mqq_r, mlv_r)[0]
 dec["exact"] = dict(target=genpe, identity=exa_id, reco=exa_rec,
