@@ -101,6 +101,9 @@ br = ["gen_Whad_m","gen_Wlep_m","gen_WW_m","reco_Whad_m","reco_Wlep_m",
       "kinfit_chi2","kinfit_chi2_ndof"]
 a = t.arrays(br, library="np")
 SQRTS_MIN = float(os.environ.get("SQRTS_MIN", "-1e9"))  # DAY5 diagnostic: drop events with gen √s' below this
+MQQ_MIN   = float(os.environ.get("MQQ_MIN", "-1e9"))    # DAY9: drop events with gen_Whad_m below this (off-shell
+#   low-m_qq tail handle — the data-undershoot firm-up: tests whether the 4f off-shell-tail under-population
+#   that biases the GEN self-fit also moves the data-applicable RECO closure (it should largely cancel).
 # ── DAY6: DATA-APPLICABLE reco-proxy tail handle (the data analog of the gen SQRTS_MIN cut) ─────────
 #   PROXY = reco branch to cut on (e.g. reco_WW_m); PROXY_DIR=low|high (which tail to REMOVE);
 #   PROXY_FRAC = fraction of the ok-sample to remove (threshold = that percentile of the proxy).
@@ -111,7 +114,7 @@ PROXY_FRAC= float(os.environ.get("PROXY_FRAC", "0.0"))
 ok = (np.isfinite(a["gen_Whad_m"]) & np.isfinite(a["gen_Wlep_m"]) & np.isfinite(a["gen_WW_m"]) &
       np.isfinite(a["reco_Whad_m"]) & np.isfinite(a["reco_Wlep_m"]) &
       (a["reco_jet1_p"]>0) & (a["reco_jet2_p"]>0) & (a["reco_lep_p"]>0) &
-      (a["gen_WW_m"] >= SQRTS_MIN) &
+      (a["gen_WW_m"] >= SQRTS_MIN) & (a["gen_Whad_m"] >= MQQ_MIN) &
       (a["gen_Whad_m"]+a["gen_Wlep_m"] < a["gen_WW_m"]))
 if PROXY and PROXY_FRAC > 0:
     pv = a[PROXY]; okv = ok & np.isfinite(pv)
