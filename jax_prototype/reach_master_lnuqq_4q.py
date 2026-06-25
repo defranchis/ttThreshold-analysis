@@ -13,11 +13,11 @@ EOSW="/eos/user/m/mdefranc/www/mW/conv_mw_4q"; os.makedirs(EOSW, exist_ok=True)
 # ── per-event slope-1 σ [MeV·√evt] = σ_full/slope · √Ng, at the chosen working point ──
 def s1ev(sig_full, slope, Ng): return (sig_full/slope)*math.sqrt(Ng)
 
-# 4q (fully hadronic): @160 nod45 (C6 no-cut), @240/365 d45-cut (NEXT-2 pending) — flagged.
+# 4q (fully hadronic), ALL no-d45 (NEXT-2 done DAY11): @160/240/365 from p8 inclusive, raw bin1.0 (slope≈1).
 FOURQ = {
- 160: dict(s1=s1ev(6.79,1.071,963916), floor=s1ev(1.27,1.0050,1003608), cut="no-d45"),
- 240: dict(s1=s1ev(6.29,0.9866,241237), floor=s1ev(2.05,1.000,259921), cut="d45<7"),
- 365: dict(s1=s1ev(9.07,0.9701,102554), floor=s1ev(3.06,0.9998,116362), cut="d45<7"),
+ 160: dict(s1=s1ev(6.79,1.0710,963916), floor=s1ev(1.27,1.0050,1003608), cut="no-d45"),
+ 240: dict(s1=s1ev(6.98,0.9788,373720), floor=s1ev(1.58,1.0001,436609), cut="no-d45"),
+ 365: dict(s1=s1ev(6.16,0.9862,380317), floor=s1ev(1.53,1.0003,466299), cut="no-d45"),
 }
 # ℓνqq (semileptonic, μ+e combined, p8 inclusive) — this session. Working point: bin0.5 @160
 # (slope≈1.01), bin1.0 @240/365 (slope≈0.99, small closure).
