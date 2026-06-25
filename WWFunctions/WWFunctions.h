@@ -23,16 +23,24 @@ inline float ECM = 160.0f;
 //    Particle0[i] indexing assumption used in FCCAnalyses::MCParticle::sel_*.
 
 namespace _selectors_detail {
-inline bool _has_electron_parent(const edm4hep::MCParticleData& p,
-                                  const ROOT::VecOps::RVec<edm4hep::MCParticleData>& in,
-                                  const ROOT::VecOps::RVec<int>& parents_relation) {
+// True if particle p has at least one immediate parent with |PDG| == target_abs_pdg
+// (walks the proper parents_begin/parents_end relation range).
+inline bool _has_parent_pdg(const edm4hep::MCParticleData& p,
+                            const ROOT::VecOps::RVec<edm4hep::MCParticleData>& in,
+                            const ROOT::VecOps::RVec<int>& parents_relation,
+                            int target_abs_pdg) {
     for (unsigned j = p.parents_begin; j < p.parents_end; ++j) {
         if (j >= parents_relation.size()) break;
         int parent_idx = parents_relation[j];
         if (parent_idx < 0 || parent_idx >= (int)in.size()) continue;
-        if (std::abs(in[parent_idx].PDG) == 11) return true;
+        if (std::abs(in[parent_idx].PDG) == target_abs_pdg) return true;
     }
     return false;
+}
+inline bool _has_electron_parent(const edm4hep::MCParticleData& p,
+                                  const ROOT::VecOps::RVec<edm4hep::MCParticleData>& in,
+                                  const ROOT::VecOps::RVec<int>& parents_relation) {
+    return _has_parent_pdg(p, in, parents_relation, 11);
 }
 }
 
@@ -214,6 +222,52 @@ struct sel_lightQuarks_fromele {
             const auto& p = in[i];
             if (std::abs(p.PDG) > 5 || std::abs(p.PDG) == 0) continue;
             if (_selectors_detail::_has_electron_parent(p, in, parents_relation)) result.emplace_back(p);
+        }
+        return result;
+    }
+};
+
+// ── WW → ℓνqq (semileptonic) gen-truth selection (Pythia8 p8_ee_WW) ──────────
+// As with sel_quarks_fromBoson, the inclusive p8 sample KEEPS the W in the MC
+// history, so the matrix-element W-decay products point to their immediate W
+// parent (|PDG|==24). These select the ℓνqq products by that W parent — the p8
+// analog of sel_genleps_fromele / sel_lightQuarks_fromele (which use the e±-parent
+// proxy needed for the Whizard munumuqq samples where the W is absent).
+//
+// sel_genleps_fromW(pdg): particles with |PDG|==pdg AND a W parent. Reused for the
+//   charged lepton (pdg=11/13) and the neutrino (pdg=12/14), exactly as the fromele
+//   version is. In a semileptonic event this returns exactly 1 ℓ and 1 ν.
+// sel_lightQuarks_fromW: light quarks (1<=|PDG|<=5) with a W parent → the 2 quarks
+//   of the hadronic W (un-grouped, unlike sel_quarks_fromBoson which needs 2 bosons).
+// τ→ℓ events are excluded automatically: the e/μ from a τ has a τ (not W) parent.
+struct sel_genleps_fromW {
+    int m_pdg;
+    explicit sel_genleps_fromW(int pdg) : m_pdg(pdg) {}
+    ROOT::VecOps::RVec<edm4hep::MCParticleData> operator()(
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> in,
+        const ROOT::VecOps::RVec<int>& parents_relation) const {
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> result;
+        result.reserve(2);
+        for (size_t i = 0; i < in.size(); ++i) {
+            const auto& p = in[i];
+            if (std::abs(p.PDG) != m_pdg) continue;
+            if (_selectors_detail::_has_parent_pdg(p, in, parents_relation, 24)) result.emplace_back(p);
+        }
+        return result;
+    }
+};
+
+struct sel_lightQuarks_fromW {
+    sel_lightQuarks_fromW() {}
+    ROOT::VecOps::RVec<edm4hep::MCParticleData> operator()(
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> in,
+        const ROOT::VecOps::RVec<int>& parents_relation) const {
+        ROOT::VecOps::RVec<edm4hep::MCParticleData> result;
+        result.reserve(2);
+        for (size_t i = 0; i < in.size(); ++i) {
+            const auto& p = in[i];
+            if (std::abs(p.PDG) > 5 || p.PDG == 0) continue;
+            if (_selectors_detail::_has_parent_pdg(p, in, parents_relation, 24)) result.emplace_back(p);
         }
         return result;
     }

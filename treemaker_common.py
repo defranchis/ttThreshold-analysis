@@ -175,6 +175,44 @@ def select_gen_fromele(df):
     return df
 
 
+# ── gen-level ℓνqq for the inclusive Pythia8 p8_ee_WW sample (W KEPT in history) ─
+def select_gen_fromW_semilep(df, lepton_pdgs=(11, 13)):
+    """Gen ℓνqq selection on the inclusive p8_ee_WW sample: pick the charged lepton,
+    neutrino and 2 light quarks by their immediate W parent (|PDG|==24) — the p8 analog
+    of select_gen_fromele (which uses the e±-parent proxy for the W-less Whizard samples).
+    lepton_pdgs selects the flavour(s): (11,13)=e+μ combined [default], (13,)=μ-only,
+    (11,)=e-only. τ→ℓ events drop out automatically (the e/μ has a τ parent, not W)."""
+    df = df.Alias("Particle0", "Particle#0.index")
+    lep_cols, nu_cols = [], []
+    for lpdg in lepton_pdgs:
+        npdg = lpdg + 1   # 11→12 (νe), 13→14 (νμ)
+        df = df.Define(f"gen_lep{lpdg}_fromW",
+            f"FCCAnalyses::WWFunctions::sel_genleps_fromW({lpdg})(Particle, Particle0)")
+        df = df.Define(f"gen_nu{npdg}_fromW",
+            f"FCCAnalyses::WWFunctions::sel_genleps_fromW({npdg})(Particle, Particle0)")
+        lep_cols.append(f"gen_lep{lpdg}_fromW")
+        nu_cols.append(f"gen_nu{npdg}_fromW")
+
+    def _concat(cols):
+        expr = cols[0]
+        for c in cols[1:]:
+            expr = f"ROOT::VecOps::Concatenate({expr}, {c})"
+        return expr
+
+    df = df.Define("gen_leps_fromW", _concat(lep_cols))
+    df = df.Define("gen_neutrinos_fromW", _concat(nu_cols))
+    df = df.Define("gen_lightquarks_fromW",
+        "FCCAnalyses::WWFunctions::sel_lightQuarks_fromW()(Particle, Particle0)")
+
+    df = df.Filter("gen_leps_fromW.size() == 1",
+                   "gen: exactly 1 charged lepton fromW (leptonic-W daughter)")
+    df = df.Filter("gen_neutrinos_fromW.size() == 1",
+                   "gen: exactly 1 neutrino fromW (leptonic-W daughter)")
+    df = df.Filter("gen_lightquarks_fromW.size() == 2",
+                   "gen: exactly 2 light quarks fromW (hadronic-W daughters)")
+    return df
+
+
 def define_beam_kinematics(df, post_isr_mode="whizard", gen_ww_p4=None):
     """Beam e± at the two relevant chain depths:
       depth=1 (post-BES, pre-ISR) → m(ee)−ECM gives BES;
@@ -242,13 +280,18 @@ def define_beam_kinematics(df, post_isr_mode="whizard", gen_ww_p4=None):
     return df
 
 
-def define_gen_kinematics(df):
+def define_gen_kinematics(df, lep_col="gen_leps_fromele",
+                          nu_col="gen_neutrinos_fromele",
+                          quark_col="gen_lightquarks_fromele"):
+    # lep_col/nu_col/quark_col let the p8 ℓνqq path (select_gen_fromW_semilep) reuse
+    # this builder with the *_fromW collections; defaults keep the Whizard fromele path
+    # bit-identical.
     df = df.Define("gen_leps_fromele_tlv",
-        "FCCAnalyses::MCParticle::get_tlv(gen_leps_fromele)")
+        f"FCCAnalyses::MCParticle::get_tlv({lep_col})")
     df = df.Define("gen_neutrinos_fromele_tlv",
-        "FCCAnalyses::MCParticle::get_tlv(gen_neutrinos_fromele)")
+        f"FCCAnalyses::MCParticle::get_tlv({nu_col})")
     df = df.Define("gen_lightquarks_fromele_tlv",
-        "FCCAnalyses::MCParticle::get_tlv(gen_lightquarks_fromele)")
+        f"FCCAnalyses::MCParticle::get_tlv({quark_col})")
 
     df = df.Define("lep_p4_gen", "gen_leps_fromele_tlv[0]")
     df = df.Define("nu_p4_gen",  "gen_neutrinos_fromele_tlv[0]")

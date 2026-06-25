@@ -72,7 +72,8 @@ if CHANNEL=="4q":
     if OBS=="kinfit": okv=okv&(a["kinfit4q_valid"]==1)
 else:  # lnuqq
     ROOT=os.environ.get("ROOT",f"outputs/treemaker/lnuqq/step2/semihad_kfit_pool_full/wzp6_ee_munumuqq_noCut_ecm{ECM}.root")
-    need=["gen_Whad_m","gen_Wlep_m","gen_WW_m","reco_Whad_m","reco_Wlep_m","kinfit_Whad_m","kinfit_Wlep_m","kinfit_chi2","reco_jet1_p","reco_jet2_p","reco_lep_p"]
+    need=["gen_Whad_m","gen_Wlep_m","gen_WW_m","reco_Whad_m","reco_Wlep_m","reco_jet1_p","reco_jet2_p","reco_lep_p"]
+    if OBS=="kinfit": need+=["kinfit_Whad_m","kinfit_Wlep_m","kinfit_chi2"]
     a=uproot.open(ROOT)["events"].arrays(need,library="np"); Nr=len(a["gen_Whad_m"])
     ghi,glo,mWW=a["gen_Whad_m"],a["gen_Wlep_m"],a["gen_WW_m"]
     if OBS=="gen":   rhi,rlo=a["gen_Whad_m"],a["gen_Wlep_m"]    # SANITY: slope must be 1
