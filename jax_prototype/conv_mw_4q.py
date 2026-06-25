@@ -118,7 +118,10 @@ def parab_min(xs, ys):
 
 # ══ load the 4q tree + build reco dijet masses for the 3 jet→W partitions ═════════════════════════
 t = uproot.open(ROOT)["events"]
-need = ["gen_W1_m","gen_W2_m","gen_WW_m","gen_pairing_true","kinfit4q_pairing","kinfit4q_valid"]
+_avail = set(t.keys())
+HAVE_KINFIT = ("kinfit4q_pairing" in _avail) and ("kinfit4q_valid" in _avail)  # FF/genqk trees have no kinfit
+need = ["gen_W1_m","gen_W2_m","gen_WW_m","gen_pairing_true"]
+if HAVE_KINFIT: need += ["kinfit4q_pairing","kinfit4q_valid"]
 for i in (1,2,3,4):
     need += [f"reco_jet{i}_p", f"reco_jet{i}_theta", f"reco_jet{i}_phi"]
 a = t.arrays(need, library="np")
@@ -136,7 +139,7 @@ PORDER = [((1,2),(3,4)), ((1,3),(2,4)), ((1,4),(2,3))]   # pairing 0,1,2
 mA = np.stack([dimass(J[p[0][0]], J[p[0][1]]) for p in PORDER], 1)   # (Nraw,3)
 mB = np.stack([dimass(J[p[1][0]], J[p[1][1]]) for p in PORDER], 1)   # (Nraw,3)
 
-gpt = a["gen_pairing_true"].astype(int); kfp = a["kinfit4q_pairing"].astype(int)
+gpt = a["gen_pairing_true"].astype(int); kfp = a["kinfit4q_pairing"].astype(int) if HAVE_KINFIT else None
 # ── (level 1) no-fit pole-referenced BARE BW pick (the original): −logBW(mA)−logBW(mB), fixed-width ──
 def _negbw(m):
     d = m*m - MW_REF*MW_REF; mwgw = MW_REF*GW
@@ -382,11 +385,67 @@ def foldpick(seed):
     dens = np.stack([interp(np.stack([hi3[:, p], lo3[:, p]], 1)) for p in range(3)], 1)
     return np.argmax(dens, 1).astype(int)
 
+# ── (level 4) TEMPLATE LIKELIHOOD-RATIO pick (DAY12 NEXT-1) — the analytic, non-ML beat-pllnops discriminant.
+#   From MC truth (gen_pairing_true) build P_true(m_hi,m_lo) (density of the TRUE partition's reco masses) and
+#   P_wrong(m_hi,m_lo) (density of the two WRONG partitions'); pick argmax_p [log P_true − log P_wrong].
+#   Train/test-HONEST via K folds (templates from the complementary folds).  Shape-only (self-normalised).
+#   ★ The mass-template RANGE MUST cover the wrong-pairing high-mass tail (>98 GeV for 74%/94% of wrong pairs
+#   at 240/365) — that tail is THE discriminator; clipping it collapses the LR BELOW pllnops.  Recovers the
+#   GBM's +10pp at 240/365 analytically (eff 82.6/90.1% vs pllnops 72.7/80.8%).  use_angle adds the within-W
+#   reco-jet opening angle (4-D template) — a small threshold-only refinement (+3pp @160).
+LR_K     = int(os.environ.get("LR_K", "4"))
+LR_BIN   = float(os.environ.get("LR_BIN", "2.0"))
+LR_SM    = float(os.environ.get("LR_SM", "1.0"))
+LR_M_LO  = float(os.environ.get("LR_M_LO", "20.0"))
+LR_M_HI  = float(os.environ.get("LR_M_HI", "340.0"))
+LR_A_BIN = float(os.environ.get("LR_A_BIN", "6.0"))
+def _reco_ang3():                                  # within-W reco-jet opening angle (Nraw,3): hi/lo per partition
+    def ang(u, v):
+        c = (u[:, :3]*v[:, :3]).sum(1)/(np.linalg.norm(u[:, :3], axis=1)*np.linalg.norm(v[:, :3], axis=1) + 1e-9)
+        return np.degrees(np.arccos(np.clip(c, -1, 1)))
+    tA = np.stack([ang(J[p[0][0]], J[p[0][1]]) for p in PORDER], 1)
+    tB = np.stack([ang(J[p[1][0]], J[p[1][1]]) for p in PORDER], 1)
+    return np.maximum(tA, tB), np.minimum(tA, tB)
+def tmpl_lr_pick(use_angle=False):
+    me = np.arange(LR_M_LO, LR_M_HI+1e-6, LR_BIN); ae = np.arange(0.0, 180.0+1e-6, LR_A_BIN)
+    edges = [me, me] + ([ae, ae] if use_angle else [])
+    thi3, tlo3 = _reco_ang3() if use_angle else (None, None)
+    def cols(rows, p):
+        f = [hi3[rows, p], lo3[rows, p]]
+        if use_angle: f += [thi3[rows, p], tlo3[rows, p]]
+        return np.stack(f, 1)
+    def cols_true(rows):
+        f = [hi3[rows, gpt[rows]], lo3[rows, gpt[rows]]]
+        if use_angle: f += [thi3[rows, gpt[rows]], tlo3[rows, gpt[rows]]]
+        return np.stack(f, 1)
+    def cols_wrong(rows):
+        wm = np.ones((len(rows), 3), bool); wm[np.arange(len(rows)), gpt[rows]] = False
+        f = [hi3[rows][wm], lo3[rows][wm]]
+        if use_angle: f += [thi3[rows][wm], tlo3[rows][wm]]
+        return np.stack(f, 1)
+    def dens(X):
+        H, _ = np.histogramdd(X, bins=edges)
+        if LR_SM > 0: H = gaussian_filter(H, sigma=LR_SM)
+        H = np.maximum(H/np.maximum(H.sum(), 1e-300), 1e-300)
+        return RegularGridInterpolator(tuple(0.5*(e[:-1]+e[1:]) for e in edges),
+                                       H, bounds_error=False, fill_value=1e-300)
+    rng = np.random.default_rng(int(os.environ.get("LR_SEED", "7")))
+    valid = (gpt >= 0) & (gpt <= 2); fold = rng.integers(0, LR_K, Nraw)
+    logLR = np.full((Nraw, 3), -np.inf)
+    for k in range(LR_K):
+        tri = np.where(valid & (fold != k))[0]; tei = np.where(fold == k)[0]
+        Pt = dens(cols_true(tri)); Pw = dens(cols_wrong(tri))
+        for p in range(3):
+            X = cols(tei, p); logLR[tei, p] = np.log(Pt(X)) - np.log(Pw(X))
+    return np.argmax(logLR, 1).astype(int)
+
 modes = {"true": gpt, "bw": bwp,
          "pll":      pll_pick(ps=1, decay=1),   # ISR-convoluted per-event likelihood (phase-space √λ ON)
          "pllnops":  pll_pick(ps=0, decay=1),   # same lineshape (const×m³) but NO threshold √λ term
          "foldpick": foldpick(bwp),             # full forward-fold template (resolution-aware)
-         "kinfit": kfp}
+         "tmplLR":   tmpl_lr_pick(False),       # DAY12: analytic template-LR on the dijet masses (beats pllnops)
+         "tmplLRa":  tmpl_lr_pick(True)}        #        + within-W angle = ADOPTED uniform pick (best/tied all √s; needed @160)
+if HAVE_KINFIT: modes["kinfit"] = kfp
 margmodes = {"marg_flat": "flat", "marg_soft": "soft"}   # marginalise over 3 partitions (no hard pick)
 ALLSEL = list(modes.keys()) + list(margmodes.keys())
 sel = ALLSEL if PAIRING == "all" else [m for m in PAIRING.split(",") if m in ALLSEL]
