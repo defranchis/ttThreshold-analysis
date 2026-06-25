@@ -6,7 +6,7 @@
 import re
 from addons.FastJet.jetClusteringHelper import ExclusiveJetClusteringHelper
 
-AVAILABLE_ECM = ['157', '160', '163']
+AVAILABLE_ECM = ['157', '160', '163', '240', '365']
 
 # FSR dressing parameters (see project_lep_p_resp_fsr_dressing.md).
 # Tuned 2026-05-05 from photon-investigation analysis: dR<0.1 around the iso
