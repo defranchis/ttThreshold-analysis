@@ -27,6 +27,11 @@ all_branches = [
     "gen_W1_m", "gen_W2_m", "gen_WW_m", "gen_WW_m_minus_ecm", "gen_WW_m_minus_m_ee",
     "gen_isr_px", "gen_isr_py", "gen_isr_pz",
     "gen_isr_WW_px", "gen_isr_WW_py", "gen_isr_WW_pz",
+    # W-grouped gen quark 4-vectors ([0,1]=W1, [2,3]=W2): true + wrong pairings vs ISR
+    "gen_qW0_px", "gen_qW0_py", "gen_qW0_pz", "gen_qW0_e",
+    "gen_qW1_px", "gen_qW1_py", "gen_qW1_pz", "gen_qW1_e",
+    "gen_qW2_px", "gen_qW2_py", "gen_qW2_pz", "gen_qW2_e",
+    "gen_qW3_px", "gen_qW3_py", "gen_qW3_pz", "gen_qW3_e",
     "jet1_p_resp", "jet2_p_resp", "jet3_p_resp", "jet4_p_resp",
     "gen_pairing_true",
 ]

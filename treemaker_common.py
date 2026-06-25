@@ -535,6 +535,14 @@ def define_gen_kinematics_4q(df):
     df = df.Define("WW_4q_gen",
         "FCCAnalyses::WWFunctions::sum_p4({gen_q0_p4, gen_q1_p4, gen_q2_p4, gen_q3_p4})")
 
+    # W-grouped gen quark 4-vectors ([0,1]=W1, [2,3]=W2) — lets a downstream study
+    # form the TRUE and both WRONG pairings + any angular separation, vs ISR.
+    for i, src in [(0, "gen_q0_p4"), (1, "gen_q1_p4"), (2, "gen_q2_p4"), (3, "gen_q3_p4")]:
+        df = df.Define(f"gen_qW{i}_px", f"{src}.Px()")
+        df = df.Define(f"gen_qW{i}_py", f"{src}.Py()")
+        df = df.Define(f"gen_qW{i}_pz", f"{src}.Pz()")
+        df = df.Define(f"gen_qW{i}_e",  f"{src}.E()")
+
     for W, src in [("W1", "W1_gen"), ("W2", "W2_gen")]:
         df = df.Define(f"gen_{W}_m",  f"{src}.M()")
         df = df.Define(f"gen_{W}_p",  f"{src}.P()")
