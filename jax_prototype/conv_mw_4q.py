@@ -120,8 +120,10 @@ def parab_min(xs, ys):
 t = uproot.open(ROOT)["events"]
 _avail = set(t.keys())
 HAVE_KINFIT = ("kinfit4q_pairing" in _avail) and ("kinfit4q_valid" in _avail)  # FF/genqk trees have no kinfit
+HAVE_GENQW  = all(f"gen_qW{i}_px" in _avail for i in range(4))                  # only the genqk trees carry these
 need = ["gen_W1_m","gen_W2_m","gen_WW_m","gen_pairing_true"]
 if HAVE_KINFIT: need += ["kinfit4q_pairing","kinfit4q_valid"]
+if HAVE_GENQW:  need += [f"gen_qW{i}_{c}" for i in range(4) for c in ("px","py","pz","e")]
 for i in (1,2,3,4):
     need += [f"reco_jet{i}_p", f"reco_jet{i}_theta", f"reco_jet{i}_phi"]
 a = t.arrays(need, library="np")
@@ -439,12 +441,157 @@ def tmpl_lr_pick(use_angle=False):
             X = cols(tei, p); logLR[tei, p] = np.log(Pt(X)) - np.log(Pw(X))
     return np.argmax(logLR, 1).astype(int)
 
+# ── (level 5) SMOOTH / phase-space-MC template-LR (DAY13 NEXT-1) — the analytic+ISR pairing discriminant.
+#   P_true, P_wrong are built NOT from data MC-truth folds (tmplLR) but from an INDEPENDENT physics MC: WW→4
+#   massless partons generated at the data s' spectrum (gen_WW_m ⇒ ISR baked in; C5-validated), folded to reco
+#   by a per-DIJET multiplicative response calibrated on the data true-pairing (reco-dijet / gen-W, angle-matched
+#   — beats per-jet, which over-inflates the true ridge @240/365; see prototype_pairing_ps_mc_reco.py).
+#   Wins vs tmplLR: (i) SMOOTH (MC stat negligible) ⇒ NO K-fold, NO fold/LR-seed dependence; (ii) physically
+#   parametrised ⇒ the pairing systematic is lineshape+resolution, not template MC-stat; (iii) ISR-CONDITIONABLE
+#   on the per-event RECO 4-jet mass (cond=1).
+#   DAY13 result (5 seeds): smooth(mass+angle, tmplLRsma) REPRODUCES the histogram tmplLRa's pairing bias at all √s
+#   (paired Δ ≈ +0.4/+0.6/+0.4 MeV, ≤2σ) at ~1pp lower eff — a genuine Bayes-optimal ceiling (eff saturates below the
+#   truth histogram); ISR-conditioning (tmplLRsmac) shows NO resolvable margin (hint of mild +0.8 MeV degradation @365).
+#   ⚠ LEADING MODELING RESIDUAL: the within-W angle response is approximated as ADDITIVE/angle-INDEPENDENT (_dijet_calib
+#   builds one Δθ pool; sang adds it), but Δθ=θ_reco−θ_gen actually swings +1°→−8/−25/−32° with the gen angle @160/240/365
+#   — calibrated on large-angle true W decays, extrapolated to small-angle cross-W wrong pairs; a hazard growing with √s.
+#   REFINE = bin Δθ by gen angle (angle-conditioned smear) before propagating a smooth-model pairing systematic.
+SM_NMC      = int(os.environ.get("SM_NMC", "2000000"))
+SM_SEED     = int(os.environ.get("SM_SEED", "11"))
+SM_COND     = int(os.environ.get("SM_COND", "0"))     # 1 ⇒ ISR-condition on the per-event reco 4-jet mass
+SM_NSP      = int(os.environ.get("SM_NSP", "12"))     # # of reco-s' quantile bins when conditioning
+SM_MBIN     = float(os.environ.get("SM_MBIN", "1.5")) # mass-template bin [GeV] (2-D mass-only template)
+SM_MBIN_A   = float(os.environ.get("SM_MBIN_A","2.0"))# mass bin [GeV] for the 4-D mass+angle template (= incumbent
+                                                     # LR_BIN; DAY13 ceiling test: eff saturates here, coarser 3.0 cost ~1pp)
+SM_ABIN     = float(os.environ.get("SM_ABIN", "6.0")) # within-W angle bin [deg]
+SM_SM       = float(os.environ.get("SM_SM", "1.0"))   # gaussian smoothing sigma [bins]
+_LOGFLOOR   = float(np.log(1e-300))
+def _opang_deg(u, v):                                  # opening angle [deg] between two 3-momenta
+    c = (u[:,:3]*v[:,:3]).sum(1)/(np.linalg.norm(u[:,:3],axis=1)*np.linalg.norm(v[:,:3],axis=1)+1e-9)
+    return np.degrees(np.arccos(np.clip(c,-1,1)))
+def _dijet_calib():
+    """data-calibrated per-dijet smearing pools, reco dijet↔gen W matched by angle (true pairing):
+       R = m_reco/m_gen_W (multiplicative mass)  and  Δθ = θ_reco − θ_gen_W [deg] (within-W opening angle)."""
+    Q = {i: np.stack([a[f"gen_qW{i}_px"],a[f"gen_qW{i}_py"],a[f"gen_qW{i}_pz"],a[f"gen_qW{i}_e"]],1) for i in range(4)}
+    W1 = Q[0]+Q[1]; W2 = Q[2]+Q[3]
+    DA = np.zeros((Nraw,4)); DB = np.zeros((Nraw,4)); thA = np.zeros(Nraw); thB = np.zeros(Nraw)
+    for pi,p in enumerate(PORDER):
+        sel = gpt==pi
+        DA[sel] = (J[p[0][0]]+J[p[0][1]])[sel]; DB[sel] = (J[p[1][0]]+J[p[1][1]])[sel]
+        thA[sel] = _opang_deg(J[p[0][0]],J[p[0][1]])[sel]; thB[sel] = _opang_deg(J[p[1][0]],J[p[1][1]])[sel]
+    swap = (_opang_deg(DA,W2)+_opang_deg(DB,W1)) < (_opang_deg(DA,W1)+_opang_deg(DB,W2))
+    rW1 = np.where(swap[:,None],DB,DA); rW2 = np.where(swap[:,None],DA,DB)
+    thW1 = np.where(swap,thB,thA);      thW2 = np.where(swap,thA,thB)
+    def m(v): return np.sqrt(np.maximum(v[:,3]**2-v[:,0]**2-v[:,1]**2-v[:,2]**2,0))
+    okp = (gpt>=0)&(gpt<=2)
+    R = np.concatenate([(m(rW1)/np.maximum(g1,1e-6))[okp], (m(rW2)/np.maximum(g2,1e-6))[okp]])
+    dth = np.concatenate([(thW1-_opang_deg(Q[0],Q[1]))[okp], (thW2-_opang_deg(Q[2],Q[3]))[okp]])
+    keepR = (R>0.2)&(R<3.0)
+    return R[keepR], dth
+def _ps_mc(rng):
+    """WW→4 partons at s' sampled from data gen_WW_m (ISR in); dijet-multiplicative mass smear + additive
+    within-W angle smear to reco.  Returns mass-sorted (m_hi,m_lo) AND angle-sorted (θ_hi,θ_lo) for the TRUE
+    partition and the two WRONG partitions, + phase-space weight + per-MC-event gen s' (for conditioning)."""
+    sp = mWW_g[np.isfinite(mWW_g) & (mWW_g>90.0)]
+    sqrts = sp[rng.integers(0,len(sp),SM_NMC)]; s = sqrts**2; mwgw = MW_REF*GW
+    mg = np.linspace(45.,125.,6000); dd = mg*mg-MW_REF*MW_REF
+    cdf = np.cumsum((mwgw/(dd*dd+mwgw*mwgw))*mg**DECAY_P); cdf /= cdf[-1]
+    m1 = np.interp(rng.random(SM_NMC),cdf,mg); m2 = np.interp(rng.random(SM_NMC),cdf,mg)
+    lam = (s-(m1+m2)**2)*(s-(m1-m2)**2)
+    w = np.where((m1+m2<sqrts)&(lam>0), np.sqrt(np.maximum(lam,0)), 0.0)
+    E1 = (s+m1**2-m2**2)/(2*sqrts); E2 = sqrts-E1; pst = np.sqrt(np.maximum(E1**2-m1**2,0))
+    bb1 = pst/np.maximum(E1,1e-9); gg1 = E1/np.maximum(m1,1e-9)
+    bb2 = pst/np.maximum(E2,1e-9); gg2 = E2/np.maximum(m2,1e-9)
+    def parton(mw,g,b,cosA,phi,zs):
+        sA = np.sqrt(np.maximum(1-cosA**2,0)); e = mw/2.; bz = zs*b
+        px = e*sA*np.cos(phi); py = e*sA*np.sin(phi); pz = e*cosA
+        return np.stack([px,py,g*(pz+bz*e),g*(e+bz*pz)],1)
+    c1 = 2*rng.random(SM_NMC)-1; p1 = 2*np.pi*rng.random(SM_NMC)
+    c2 = 2*rng.random(SM_NMC)-1; p2 = 2*np.pi*rng.random(SM_NMC)
+    A1 = parton(m1,gg1,bb1,c1,p1,+1); A2 = parton(m1,gg1,bb1,-c1,p1+np.pi,+1)
+    B1 = parton(m2,gg2,bb2,c2,p2,-1); B2 = parton(m2,gg2,bb2,-c2,p2+np.pi,-1)
+    def mm4(v): return np.sqrt(np.maximum(v[:,3]**2-v[:,0]**2-v[:,1]**2-v[:,2]**2,0))
+    Rp, Ap = _dijet_calib()
+    def smass(x): return x*Rp[rng.integers(0,len(Rp),len(x))]                 # dijet multiplicative mass smear
+    def sang(x):  return np.clip(x+Ap[rng.integers(0,len(Ap),len(x))],0,180)  # within-W additive angle smear
+    # TRUE partition: dijets (A1,A2) and (B1,B2)
+    mt1 = smass(mm4(A1+A2)); mt2 = smass(mm4(B1+B2))
+    at1 = sang(_opang_deg(A1,A2)); at2 = sang(_opang_deg(B1,B2))
+    # WRONG partition 1: (A1,B1)(A2,B2) ; WRONG partition 2: (A1,B2)(A2,B1)
+    w11 = smass(mm4(A1+B1)); w12 = smass(mm4(A2+B2)); w21 = smass(mm4(A1+B2)); w22 = smass(mm4(A2+B1))
+    aw11 = sang(_opang_deg(A1,B1)); aw12 = sang(_opang_deg(A2,B2)); aw21 = sang(_opang_deg(A1,B2)); aw22 = sang(_opang_deg(A2,B1))
+    cat = np.concatenate
+    return dict(
+        t_mhi=np.maximum(mt1,mt2), t_mlo=np.minimum(mt1,mt2),                  # mass-sorted (true)
+        t_ahi=np.maximum(at1,at2), t_alo=np.minimum(at1,at2),                  # angle-sorted (true, independent)
+        tw=w, tsq=sqrts,
+        w_mhi=cat([np.maximum(w11,w12), np.maximum(w21,w22)]),
+        w_mlo=cat([np.minimum(w11,w12), np.minimum(w21,w22)]),
+        w_ahi=cat([np.maximum(aw11,aw12), np.maximum(aw21,aw22)]),
+        w_alo=cat([np.minimum(aw11,aw12), np.minimum(aw21,aw22)]),
+        ww=cat([w,w]), wsq=cat([sqrts,sqrts]))
+_SMOOTH_MC = None
+def _get_smooth_mc():
+    global _SMOOTH_MC
+    if _SMOOTH_MC is None: _SMOOTH_MC = _ps_mc(np.random.default_rng(SM_SEED))
+    return _SMOOTH_MC
+_thi3a = _tlo3a = None
+def _reco_angles_sorted():                              # data within-W reco angles, sorted hi/lo per partition
+    global _thi3a, _tlo3a
+    if _thi3a is None: _thi3a, _tlo3a = _reco_ang3()
+    return _thi3a, _tlo3a
+def tmpl_lr_smooth_pick(cond=None, use_angle=False):
+    cond = SM_COND if cond is None else cond
+    mc = _get_smooth_mc()
+    if use_angle:
+        me = np.arange(LR_M_LO, LR_M_HI+1e-6, SM_MBIN_A); ae = np.arange(0.0, 180.0+1e-6, SM_ABIN)
+        edg = [me, me, ae, ae]; ctr = tuple(0.5*(e[:-1]+e[1:]) for e in edg)
+        thi3a, tlo3a = _reco_angles_sorted()
+        Xt = (mc["t_mhi"], mc["t_mlo"], mc["t_ahi"], mc["t_alo"])
+        Xw = (mc["w_mhi"], mc["w_mlo"], mc["w_ahi"], mc["w_alo"])
+        data_cols = [np.stack([hi3[:,p], lo3[:,p], thi3a[:,p], tlo3a[:,p]], 1) for p in range(3)]
+    else:
+        me = np.arange(LR_M_LO, LR_M_HI+1e-6, SM_MBIN); edg = [me, me]; ctr = (0.5*(me[:-1]+me[1:]),)*2
+        Xt = (mc["t_mhi"], mc["t_mlo"]); Xw = (mc["w_mhi"], mc["w_mlo"])
+        data_cols = [np.stack([hi3[:,p], lo3[:,p]], 1) for p in range(3)]
+    def dens(samples, sel, wt):
+        H,_ = np.histogramdd([x[sel] for x in samples], bins=edg, weights=wt[sel])
+        if SM_SM>0: H = gaussian_filter(H, sigma=SM_SM)
+        H = np.maximum(H/np.maximum(H.sum(),1e-300), 1e-300)
+        return RegularGridInterpolator(ctr, np.log(H), bounds_error=False, fill_value=_LOGFLOOR)
+    if not cond:
+        allt = np.ones(len(mc["tw"]),bool); allw = np.ones(len(mc["ww"]),bool)
+        lPt = dens(Xt, allt, mc["tw"]); lPw = dens(Xw, allw, mc["ww"])
+        return np.argmax(np.stack([lPt(c)-lPw(c) for c in data_cols],1), 1).astype(int)
+    # ISR-conditioned: bin by reco 4-jet mass; MC gets a reco-s' proxy = gen s' + sampled (reco−gen) s' residual.
+    rng = np.random.default_rng(SM_SEED+1)
+    okm = (gpt>=0)&(gpt<=2)&np.isfinite(mWW_g)&np.isfinite(mWW_reco)
+    dpool = (mWW_reco - mWW_g)[okm]
+    edges = np.quantile(mWW_reco[okm], np.linspace(0,1,SM_NSP+1)); edges[0] = -1e9; edges[-1] = 1e9
+    mc_t = mc["tsq"] + dpool[rng.integers(0,len(dpool),len(mc["tsq"]))]
+    mc_w = mc["wsq"] + dpool[rng.integers(0,len(dpool),len(mc["wsq"]))]
+    binof = lambda x: np.clip(np.searchsorted(edges, x, side="right")-1, 0, SM_NSP-1)
+    dbin = binof(mWW_reco); tbin = binof(mc_t); wbin = binof(mc_w)
+    logLR = np.zeros((Nraw,3))
+    for b in range(SM_NSP):
+        drows = np.where(dbin==b)[0]
+        if len(drows)==0: continue
+        lPt = dens(Xt, tbin==b, mc["tw"]); lPw = dens(Xw, wbin==b, mc["ww"])
+        for p in range(3):
+            logLR[drows,p] = lPt(data_cols[p][drows]) - lPw(data_cols[p][drows])
+    return np.argmax(logLR,1).astype(int)
+
 modes = {"true": gpt, "bw": bwp,
          "pll":      pll_pick(ps=1, decay=1),   # ISR-convoluted per-event likelihood (phase-space √λ ON)
          "pllnops":  pll_pick(ps=0, decay=1),   # same lineshape (const×m³) but NO threshold √λ term
          "foldpick": foldpick(bwp),             # full forward-fold template (resolution-aware)
          "tmplLR":   tmpl_lr_pick(False),       # DAY12: analytic template-LR on the dijet masses (beats pllnops)
          "tmplLRa":  tmpl_lr_pick(True)}        #        + within-W angle = ADOPTED uniform pick (best/tied all √s; needed @160)
+if HAVE_GENQW:
+    modes["tmplLRsm"]   = tmpl_lr_smooth_pick(cond=False, use_angle=False)  # smooth MC-LR, mass-only, integrated
+    modes["tmplLRsmc"]  = tmpl_lr_smooth_pick(cond=True,  use_angle=False)  #   + ISR-conditioned on reco 4-jet mass
+    modes["tmplLRsma"]  = tmpl_lr_smooth_pick(cond=False, use_angle=True)   #   mass+within-W angle, integrated
+    modes["tmplLRsmac"] = tmpl_lr_smooth_pick(cond=True,  use_angle=True)   #   mass+angle + ISR-conditioned (full)
 if HAVE_KINFIT: modes["kinfit"] = kfp
 margmodes = {"marg_flat": "flat", "marg_soft": "soft"}   # marginalise over 3 partitions (no hard pick)
 ALLSEL = list(modes.keys()) + list(margmodes.keys())
