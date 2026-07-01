@@ -383,7 +383,7 @@ def foldpick(seed):
     if FOLD_SM > 0: H = gaussian_filter(H, sigma=FOLD_SM)
     H = np.maximum(H/np.maximum(H.sum(), 1e-300), 1e-300)
     interp = RegularGridInterpolator((c1, c1), H, bounds_error=False, fill_value=1e-300)
-    hi3 = np.maximum(mA, mB); lo3 = np.minimum(mA, mB)
+    # hi3/lo3 are the module-level sorted dijet masses (defined at top); no need to recompute
     dens = np.stack([interp(np.stack([hi3[:, p], lo3[:, p]], 1)) for p in range(3)], 1)
     return np.argmax(dens, 1).astype(int)
 
@@ -487,7 +487,7 @@ def _dijet_calib():
     R = np.concatenate([(m(rW1)/np.maximum(g1,1e-6))[okp], (m(rW2)/np.maximum(g2,1e-6))[okp]])
     dth = np.concatenate([(thW1-_opang_deg(Q[0],Q[1]))[okp], (thW2-_opang_deg(Q[2],Q[3]))[okp]])
     keepR = (R>0.2)&(R<3.0)
-    return R[keepR], dth
+    return R[keepR], dth[keepR]   # filter BOTH pools consistently (angle pool was leaking mass-outlier events)
 def _ps_mc(rng):
     """WW→4 partons at s' sampled from data gen_WW_m (ISR in); dijet-multiplicative mass smear + additive
     within-W angle smear to reco.  Returns mass-sorted (m_hi,m_lo) AND angle-sorted (θ_hi,θ_lo) for the TRUE

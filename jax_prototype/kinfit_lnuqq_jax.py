@@ -310,53 +310,6 @@ def build_postfit(ecm, isr_mode=None):
         return jnp.array([M(Wh), M(Wl), M(WW)])
     return pf
 
-def main():
-    root=sys.argv[1]; ecm=int(sys.argv[2]) if len(sys.argv)>2 else 160
-    t=uproot.open(root)["events"]
-    cols=["reco_jet1_p","reco_jet1_theta","reco_jet1_phi","reco_jet2_p","reco_jet2_theta","reco_jet2_phi",
-          "reco_lep_p","reco_lep_theta","reco_lep_phi","reco_met_p","reco_met_theta","reco_met_phi"]
-    extra=[c for c in ["kinfit_valid","kinfit_valid_loose","kinfit_mW","gen_lep_p"] if c in t.keys()]
-    a=t.arrays(cols+extra, library="np")
-    D=np.stack([a[c] for c in cols],axis=1).astype(np.float64)       # (N,12)
-    ok=np.all(np.isfinite(D),axis=1)&(D[:,0]>0)&(D[:,3]>0)&(D[:,6]>0)&(D[:,9]>0)
-    okidx=np.where(ok)[0]
-    MAXN=int(os.environ.get("MAXN","3000"))
-    if MAXN>0 and len(okidx)>MAXN: okidx=okidx[:MAXN]
-    D=D[okidx]; N=len(D)
-    a={k:v[okidx] for k,v in a.items()}                              # align extras to subsample
-    print(f"[lnuqq JAX] ecm{ecm} N={N} (MAXN={MAXN}), jax {jax.__version__}")
-    chi2=build_chi2(ecm)
-    fit=J.make_bfgs_solver(chi2, 16, maxiter=500)
-    ndev=jax.local_device_count()
-    pad=(-N) % ndev
-    Dp=np.concatenate([D, np.repeat(D[-1:],pad,axis=0)],axis=0) if pad else D   # pad to ndev multiple
-    Dp=Dp.reshape(ndev, -1, 12)                                                 # (ndev, per_dev, 12)
-    pfit=jax.pmap(jax.vmap(fit))                                                # shard over cores, vmap within
-    print(f"  parallel: {ndev} devices x {Dp.shape[1]} events/device (BFGS)")
-    t0=time.time(); y,c,gn,succ=pfit(jnp.array(Dp)); jax.block_until_ready(y); dt=time.time()-t0
-    y=np.asarray(y).reshape(-1,16)[:N]; c=np.asarray(c).reshape(-1)[:N]
-    gn=np.asarray(gn).reshape(-1)[:N]; succ=np.asarray(succ).reshape(-1)[:N]
-    mW=KF_MW_INIT+KF_MW_PHYS_SIGMA*y[:,0]
-    fin=np.isfinite(mW)&np.isfinite(c)
-    print(f"\n=== RESULTS ({dt:.1f}s, {1e3*dt/N:.2f} ms/fit, ndev={ndev}) ===")
-    print(f"finite fit: {100*np.mean(fin):.1f}%   BFGS success: {100*np.mean(succ):.1f}%   |grad| median={np.median(gn[fin]):.2e}")
-    print(f"diff-fit free mW (all finite): mean={np.mean(mW[fin]):.3f} std={np.std(mW[fin]):.3f} GeV")
-    # ── Fork C: PHYSICS-RECOVERY metric (vs strict valid gate) ──────────────
-    if "kinfit_valid" in a and "kinfit_mW" in a:
-        v=a["kinfit_valid"].astype(bool); vl=a.get("kinfit_valid_loose",a["kinfit_valid"]).astype(bool)
-        cmw=a["kinfit_mW"]
-        print(f"\n[C++ Minuit, same events]  valid(strict EDM gate)={100*np.mean(v):.1f}%   valid_loose={100*np.mean(vl):.1f}%")
-        cm=np.isfinite(cmw)&v
-        print(f"  Minuit mW(valid): mean={np.mean(cmw[cm]):.3f} std={np.std(cmw[cm]):.3f}")
-        # recovery = diff-fit reproduces Minuit's mW
-        d=mW-cmw; good=fin&np.isfinite(cmw)
-        for ref,lab in [(v,"vs Minuit-VALID"),(np.ones_like(v),"vs Minuit-ALL")]:
-            sel=good&ref
-            for thr in (0.5,1.0):
-                print(f"  recovery |ΔmW|<{thr} GeV {lab}: {100*np.mean(np.abs(d[sel])<thr):.1f}%  (N={sel.sum()})")
-        print(f"  median |ΔmW| (vs valid): {np.median(np.abs(d[good&v])):.3f} GeV")
-        print(f"\n  >>> REFRAME: diff-fit is FINITE for {100*np.mean(fin):.1f}% of events and reproduces")
-        print(f"      Minuit's mW (<0.5 GeV) for {100*np.mean(np.abs(d[good&v])<0.5):.1f}% of Minuit-valid events,")
-        print(f"      i.e. physics is recovered far more often than the strict valid gate ({100*np.mean(v):.0f}%) implies.")
-
-if __name__=="__main__": main()
+# NOTE: the standalone main()/BFGS driver was removed (2026-07-01 review): it wired the
+# 3-arg chi2(y,D,PR) into make_bfgs_solver (2-arg) and built no prior pack, so it crashed.
+# The working lnuqq driver is jax_prototype/recovery_lnuqq_mp.py (calls chi2(y,Di,PRi)).

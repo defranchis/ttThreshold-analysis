@@ -191,7 +191,7 @@ def make_solver(chi2, npar, niter=150, trust=1.0, LAM0_FAC=1.0):
         y,lam,nu,c = jax.lax.fori_loop(0,niter,body,(y0,lam0,2.0,c0))
         g=grad(y,D); H=hess(y,D)
         w,V = jnp.linalg.eigh(H)
-        edm = 0.5*jnp.dot(g, V @ ((V.T @ g)/jnp.maximum(w,1e-12)))
+        edm = 0.5*jnp.dot(g, V @ ((V.T @ g)/jnp.where(w>0,w,jnp.inf)))   # only PD dirs (match make_solver_mn)
         gn  = jnp.linalg.norm(g)
         return y, c, gn, edm
     return fit

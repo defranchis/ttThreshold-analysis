@@ -141,7 +141,6 @@ def analyze(ecm):
     # weights at arbitrary μ via interpolation of the per-event log-weight columns (smooth in μ)
     logW = -0.5*(Lgen[use] - Lgen[use][:, [j0]])                          # (Nu, nmw)
     def wat(mu):
-        lw = np.array([np.interp(mu, mw, logW[i]) for i in range(0)]) if False else None
         # vectorized interp over events
         idx = np.searchsorted(mw, mu) - 1; idx = np.clip(idx, 0, PE_NMW-2)
         frac = (mu - mw[idx])/(mw[idx+1]-mw[idx])

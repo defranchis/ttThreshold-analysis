@@ -592,6 +592,16 @@ static void kf_init_logz_table() {
     }
     struct stat st;
     if (::fstat(fd, &st) != 0) { ::close(fd); return; }
+    // Reject a truncated/stale table: the header-only check below cannot catch a
+    // short write, and mmap over a short file SIGBUSes on reads past EOF.
+    const long kf_logz_expect = 72L +
+        (long)KF_LOGZ_GRID_N_MW * KF_LOGZ_GRID_N_GW * KF_LOGZ_GRID_N_MWW * (long)sizeof(double);
+    if ((long)st.st_size != kf_logz_expect) {
+        std::fprintf(stderr, "[kinfit] log Z table %s size %ld != expected %ld (truncated/stale, "
+                     "rebuild via tools/build_logz_table); falling back to on-the-fly\n",
+                     KF_LOGZ_TABLE_PATH, (long)st.st_size, kf_logz_expect);
+        ::close(fd); return;
+    }
     void* mmap_base = ::mmap(nullptr, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
     ::close(fd);
     if (mmap_base == MAP_FAILED) {

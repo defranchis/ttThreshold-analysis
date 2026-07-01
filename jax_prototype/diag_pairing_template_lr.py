@@ -74,10 +74,15 @@ def eff_tmpl_lr(hi3, lo3, thi3, tlo3, true, use_angle=False):
     me = np.arange(M_LO, M_HI+1e-6, LR_BIN)                 # mass edges
     ae = np.arange(0.0, 180.0+1e-6, A_BIN)                  # angle edges
     edges = [me, me] + ([ae, ae] if use_angle else [])
+    # Clip evaluation features into the grid interior so an out-of-range partition gets the
+    # nearest in-grid density instead of the fill_value tie (both Pt,Pw -> 1e-300 => logLR=0,
+    # which would let an out-of-range wrong partition beat a correctly-scored true one).
+    cen_lo = np.array([0.5*(e[0]+e[1])   for e in edges])
+    cen_hi = np.array([0.5*(e[-2]+e[-1]) for e in edges])
     def feats(p):                                          # feature columns for partition p (all events)
         f = [hi3[:, p], lo3[:, p]]
         if use_angle: f += [thi3[:, p], tlo3[:, p]]
-        return np.stack(f, 1)
+        return np.clip(np.stack(f, 1), cen_lo, cen_hi)
     logLR = np.full((N, 3), -np.inf)
     for k in range(LR_K):
         tr = np.where(fold != k)[0]; te = np.where(fold == k)[0]
