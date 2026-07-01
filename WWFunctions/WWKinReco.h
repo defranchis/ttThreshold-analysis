@@ -673,6 +673,29 @@ static inline double log_Z_bw_phasespace(double m_WW, double mW, double gW) {
 }
 
 
+// ── Shared W-pair Breit-Wigner × phase-space normalized −2 ln PDF ──────────────
+// Single source for the term used verbatim by the lnuqq kinFit chi², the 4q
+// kinFit4q chi², and the 4q per-term diagnostic — factored so the lineshape
+// convention (fixed-width BW × √λ/s_WW, normalized by log_Z over the kinematic
+// triangle {m_h+m_l < m_WW}) cannot silently drift between the three sites and
+// bias mW differently across channels (see project_kinfit_bw_normalization).
+// Args: the two W (di-jet) masses m_h,m_l and s_WW = (Wh+Wl).M2(). Returns
+// −2 ln[ BW(m_h)·BW(m_l)·√λ/s_WW / Z ], BW = mΓ/(δ²+m²Γ²), λ smoothly floored.
+static inline double bw_phasespace_neg2ll(double mh, double ml, double s_ww,
+                                          double mW, double gW) {
+    const double mwgw = mW * gW;
+    const double dh = mh*mh - mW*mW, dl = ml*ml - mW*mW;
+    const double bw_h = mwgw / (dh*dh + mwgw*mwgw);
+    const double bw_l = mwgw / (dl*dl + mwgw*mwgw);
+    double lam = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
+    lam = std::sqrt(lam*lam + 1e-24);  // smooth |λ| floor — derivative continuous through 0
+    return -2.0 * (std::log(bw_h) + std::log(bw_l))
+         + 4.0 * std::log(M_PI)
+         - std::log(lam) + 2.0 * std::log(s_ww)
+         + 2.0 * log_Z_bw_phasespace(std::sqrt(s_ww), mW, gW);
+}
+
+
 KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
                     float jet2_p,    float jet2_theta,    float jet2_phi,
                     float Isolep_p,  float Isolep_theta,  float Isolep_phi,
@@ -790,25 +813,10 @@ KinFitResult kinFit(float jet1_p,    float jet1_theta,    float jet1_phi,
         TLorentzVector Wl = lf  + nf;
         TLorentzVector WW = Wh  + Wl;
 
-        double mh = Wh.M(), ml = Wl.M();
-        double mwgw = mW * gW;
-        double dh   = mh*mh - mW*mW,  dl = ml*ml - mW*mW;
-        double bw_h = mwgw / (dh*dh + mwgw*mwgw);
-        double bw_l = mwgw / (dl*dl + mwgw*mwgw);
-        double s_ww = WW.M2();
-        double lam  = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
-        // Floor lam to keep -log(lam) finite and gradient smooth across the boundary.
-        lam = std::sqrt(lam*lam + 1e-24);  // smooth |λ| floor — derivative continuous through 0
-        // Joint BW × phase-space PDF (BW_norm = BW/π; phase space ∝ √λ/s_WW).
-        // The PDF must be normalized over the kinematic triangle {m_h+m_l < m_WW}
-        // for the per-event mW to be unbiased — see project_kinfit_bw_normalization.
-        // Add 2·log Z(mW, gW, m_WW) where Z is the joint-PDF normalization
-        // integral. Lookup is trilinear interpolation on a precomputed 3D table
-        // (KF_LOGZ_GRID_*); table is built once via on-the-fly GL24 quadrature.
-        double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l))
-                       + 4.0 * std::log(M_PI)
-                       - std::log(lam) + 2.0 * std::log(s_ww)
-                       + 2.0 * log_Z_bw_phasespace(std::sqrt(s_ww), mW, gW);
+        // Joint BW × phase-space PDF, normalized over the kinematic triangle
+        // {m_h+m_l < m_WW} so the per-event mW is unbiased (the log Z term) — see
+        // project_kinfit_bw_normalization. Shared kernel (identical in kinFit4q).
+        double bw_term = bw_phasespace_neg2ll(Wh.M(), Wl.M(), WW.M2(), mW, gW);
 
         // BES nuisance priors (Gaussian).
         double bes_term = gauss_neg2logpdf(bes_m,  kf_ee_m_minus_ecm)

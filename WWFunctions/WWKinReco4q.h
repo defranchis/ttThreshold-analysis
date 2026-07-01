@@ -316,18 +316,8 @@ inline KinFit4qResult kinFit4q(
         TLorentzVector WW = Wa + Wb;
 
         // BW × BW × phase-space, normalized via the shared log-Z table.
-        double mh = Wa.M(), ml = Wb.M();
-        double mwgw = mW * gW;
-        double dh   = mh*mh - mW*mW,  dl = ml*ml - mW*mW;
-        double bw_h = mwgw / (dh*dh + mwgw*mwgw);
-        double bw_l = mwgw / (dl*dl + mwgw*mwgw);
-        double s_ww = WW.M2();
-        double lam  = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
-        lam = std::sqrt(lam*lam + 1e-24);
-        double bw_term = -2.0 * (std::log(bw_h) + std::log(bw_l))
-                       + 4.0 * std::log(M_PI)
-                       - std::log(lam) + 2.0 * std::log(s_ww)
-                       + 2.0 * log_Z_bw_phasespace(std::sqrt(s_ww), mW, gW);
+        // Shared kernel bw_phasespace_neg2ll (WWKinReco.h) — identical to lnuqq kinFit.
+        double bw_term = bw_phasespace_neg2ll(Wa.M(), Wb.M(), WW.M2(), mW, gW);
 
         // BES priors (narrow Gaussian — p8 has ≈0 BES).
         double bes_term = gauss_neg2logpdf(bes_m,  KF4Q_BES_M_PRIOR)
@@ -591,16 +581,13 @@ inline KinFit4qChi2Terms kf4q_chi2_terms(
     TLorentzVector j4f = _vec_spherical(jet4_p/s4, jet4_theta - t4, jet4_phi - q4);
     TLorentzVector Wa = j1f + j2f, Wb = j3f + j4f, WW = Wa + Wb;
 
+    // Shared kernel for T.bw (identical to chi2fn); bw_h/bw_l/mwgw kept below for r_bw.
     double mh = Wa.M(), ml = Wb.M(), mwgw = mW * gW;
     double dh = mh*mh - mW*mW, dl = ml*ml - mW*mW;
     double bw_h = mwgw / (dh*dh + mwgw*mwgw);
     double bw_l = mwgw / (dl*dl + mwgw*mwgw);
     double s_ww = WW.M2();
-    double lam  = (s_ww - (mh+ml)*(mh+ml)) * (s_ww - (mh-ml)*(mh-ml));
-    lam = std::sqrt(lam*lam + 1e-24);
-    T.bw = -2.0 * (std::log(bw_h) + std::log(bw_l)) + 4.0 * std::log(M_PI)
-         - std::log(lam) + 2.0 * std::log(s_ww)
-         + 2.0 * log_Z_bw_phasespace(std::sqrt(s_ww), mW, gW);
+    T.bw = bw_phasespace_neg2ll(mh, ml, s_ww, mW, gW);
 
     T.bes = gauss_neg2logpdf(bes_m, KF4Q_BES_M_PRIOR)
           + gauss_neg2logpdf(bes_pz, KF4Q_BES_PZ_PRIOR);
