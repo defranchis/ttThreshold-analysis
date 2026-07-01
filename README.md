@@ -25,10 +25,11 @@ fccanalyses build -j 6
 cd ..
 ```
 
-Clone this repository next to `FCCAnalyses/`:
+Clone this repository (the `wwTh_scan` branch — where this pipeline lives) next
+to `FCCAnalyses/`:
 
 ```
-git clone git@github.com:ttThreshold-FCC/ttThreshold-analysis.git
+git clone -b wwTh_scan git@github.com:ttThreshold-FCC/ttThreshold-analysis.git
 cd ttThreshold-analysis
 ```
 
